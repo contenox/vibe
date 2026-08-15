@@ -145,7 +145,6 @@ func TestUnit_RunLocalInit_SeedsOnlyConventionNames(t *testing.T) {
 		"chain-compact-default.json",
 		"chain-planner-default.json",
 		"chain-oracle-default.json",
-		"chain-oracle-conservative.json",
 	}
 	for _, name := range wantChains {
 		require.FileExists(t, filepath.Join(workspace, name))

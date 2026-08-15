@@ -150,6 +150,8 @@ func (t *Transport) LoadSession(ctx context.Context, req libacp.LoadSessionReque
 	t.markExternalIfPersisted(ctx, store, req.SessionID, entry)
 	// A reloaded session that fired missions is still their supervisor.
 	entry.FiredMissions = t.readSessionFiredMission(ctx, store, req.SessionID)
+	// And a reloaded session that IS a mission still holds its mission tools.
+	t.restoreSessionMission(ctx, store, req.SessionID, entry)
 
 	t.clearToolCallState(req.SessionID)
 	t.subscribeTerminal(req.SessionID, contenoxSessionID)
@@ -667,14 +669,15 @@ func (t *Transport) NewSession(ctx context.Context, req libacp.NewSessionRequest
 		Provider:          t.provider(),
 		Model:             t.model(),
 		Think:             t.thinkDefault(),
-		HITLPolicy:        hitlPolicyDefaultValue,
+		// A unit is gated by the envelope its mission was fired under, not by its host's policy.
+		HITLPolicy: missionHITLPolicy(missionMeta.HITLPolicyName),
 	}
 	t.sessionMu.Lock()
 	t.sessions[sessionID] = entry
 	t.bindContenoxSession(contenoxSessionID, sessionID)
 	t.sessionMu.Unlock()
 	t.persistSessionCwd(ctx, store, sessionID, sessionCwd)
-	t.persistSessionMission(ctx, store, sessionID, missionID)
+	t.persistSessionMission(ctx, store, sessionID, missionMeta)
 	t.clearToolCallState(sessionID)
 	t.subscribeTerminal(sessionID, contenoxSessionID)
 
@@ -770,6 +773,10 @@ func (t *Transport) ResumeSession(ctx context.Context, req libacp.ResumeSessionR
 	t.sessionMu.Unlock()
 	t.persistSessionCwd(ctx, store, req.SessionID, sessionCwd)
 	t.markExternalIfPersisted(ctx, store, req.SessionID, entry)
+	// Mirror LoadSession: a resumed session keeps both halves of its mission
+	// relationship — the units it fired, and the mission it is.
+	entry.FiredMissions = t.readSessionFiredMission(ctx, store, req.SessionID)
+	t.restoreSessionMission(ctx, store, req.SessionID, entry)
 	t.clearToolCallState(req.SessionID)
 	t.subscribeTerminal(req.SessionID, contenoxSessionID)
 	// Join an in-flight native turn so the resumed session picks the live

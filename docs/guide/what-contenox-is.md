@@ -5,7 +5,9 @@ description: The rules an AI agent runs under are a file you wrote, in your repo
 
 # What contenox is
 
-**An agent server.** This is an agent, configured:
+**An agent server.** An agent is one file you declare — `.contenox/agents/reviewer.md`,
+Markdown with a YAML frontmatter header. This is the other file, the one that
+says what it may do:
 
 ```json
 {
@@ -68,7 +70,7 @@ preference.
 - An overnight mission under a strict envelope — review a diff, run the tests,
   draft the patch — that stops and asks before it touches the branch.
 - Work that fires from something else: a webhook, a schedule, a form on your
-  own site, each running a chain on a machine you already own.
+  own site, each running a declared agent on a machine you already own.
 - Local inference where nothing may leave the network, or a hosted model on
   your own key and your own region when that is the honest trade.
 - The unglamorous case, and the most common one: a repeatable job you would
@@ -107,7 +109,9 @@ that refuses to run past it.
 
 ## Where to go next
 
-- [Core concepts](/docs/guide/concepts/) — chains, tasks, tools, transitions.
+- [Declaring agents](/docs/guide/agents/) — the file, the frontmatter, and what
+  `agents.toml` supplies that a declaration cannot.
+- [Core concepts](/docs/guide/concepts/) — agents, chains, tasks, tools, transitions.
 - [Human-in-the-loop policies](/docs/guide/hitl/) — the full envelope format.
 - [Envelope JSON Schema](/schema/hitl-policy-v1.schema.json) and
   [chain JSON Schema](/schema/task-chain.schema.json) — the formats, generated from

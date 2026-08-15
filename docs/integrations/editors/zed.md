@@ -47,7 +47,7 @@ Restart Zed (or reload the window). Open the agent panel — Contenox now appear
 
 ACP sessions use a dedicated chain file separate from the CLI's default chain:
 
-- Loaded from `~/.contenox/chain-agent-acp.json` (formerly `default-acp-chain.json` — `contenox init --update` renames it).
+- Loaded from `~/.contenox/chain-agent-acp.json`, falling back to the shipped copy in `~/.contenox/system/`. Copy it up a level to edit it.
 - Override path with the `CONTENOX_ACP_CHAIN_PATH` environment variable (set it in the shell that launches Zed).
 
 The ACP chain looks like any other Contenox chain. The default chain uses `"tools": ["*"]`, which exposes everything the engine has registered — `local_fs`, `local_shell`, `webtools`, plus any MCP servers you've added via `contenox mcp add`.
@@ -93,7 +93,7 @@ To skip Contenox HITL entirely (trusted/scripted contexts), launch with `--auto`
 
 Type `/mission <intent>` (or `/mission <agent-name> <intent>`) in the agent panel to fire a [mission](/docs/reference/contenox-cli/#the-mission-slash-command) without leaving the conversation: a declared agent runs the intent unattended under its envelope, as a child subprocess of this editor session. The unit's reports stream live back into the session that fired it.
 
-> **Beta:** naming a user-authored agent (a custom `chain-agent-*` chain) requires `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`); `/mission` itself and the shipped `agent-planner` work without it.
+> **Beta:** naming an agent of your own — a declaration in `.contenox/agents/`, or a hand-authored `chain-agent-*` chain — requires `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`); `/mission` itself and the shipped `agent-planner` work without it.
 
 Set the fallbacks the bare form uses first:
 
@@ -123,6 +123,7 @@ Subsequent ACP sessions write structured operation traces to `~/.contenox/teleme
 
 ## Where to next
 
-- [Author your first chain](/docs/guide/first-chain/) — the chain file is what defines the agent's behavior, regardless of which client drives it.
+- [Declaring agents](/docs/guide/agents/) — one Markdown file is the agent, regardless of which client drives it.
+- [Writing a chain by hand](/docs/guide/first-chain/) — for the agent that has outgrown a declaration.
 - [HITL policies](/docs/guide/hitl/) — choose what requires approval and what doesn't.
 - [MCP](/docs/integrations/tools/mcp/) — register MCP servers once globally; ACP sessions pick them up automatically.

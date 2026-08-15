@@ -404,14 +404,18 @@ func runToolsList(cmd *cobra.Command, args []string) error {
 	}
 
 	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "%-20s  %-45s  %s\n", "NAME", "URL", "TIMEOUT")
-	fmt.Fprintf(out, "%-20s  %-45s  %s\n", strings.Repeat("-", 20), strings.Repeat("-", 45), "-------")
+	fmt.Fprintf(out, "%-28s  %-45s  %-9s  %s\n", "NAME", "URL", "TIMEOUT", "OWNER")
+	fmt.Fprintf(out, "%-28s  %-45s  %-9s  %s\n", strings.Repeat("-", 28), strings.Repeat("-", 45), strings.Repeat("-", 9), "-----")
 	for _, h := range all {
 		urlStr := h.EndpointURL
 		if len(urlStr) > 45 {
 			urlStr = urlStr[:42] + "..."
 		}
-		fmt.Fprintf(out, "%-20s  %-45s  %dms\n", h.Name, urlStr, h.TimeoutMs)
+		owner := "you"
+		if runtimetypes.IsDeclaredToolName(h.Name) {
+			owner = "declaration"
+		}
+		fmt.Fprintf(out, "%-28s  %-45s  %-9s  %s\n", h.Name, urlStr, fmt.Sprintf("%dms", h.TimeoutMs), owner)
 	}
 	return nil
 }

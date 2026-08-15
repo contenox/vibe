@@ -61,7 +61,7 @@ func TestUnit_promptInputIsNotReserved(t *testing.T) {
 
 func TestUnit_seedHeadlessACPChainIfMissing(t *testing.T) {
 	dir := t.TempDir()
-	dst := filepath.Join(dir, chainAgentACPXFilename)
+	dst := filepath.Join(dir, SystemDirName, chainAgentACPXFilename)
 
 	if err := seedHeadlessACPChainIfMissing(dir); err != nil {
 		t.Fatalf("seed when absent: %v", err)
@@ -89,7 +89,7 @@ func TestUnit_seedHeadlessACPChainIfMissing(t *testing.T) {
 // seeds chain-fim-default.json when absent, never overwrites a user edit.
 func TestUnit_seedFIMChainIfMissing(t *testing.T) {
 	dir := t.TempDir()
-	dst := filepath.Join(dir, "chain-fim-default.json")
+	dst := filepath.Join(dir, SystemDirName, "chain-fim-default.json")
 
 	if err := seedFIMChainIfMissing(dir); err != nil {
 		t.Fatalf("seed when absent: %v", err)
@@ -119,7 +119,7 @@ func TestUnit_seedFIMChainIfMissing(t *testing.T) {
 func TestUnit_seedOptionalFIMChain_ACPXDoesNotSeed(t *testing.T) {
 	dir := t.TempDir()
 	seedOptionalFIMChain(acpProfileACPX, dir)
-	if _, err := os.Stat(filepath.Join(dir, "chain-fim-default.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, SystemDirName, "chain-fim-default.json")); !os.IsNotExist(err) {
 		t.Fatalf("expected acpx to leave chain-fim-default.json unwritten, stat err: %v", err)
 	}
 }
@@ -129,7 +129,7 @@ func TestUnit_seedOptionalFIMChain_ACPXDoesNotSeed(t *testing.T) {
 func TestUnit_seedOptionalFIMChain_ACPSeeds(t *testing.T) {
 	dir := t.TempDir()
 	seedOptionalFIMChain(acpProfileACP, dir)
-	if _, err := os.Stat(filepath.Join(dir, "chain-fim-default.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, SystemDirName, "chain-fim-default.json")); err != nil {
 		t.Fatalf("expected acp to seed chain-fim-default.json: %v", err)
 	}
 }

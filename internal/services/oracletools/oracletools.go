@@ -1,15 +1,9 @@
-// Package oracletools is the oracle attention driver's tool grant: exactly
-// one model-facing tool, submit_verdict, bound to exactly one durable ask for
-// exactly one chain execution. The binding rides the request context
-// (WithBinding), set once by the driver before it runs the oracle chain — the
-// mission-tools idiom: off a bound execution the provider lists no tools at
-// all, so nothing else ever sees submit_verdict. The provider is registered
-// only in the driver's host engine, never in the global CLI toolset.
-//
-// This package's responsibility ends at handing a valid ANSWER to the
-// Answerer seam; bounds enforcement and durable delivery live behind it
-// (hitlservice.EnforceAgentAnswerBounds + AnswerAsAgentNamed, composed by the
-// driver).
+// Package oracletools is the oracle's tool grant: exactly one model-facing
+// tool, submit_verdict, bound to exactly one durable ask for exactly one chain
+// execution. The binding rides the request context (WithBinding), set once by
+// the driver before it runs the oracle chain — the mission-tools idiom: off a
+// bound execution the provider lists no tools at all. The provider is
+// registered only in the driver's host engine, never in the global CLI toolset.
 package oracletools
 
 import (
@@ -24,28 +18,35 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// ToolsProviderName is the tools-provider key the driver registers this
-// package under; the model sees the tool as "oracle.submit_verdict".
+// ToolsProviderName is the tools-provider key the driver registers this package under.
 const ToolsProviderName = "oracle"
 
-// verdictAnswer is the "answer" verdict value; the "wait" value is
-// OutcomeWait, which the verdict and the outcome share verbatim.
-const verdictAnswer = "answer"
+// AskKind is which contract the bound ask answers to.
+type AskKind string
 
-// The verdict_state gate's two states.
+const (
+	// AskKindPermission is a gated tool call: approve, deny, or wait.
+	AskKindPermission AskKind = "permission"
+	// AskKindAttention is a unit's question: answer, or wait.
+	AskKindAttention AskKind = "attention"
+)
+
+const (
+	verdictWait    = "wait"
+	verdictAnswer  = "answer"
+	verdictApprove = "approve"
+	verdictDeny    = "deny"
+)
+
 const (
 	verdictStateSettled = "settled"
 	verdictStateOpen    = "open"
 )
 
 const (
-	// ToolNameSubmitVerdict is the one model-facing tool: submit the WAIT or
-	// ANSWER verdict for the bound ask.
+	// ToolNameSubmitVerdict is the one model-facing tool.
 	ToolNameSubmitVerdict = "submit_verdict"
-	// ToolNameVerdictState is the deterministic chain-step gate (a `tools`
-	// task, never advertised to the model): it reports whether the contract
-	// is settled and, when open, renders the machine-register correction the
-	// loop feeds back on a chat-text reply.
+	// ToolNameVerdictState is the deterministic chain-step gate, never advertised to the model.
 	ToolNameVerdictState = "verdict_state"
 )
 
@@ -53,35 +54,40 @@ const (
 type Outcome string
 
 const (
-	// OutcomeNone: no valid verdict landed (yet) — WAIT-equivalent if the
-	// chain ends here.
+	// OutcomeNone: no valid verdict landed; WAIT-equivalent if the chain ends here.
 	OutcomeNone Outcome = ""
-	// OutcomeWait: a valid {"verdict":"wait"} was recorded.
+	// OutcomeWait: a valid wait verdict was recorded.
 	OutcomeWait Outcome = "wait"
-	// OutcomeAnswered: a valid ANSWER was delivered to the ask.
+	// OutcomeAnswered: a valid ANSWER was delivered to a question.
 	OutcomeAnswered Outcome = "answered"
+	// OutcomeApproved: a gated tool call was let through.
+	OutcomeApproved Outcome = "approved"
+	// OutcomeDenied: a gated tool call was refused, with optional guidance.
+	OutcomeDenied Outcome = "denied"
 )
 
-// AskBinding binds one oracle-chain execution to one durable ask: the askId
-// every submit_verdict call must echo, the input payload corrections
-// re-render, and the contract's settled state.
+// AskBinding binds one oracle-chain execution to one durable ask.
 type AskBinding struct {
 	askID string
+	kind  AskKind
 	input string
 
-	mu      sync.Mutex
-	outcome Outcome
-	answer  string
+	mu       sync.Mutex
+	outcome  Outcome
+	answer   string
+	guidance string
 }
 
-// NewAskBinding builds the binding for askID; input is the ask payload JSON
-// the chain received (re-rendered verbatim into corrections).
-func NewAskBinding(askID, input string) *AskBinding {
-	return &AskBinding{askID: askID, input: input}
+// NewAskBinding builds the binding for askID; input is the ask payload JSON the chain received.
+func NewAskBinding(askID string, kind AskKind, input string) *AskBinding {
+	return &AskBinding{askID: askID, kind: kind, input: input}
 }
 
 // AskID returns the bound ask's id.
 func (b *AskBinding) AskID() string { return b.askID }
+
+// Kind returns which verdict set this binding accepts.
+func (b *AskBinding) Kind() AskKind { return b.kind }
 
 // Outcome returns the contract's terminal state, OutcomeNone while open.
 func (b *AskBinding) Outcome() Outcome {
@@ -97,24 +103,30 @@ func (b *AskBinding) Answer() string {
 	return b.answer
 }
 
+// Guidance returns what a denial told the unit to do instead.
+func (b *AskBinding) Guidance() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.guidance
+}
+
 func (b *AskBinding) settled() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.outcome != OutcomeNone
 }
 
-func (b *AskBinding) settle(o Outcome, answer string) {
+func (b *AskBinding) settle(o Outcome, answer, guidance string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.outcome = o
 	b.answer = answer
+	b.guidance = guidance
 }
 
-// bindingCtxKey is the unexported context key WithBinding stores under.
 type bindingCtxKey struct{}
 
-// WithBinding binds b to ctx as this execution's contract. The driver calls
-// it once per oracle-chain run; a nil b returns ctx unchanged.
+// WithBinding binds b to ctx as this execution's contract; a nil b returns ctx unchanged.
 func WithBinding(ctx context.Context, b *AskBinding) context.Context {
 	if b == nil {
 		return ctx
@@ -122,61 +134,49 @@ func WithBinding(ctx context.Context, b *AskBinding) context.Context {
 	return context.WithValue(ctx, bindingCtxKey{}, b)
 }
 
-// BindingFromContext returns the binding WithBinding set, or nil when the
-// execution is not an oracle-chain run.
+// BindingFromContext returns the binding WithBinding set, or nil off an oracle-chain run.
 func BindingFromContext(ctx context.Context) *AskBinding {
 	b, _ := ctx.Value(bindingCtxKey{}).(*AskBinding)
 	return b
 }
 
-// Answerer delivers a valid ANSWER verdict to the bound ask. A returned
-// *AnswerRefusedError is a policy denial (the envelope holding, or the ask
-// already resolved): the tool reports it as a plain denied-per-policy result
-// and the contract stays open — a retry yields the same denial, self-limiting
-// within the chain's budgets. Any other error is transient plumbing, surfaced
-// to the model as the tool result.
-type Answerer interface {
+// Resolver delivers a settled verdict to the bound ask. A returned *RefusedError is a policy denial — the envelope holding, or the ask already resolved — which the tool reports as a plain denied-per-policy result with the contract left open; a retry yields the same denial. Any other error is transient plumbing.
+type Resolver interface {
+	// Answer delivers words to a question.
 	Answer(ctx context.Context, askID, text string) error
+	// Decide rules on a gated tool call; guidance is what a denial tells the unit to do instead.
+	Decide(ctx context.Context, askID string, approve bool, guidance string) error
 }
 
-// AnswerRefusedError is a policy denial — see Answerer. This package discards
-// Reason (the tool result is the plain denial), so the Answerer must state it
-// on the operator's trace at the refusal point or the denial is invisible.
-type AnswerRefusedError struct{ Reason string }
+// RefusedError is a policy denial. This package discards Reason, so the Resolver must state it on the operator's trace at the refusal point.
+type RefusedError struct{ Reason string }
 
-func (e *AnswerRefusedError) Error() string { return e.Reason }
+func (e *RefusedError) Error() string { return e.Reason }
 
 type provider struct {
-	answerer Answerer
+	resolver Resolver
 }
 
-// New returns the oracle tools provider. answerer is required — a verdict
-// tool with no delivery seam is a wiring defect, so New panics rather than
-// degrading (missiontools.New's stance).
-func New(answerer Answerer) taskengine.ToolsRepo {
-	if answerer == nil {
-		panic("oracletools: answerer is required")
+// New returns the oracle tools provider; resolver is required and New panics on nil rather than degrade.
+func New(resolver Resolver) taskengine.ToolsRepo {
+	if resolver == nil {
+		panic("oracletools: resolver is required")
 	}
-	return &provider{answerer: answerer}
+	return &provider{resolver: resolver}
 }
 
-// Supports reports the one provider name; which tools it then exposes is
-// gated on the context binding in GetToolsForToolsByName.
+// Supports reports the one provider name; which tools it exposes is gated on the context binding.
 func (p *provider) Supports(context.Context) ([]string, error) {
 	return []string{ToolsProviderName}, nil
 }
 
-// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract:
-// the submit_verdict request/response pair and the deterministic gate's
-// response. The request schema is built from the same property table the tool
-// descriptor renders (verdictProperties), so the declared contract and what
-// the model actually receives cannot drift.
+// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract, built from the same property table the tool descriptor renders so the two cannot drift.
 func (p *provider) GetSchemasForSupportedTools(context.Context) (map[string]*openapi3.T, error) {
 	schema := &openapi3.T{
 		OpenAPI: "3.1.0",
 		Info: &openapi3.Info{
-			Title:       "Oracle Attention Tools",
-			Description: "Submit the verdict for the one durable attention ask bound to this chain execution. wait leaves the question to a human; answer delivers a reply, still bounded by the mission envelope's attention bounds.",
+			Title:       "Oracle Adjudication Tools",
+			Description: "Submit the verdict for the one durable ask bound to this chain execution. A gated tool call takes approve, deny, or wait; a question takes answer or wait. wait always leaves it to a human. Every verdict is still bounded by the mission envelope.",
 			Version:     "1.0.0",
 		},
 		Paths: openapi3.NewPaths(),
@@ -195,12 +195,12 @@ func (p *provider) GetSchemasForSupportedTools(context.Context) (map[string]*ope
 						Properties: map[string]*openapi3.SchemaRef{
 							"accepted": {Value: &openapi3.Schema{
 								Type:        &openapi3.Types{openapi3.TypeBoolean},
-								Description: "True when this call settled the contract. False for every corrective outcome (malformed shape, wrong askId, missing answer, a denied answer, a contract already settled) — read message and submit a corrected call.",
+								Description: "True when this call settled the contract. False for every corrective outcome (malformed shape, wrong askId, a verdict this ask kind does not take, a missing answer, a refused verdict, a contract already settled) — read message and submit a corrected call.",
 							}},
 							"outcome": {Value: &openapi3.Schema{
 								Type:        &openapi3.Types{openapi3.TypeString},
-								Enum:        []any{string(OutcomeNone), string(OutcomeWait), string(OutcomeAnswered)},
-								Description: `The contract's state after this call: "wait" (recorded, nothing executed), "answered" (the reply was delivered and the asking unit continues), or "" (still open — nothing was recorded).`,
+								Enum:        []any{string(OutcomeNone), string(OutcomeWait), string(OutcomeAnswered), string(OutcomeApproved), string(OutcomeDenied)},
+								Description: `The contract's state after this call: "wait", "answered", "approved", "denied", or "" (still open — nothing was recorded).`,
 							}},
 							"message": {Value: &openapi3.Schema{
 								Type:        &openapi3.Types{openapi3.TypeString},
@@ -233,30 +233,30 @@ func (p *provider) GetSchemasForSupportedTools(context.Context) (map[string]*ope
 	return map[string]*openapi3.T{ToolsProviderName: schema}, nil
 }
 
-// verdictProperty is one submit_verdict argument, declared once and rendered
-// into both the OpenAPI components and the model-facing tool descriptor.
 type verdictProperty struct {
 	name        string
 	description string
-	// enum, when set, is the closed value set — declared, never left to prose.
-	enum     []string
-	required bool
+	enum        []string
+	required    bool
 }
 
-// verdictProperties is the single source of truth for submit_verdict's
-// arguments: every property is a string, so neither renderer carries a type
-// switch.
 func verdictProperties() []verdictProperty {
 	return []verdictProperty{
 		{
-			name:        "verdict",
-			description: `"wait": a human must answer. "answer": the question is ROUTINE and the answer property carries the reply.`,
-			enum:        []string{string(OutcomeWait), verdictAnswer},
-			required:    true,
+			name: "verdict",
+			description: `On a PERMISSION ask (a gated tool call): "approve" lets the call run, "deny" refuses it, "wait" leaves it to a human. ` +
+				`On an ATTENTION ask (a question): "answer" replies in the answer property, "wait" leaves it to a human. ` +
+				`Approve only what the mission's own intent already implies. When in doubt, wait.`,
+			enum:     []string{verdictApprove, verdictDeny, verdictAnswer, verdictWait},
+			required: true,
 		},
 		{
 			name:        "answer",
-			description: "Required when verdict is answer: one short plain sentence, on one line, that the asking unit can act on. Omitted or empty for a wait verdict.",
+			description: "Required when verdict is answer: one short plain sentence, on one line, that the asking unit can act on. Omitted otherwise.",
+		},
+		{
+			name:        "guidance",
+			description: "Optional on deny: one short plain sentence naming what the unit should do INSTEAD, so a refusal redirects it rather than stalling it. Ignored for any other verdict.",
 		},
 		{
 			name:        "askId",
@@ -266,9 +266,8 @@ func verdictProperties() []verdictProperty {
 	}
 }
 
-// verdictRequestSchemaProperties renders the property table as OpenAPI schema refs.
 func verdictRequestSchemaProperties() map[string]*openapi3.SchemaRef {
-	out := make(map[string]*openapi3.SchemaRef, 3)
+	out := make(map[string]*openapi3.SchemaRef, 4)
 	for _, p := range verdictProperties() {
 		s := &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}, Description: p.description}
 		for _, v := range p.enum {
@@ -279,7 +278,6 @@ func verdictRequestSchemaProperties() map[string]*openapi3.SchemaRef {
 	return out
 }
 
-// verdictRequiredProperties renders the table's required set, in table order.
 func verdictRequiredProperties() []string {
 	var out []string
 	for _, p := range verdictProperties() {
@@ -290,10 +288,8 @@ func verdictRequiredProperties() []string {
 	return out
 }
 
-// verdictToolParameters renders the same table as the descriptor's JSON Schema
-// parameters — what actually reaches the provider.
 func verdictToolParameters() map[string]any {
-	props := make(map[string]any, 3)
+	props := make(map[string]any, 4)
 	for _, p := range verdictProperties() {
 		prop := map[string]any{"type": "string", "description": p.description}
 		if len(p.enum) > 0 {
@@ -308,9 +304,7 @@ func verdictToolParameters() map[string]any {
 	}
 }
 
-// GetToolsForToolsByName lists submit_verdict only when ctx carries an ask
-// binding; off a bound execution it returns an empty slice, so the tool is
-// absent from every other run's tool list rather than present-and-refused.
+// GetToolsForToolsByName lists submit_verdict only when ctx carries an ask binding; off a bound execution the tool is absent rather than present-and-refused.
 func (p *provider) GetToolsForToolsByName(ctx context.Context, name string) ([]taskengine.Tool, error) {
 	if name != ToolsProviderName {
 		return nil, fmt.Errorf("unknown tools: %s", name)
@@ -321,15 +315,13 @@ func (p *provider) GetToolsForToolsByName(ctx context.Context, name string) ([]t
 	return []taskengine.Tool{submitVerdictToolSchema()}, nil
 }
 
-// Exec runs one oracle-tool call. It refuses off a bound execution — the
-// backstop behind the empty listing above.
 func (p *provider) Exec(ctx context.Context, _ time.Time, input any, _ bool, call *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	if call == nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("oracletools: missing tools call")
 	}
 	binding := BindingFromContext(ctx)
 	if binding == nil {
-		return nil, taskengine.DataTypeAny, fmt.Errorf("oracletools: no ask is bound to this execution; %s exists only inside the attention driver's oracle-chain run", call.ToolName)
+		return nil, taskengine.DataTypeAny, fmt.Errorf("oracletools: no ask is bound to this execution; %s exists only inside the oracle driver's chain run", call.ToolName)
 	}
 	switch call.ToolName {
 	case ToolNameSubmitVerdict:
@@ -341,77 +333,88 @@ func (p *provider) Exec(ctx context.Context, _ time.Time, input any, _ bool, cal
 	}
 }
 
-// verdictResult renders submit_verdict's declared response
-// (SubmitVerdictResponse): accepted says whether the contract was settled,
-// outcome its state after the call, message the one line naming what happened.
 func verdictResult(accepted bool, outcome Outcome, message string) map[string]any {
 	return map[string]any{"accepted": accepted, "outcome": string(outcome), "message": message}
 }
 
-// corrective is a rejected call: nothing recorded, the contract still open,
-// message naming exactly what to fix.
 func corrective(format string, args ...any) (any, taskengine.DataType, error) {
 	return verdictResult(false, OutcomeNone, fmt.Sprintf(format, args...)), taskengine.DataTypeJSON, nil
 }
 
-// verdictSchemaLine is the corrective schema statement a malformed call gets
-// back verbatim.
-const verdictSchemaLine = `the schema is {"verdict":"wait"|"answer", "answer": string (required when verdict is "answer"), "askId": string}. Correct the call and submit the verdict via submit_verdict again.`
+func schemaLineFor(kind AskKind) string {
+	if kind == AskKindAttention {
+		return `this ask is a QUESTION, so the schema is {"verdict":"answer"|"wait", "answer": string (required when verdict is "answer"), "askId": string}. Correct the call and submit the verdict via submit_verdict again.`
+	}
+	return `this ask is a GATED TOOL CALL, so the schema is {"verdict":"approve"|"deny"|"wait", "guidance": string (optional on "deny"), "askId": string}. Correct the call and submit the verdict via submit_verdict again.`
+}
 
-// execSubmitVerdict validates one submit_verdict call against the binding
-// and, on a valid verdict, settles the contract. Every invalid call returns a
-// corrective RESULT (never an error) naming exactly what was wrong, so the
-// loop hands it back to the model for a bounded retry.
 func (p *provider) execSubmitVerdict(ctx context.Context, b *AskBinding, input any, call *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	if b.settled() {
 		return corrective("verdict already recorded for ask %s: the contract is settled. Do not call submit_verdict again.", b.askID)
 	}
 	verdict := strings.ToLower(strings.TrimSpace(argString(input, call, "verdict")))
 	answer := strings.TrimSpace(argString(input, call, "answer"))
+	guidance := strings.TrimSpace(argString(input, call, "guidance"))
 	askID := strings.TrimSpace(argString(input, call, "askId"))
 
-	if verdict != string(OutcomeWait) && verdict != verdictAnswer {
-		return corrective("invalid verdict %q: %s", verdict, verdictSchemaLine)
-	}
 	if askID != b.askID {
 		return corrective("invalid askId %q: askId must be the askId field of the INPUT event, which is %q. Correct the call and submit the verdict via submit_verdict again.", askID, b.askID)
 	}
-	if verdict == verdictAnswer && answer == "" {
-		return corrective(`invalid call: verdict "answer" requires a non-empty "answer" — the one short plain sentence the unit acts on. %s`, verdictSchemaLine)
-	}
-
-	if verdict == string(OutcomeWait) {
-		b.settle(OutcomeWait, "")
+	if verdict == verdictWait {
+		b.settle(OutcomeWait, "", "")
 		return verdictResult(true, OutcomeWait,
-			fmt.Sprintf("verdict recorded for ask %s: WAIT — nothing was executed; the question stays with a human. The contract is complete: do not call submit_verdict again.", b.askID)), taskengine.DataTypeJSON, nil
+			fmt.Sprintf("verdict recorded for ask %s: WAIT — nothing was executed; the ask stays with a human. The contract is complete: do not call submit_verdict again.", b.askID)), taskengine.DataTypeJSON, nil
 	}
 
-	if err := p.answerer.Answer(ctx, b.askID, answer); err != nil {
-		var refused *AnswerRefusedError
-		if errors.As(err, &refused) {
-			// A plain policy denial, nothing more; the contract stays open. A
-			// retry yields the same denial — self-limiting within the budgets.
-			return corrective("answer denied per policy for ask %s.", b.askID)
+	switch b.kind {
+	case AskKindAttention:
+		if verdict != verdictAnswer {
+			return corrective("invalid verdict %q: %s", verdict, schemaLineFor(b.kind))
 		}
-		// Transient plumbing: surfaced as the tool result by the engine, so
-		// the model may retry within the chain's budgets.
-		return nil, taskengine.DataTypeAny, fmt.Errorf("oracletools: deliver answer for ask %s: %w", b.askID, err)
+		if answer == "" {
+			return corrective(`invalid call: verdict "answer" requires a non-empty "answer" — the one short plain sentence the unit acts on. %s`, schemaLineFor(b.kind))
+		}
+		if err := p.resolver.Answer(ctx, b.askID, answer); err != nil {
+			return p.deliveryFailure(b, err)
+		}
+		b.settle(OutcomeAnswered, answer, "")
+		return verdictResult(true, OutcomeAnswered,
+			fmt.Sprintf("verdict recorded for ask %s: ANSWER delivered; the asking unit continues with it. The contract is complete: do not call submit_verdict again.", b.askID)), taskengine.DataTypeJSON, nil
+
+	default:
+		if verdict != verdictApprove && verdict != verdictDeny {
+			return corrective("invalid verdict %q: %s", verdict, schemaLineFor(b.kind))
+		}
+		approve := verdict == verdictApprove
+		if approve {
+			guidance = ""
+		}
+		if err := p.resolver.Decide(ctx, b.askID, approve, guidance); err != nil {
+			return p.deliveryFailure(b, err)
+		}
+		if approve {
+			b.settle(OutcomeApproved, "", "")
+			return verdictResult(true, OutcomeApproved,
+				fmt.Sprintf("verdict recorded for ask %s: APPROVED; the gated call runs and the unit continues. The contract is complete: do not call submit_verdict again.", b.askID)), taskengine.DataTypeJSON, nil
+		}
+		b.settle(OutcomeDenied, "", guidance)
+		return verdictResult(true, OutcomeDenied,
+			fmt.Sprintf("verdict recorded for ask %s: DENIED; the gated call is refused and the unit continues without it. The contract is complete: do not call submit_verdict again.", b.askID)), taskengine.DataTypeJSON, nil
 	}
-	b.settle(OutcomeAnswered, answer)
-	return verdictResult(true, OutcomeAnswered,
-		fmt.Sprintf(`verdict recorded for ask %s: ANSWER delivered as agent "oracle"; the asking unit continues with it. The contract is complete: do not call submit_verdict again.`, b.askID)), taskengine.DataTypeJSON, nil
 }
 
-// correctionText is the machine-register nudge the gate renders while the
-// contract is open — fed back to the model as its next input when it replied
-// with chat text instead of a tool call.
+func (p *provider) deliveryFailure(b *AskBinding, err error) (any, taskengine.DataType, error) {
+	var refused *RefusedError
+	if errors.As(err, &refused) {
+		return corrective("verdict refused per policy for ask %s.", b.askID)
+	}
+	return nil, taskengine.DataTypeAny, fmt.Errorf("oracletools: deliver verdict for ask %s: %w", b.askID, err)
+}
+
 func correctionText(b *AskBinding) string {
 	return fmt.Sprintf("output rejected: submit the verdict via submit_verdict. Chat text is not a protocol action.\n\nINPUT:\n%s", b.input)
 }
 
-// execVerdictState is the deterministic gate payload: {"state","text"}. The
-// chain's corrective task renders it through an output template — "settled"
-// ends the chain, anything else loops the correction back to the model.
 func execVerdictState(b *AskBinding) map[string]any {
 	if b.settled() {
 		return map[string]any{"state": verdictStateSettled, "text": ""}
@@ -424,15 +427,12 @@ func submitVerdictToolSchema() taskengine.Tool {
 		Type: "function",
 		Function: taskengine.FunctionTool{
 			Name:        ToolNameSubmitVerdict,
-			Description: `Submit the verdict for the ask under review. Exactly one accepted call ends the review. Returns {accepted, outcome, message}: accepted false means nothing was recorded and message states what to correct.`,
+			Description: `Submit the verdict for the ask under review. The INPUT event's "kind" says which verdicts this ask takes: "permission" takes approve/deny/wait, "attention" takes answer/wait. Exactly one accepted call ends the review. Returns {accepted, outcome, message}: accepted false means nothing was recorded and message states what to correct.`,
 			Parameters:  verdictToolParameters(),
 		},
 	}
 }
 
-// argString reads a string argument by key from either call shape — the
-// model-driven map input, or the deterministic Args map (missiontools'
-// idiom). The model shape wins when present.
 func argString(input any, call *taskengine.ToolsCall, key string) string {
 	if m, ok := input.(map[string]any); ok {
 		if v, ok := m[key]; ok {

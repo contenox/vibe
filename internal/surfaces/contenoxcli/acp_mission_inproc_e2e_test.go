@@ -88,7 +88,7 @@ func TestSystem_ACPMissionInProcess(t *testing.T) {
 	missions := missionservice.New(db)
 	inbox := operatorinbox.New(db)
 
-	h, cmd, shutdown := inprocSpawnACP(t, bin, baseEnv)
+	h, cmd, shutdown := inprocSpawnACP(t, bin, baseEnv, workspaceDir)
 	editorPID := cmd.Process.Pid
 
 	_, err = h.client.Initialize(ctx, libacp.InitializeRequest{
@@ -306,12 +306,18 @@ func inprocSeedConfig(t *testing.T, dbPath string) {
 	require.NoError(t, clikv.WriteConfig(ctx, store, "", "update-check", "false"))
 }
 
-func inprocSpawnACP(t *testing.T, bin string, env []string) (*fwdACPHarness, *exec.Cmd, func()) {
+// inprocSpawnACP launches the agent in dir, the way an editor launches it in
+// the project it has open. The launch directory is always the first workspace
+// root (see workspace_roots.go), so a session rooted anywhere outside dir is
+// refused — spawning with the test process's own cwd inherited would root the
+// allowlist in the source tree.
+func inprocSpawnACP(t *testing.T, bin string, env []string, dir string) (*fwdACPHarness, *exec.Cmd, func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	cmd := exec.Command(bin, "acp")
 	cmd.Env = env
+	cmd.Dir = dir
 	stdin, err := cmd.StdinPipe()
 	require.NoError(t, err)
 	stdout, err := cmd.StdoutPipe()

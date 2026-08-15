@@ -220,7 +220,12 @@ func printWorkspaceShadowNote(w io.Writer, contenoxDir string, extra []string) {
 		}
 		homePath := filepath.Join(home, name)
 		if _, err := os.Stat(homePath); err != nil {
-			continue
+			// Shipped chains live under system/; a workspace copy shadows
+			// those too, and not saying so would hide a real override.
+			homePath = filepath.Join(systemDir(home), name)
+			if _, err := os.Stat(homePath); err != nil {
+				continue
+			}
 		}
 		lines = append(lines, fmt.Sprintf("  %s (%s over %s)", name, wsPath, homePath))
 	}

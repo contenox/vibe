@@ -17,6 +17,7 @@ Concretely, the overlap:
 
 | Capability | In contenox |
 |---|---|
+| Agent declarations | One Markdown file with YAML frontmatter in `.contenox/agents/`; `.claude/agents/` is read where it already is — [declaring agents](/docs/guide/agents/) |
 | Tool-using chat loop | `chat_completion` + `execute_tool_calls` tasks with a back-edge — [the agentic loop](/docs/guide/agentic-loop/) |
 | MCP servers | `contenox mcp add <name> <url>` — [MCP integration](/docs/integrations/tools/mcp/) |
 | Provider switching | `contenox backend add` for Ollama, vLLM, OpenAI, Anthropic, Gemini, Vertex AI, Bedrock; routing is config, not code |
@@ -34,7 +35,7 @@ And the honest half of that: for **pure coding ergonomics** — repository mappi
 
 In the dedicated coding agents, permission lives in the agent's own configuration surface: Claude Code's settings allowlists and permission modes, Aider's `--yes`, the in-session prompts in OpenCode and Kilo Code. Permission is configuration *of the agent*, and it travels with the agent.
 
-Here it is a second file. The **chain** says what happens — tasks, models, per-task tool allowlists, transitions, budgets. The **envelope** says what is permitted — `allow` / `approve` / `deny` rules, argument conditions, compute ceilings, who may answer a question, which binaries an allow rule may run. Two artifacts, authored separately, versioned separately, and both validated by the same command before anything runs them:
+Here it is two files. The **chain** says what happens — tasks, models, per-task tool allowlists, transitions, budgets. The **envelope** says what is permitted — `allow` / `approve` / `deny` rules, argument conditions, compute ceilings, who may answer a question, which binaries an allow rule may run. Declaring an agent writes both, so most of the time you edit one Markdown file and read the pair to see what it meant. Two artifacts either way, versioned separately, and both validated by the same command before anything runs them:
 
 ```bash
 contenox vet --all      # chains AND hitl-policy files, each with its own validator
@@ -55,7 +56,7 @@ contenox mission fire agent-planner "..." --policy hitl-policy-strict.json   # n
 A mission's envelope is a required argument, not a default it inherits — the dispatch refuses without one, and validates the file before the first unit starts.
 
 - [HITL policies](/docs/guide/hitl/) — the envelope format, condition operators, and the shipped presets
-- [Your first chain](/docs/guide/first-chain/) and [chain files: naming, roles, and resolution](/docs/guide/chain-naming/) — the other artifact, and how each is resolved
+- [Writing a chain by hand](/docs/guide/first-chain/) and [chain files: naming, roles, and resolution](/docs/guide/chain-naming/) — the other artifact, and how each is resolved
 
 ### 2. Human gates are durable and resumable
 
@@ -94,8 +95,7 @@ Three properties, together, are the uncommon part. The grant is **bounded** — 
 
 Confidence-gated auto-approval exists in other tools. A separation of powers over *durable* asks, with an explicit budget on how much judgment may be delegated and a record of who spent it, we have not found elsewhere.
 
-- [Who may answer a unit's question](/docs/guide/hitl/#who-may-answer-a-units-question-attention) — the `attention` block and each preset's stance
-- [The attention oracle (beta)](/docs/use-cases/auto-attention/) — a driver that spends that budget on routine questions so unattended runs finish
+- [Who may answer a unit's question](/docs/guide/hitl/#who-may-answer-a-subagent-attention) — the `attention` block and each preset's stance
 
 ## Also uncommon
 
@@ -123,7 +123,8 @@ Reach for contenox when the work is **governed, unattended, or repeatable** and 
 
 ## Next
 
-- [Core concepts](/docs/guide/concepts/) — chains, tasks, tools, transitions
+- [Declaring agents](/docs/guide/agents/) — the file an agent is
+- [Core concepts](/docs/guide/concepts/) — agents, chains, tasks, tools, transitions
 - [HITL policies](/docs/guide/hitl/) — the envelope in full
 - [The agentic loop](/docs/guide/agentic-loop/) — the loop as an authored task graph
 - [Request routing](/docs/guide/request-routing/) — one prompt, several specialist loops, each with its own tool scope and budget

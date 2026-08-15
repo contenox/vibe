@@ -15,7 +15,7 @@ import (
 // (preamble, nudge) must name tools exactly as taskengine qualifies and
 // offers them to the model, never the bare form.
 func TestUnit_MissionPrompts_NameToolsAsTheModelSeesThem(t *testing.T) {
-	tools, err := missiontools.New(schemaOnlyStore{}, nil).GetToolsForToolsByName(
+	tools, err := missiontools.New(schemaOnlyStore{}).GetToolsForToolsByName(
 		missiontools.WithMissionID(context.Background(), "m-1"),
 		missiontools.ToolsProviderName,
 	)
@@ -27,7 +27,7 @@ func TestUnit_MissionPrompts_NameToolsAsTheModelSeesThem(t *testing.T) {
 		offered[missiontools.ToolsProviderName+"."+tool.Function.Name] = true
 	}
 
-	for _, name := range []string{toolAskAttention, toolReport, toolFinish} {
+	for _, name := range []string{toolAsk, toolReport, toolFinish} {
 		require.True(t, offered[name],
 			"the prompts tell a unit to call %q, which is not among the tools the model is offered: %v", name, keys(offered))
 	}
@@ -36,7 +36,7 @@ func TestUnit_MissionPrompts_NameToolsAsTheModelSeesThem(t *testing.T) {
 		what string
 		text string
 	}{{"preamble", missionPreamble}, {"nudge", missionNudge}} {
-		for _, name := range []string{toolAskAttention, toolReport, toolFinish} {
+		for _, name := range []string{toolAsk, toolReport, toolFinish} {
 			require.Contains(t, prompt.text, name, "the %s must name %q the way the model sees it", prompt.what, name)
 		}
 		// Must not name the bare form: it reads to the model as a different,

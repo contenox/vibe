@@ -147,6 +147,9 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 		_ = sink.PublishTaskEvent(ctx, ev)
 	}
 
+	req.AskID = askID
+	s.offer(ctx, adjudicationFromAttentionRequest(askID, req))
+
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -263,6 +266,8 @@ func (s *service) answerAttention(ctx context.Context, askID, text, by string, b
 		}
 		return ErrApprovalAlreadyResolved
 	}
+
+	s.forgetOffer(askID)
 
 	s.mu.Lock()
 	ch, ok := s.pending[askID]

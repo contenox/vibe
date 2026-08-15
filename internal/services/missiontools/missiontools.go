@@ -20,7 +20,9 @@ const (
 	// ToolNameReport files a structured progress/finding/blocker/result report
 	// against the caller's own mission.
 	ToolNameReport = "mission_report"
-	// ToolNameAskAttention flags that the caller's mission needs an operator.
+	// ToolNameAskAttention flags that the caller's mission needs a decision it
+	// may not make on its own — answered by a human, by the supervising
+	// session's agent, or by the oracle, whichever reaches it first.
 	ToolNameAskAttention = "mission_ask_attention"
 
 	// AttentionParkWindow is how long a suspendable mission_ask_attention
@@ -64,22 +66,20 @@ type MissionStore interface {
 	Finish(ctx context.Context, id string, status missionservice.Status, reason string) (*missionservice.Mission, error)
 }
 
-// AttentionAsker is the durable-ask machinery mission_ask_attention hands a request to, kept as a one-method seam so this package doesn't depend on hitlservice directly; when nil, mission_ask_attention degrades to filing a durable blocker report (see New).
+// AttentionAsker is the durable-ask channel mission_ask_attention runs on; unset, the tool files a blocker report instead.
 type AttentionAsker interface {
-	// RaiseAttention puts the unit's question to a human and blocks until answered, returning the operator's words; an error means no answer is coming, except when ask.ParkWindow elapses unanswered, in which case the error is a *taskengine.ApprovalPendingError and the caller must let the run suspend rather than file a blocker.
+	// RaiseAttention blocks until the question is answered and returns the answerer's words; a *taskengine.ApprovalPendingError means ask.ParkWindow elapsed and the caller must let the run suspend.
 	RaiseAttention(ctx context.Context, ask AttentionAsk) (string, error)
 }
 
-// AttentionAsk is one unit's question plus the identity/parking knobs the checkpoint-and-release path needs; zero AskID/ParkWindow means the pre-detach behavior (fresh row ID, block to the ceiling).
+// AttentionAsk is one unit's question plus the identity and parking knobs the checkpoint-and-release path needs.
 type AttentionAsk struct {
 	MissionID string
 	Summary   string
 	Detail    string
-	// AskID is the durable row identity — the engine tool-call ID on the
-	// suspendable path, so "ask ID == tool-call ID == checkpoint key" holds.
+	// AskID is the durable row identity, the engine tool-call ID on the suspendable path.
 	AskID string
-	// ParkWindow, when > 0, bounds the block; past it the asker returns the
-	// typed pending error described on RaiseAttention.
+	// ParkWindow, when > 0, bounds the block.
 	ParkWindow time.Duration
 }
 
@@ -90,10 +90,23 @@ type provider struct {
 	resolver        AttentionResolver
 	parkWindow      time.Duration
 	recordDowngrade func()
+
+	// The supervisor half: what a session that HAS subagents may start and watch.
+	spawner          Spawner
+	watcher          SubagentWatcher
+	subagentDefaults SubagentDefaults
+	subagentTimeout  time.Duration
 }
 
 // Option configures the provider at construction.
 type Option func(*provider)
+
+// WithAttentionAsker wires the durable-ask channel mission_ask_attention runs on.
+func WithAttentionAsker(asker AttentionAsker) Option {
+	return func(p *provider) {
+		p.asker = asker
+	}
+}
 
 // WithAttentionParkWindow overrides the park duration (AttentionParkWindow
 // by default) — tests shrink it so a suspension happens in milliseconds.
@@ -105,21 +118,30 @@ func WithAttentionParkWindow(d time.Duration) Option {
 	}
 }
 
-// WithSupervision wires the tools a session that fired missions gets (list your missions, answer a unit's question); both deps are required together.
-func WithSupervision(store SupervisorStore, resolver AttentionResolver) Option {
+// WithSupervision wires the tool a session that fired missions gets: list your missions.
+func WithSupervision(store SupervisorStore) Option {
 	return func(p *provider) {
 		p.supervisor = store
+	}
+}
+
+// WithAttentionResolver adds the answering half of the supervisor surface: read what your subagents are waiting on, and answer it.
+func WithAttentionResolver(resolver AttentionResolver) Option {
+	return func(p *provider) {
 		p.resolver = resolver
 	}
 }
 
-// New returns the mission-tools provider; missions is required and New panics on nil rather than degrade, while asker is optional and nil means mission_ask_attention files a durable blocker report instead of a durable ask.
-func New(missions MissionStore, asker AttentionAsker, opts ...Option) taskengine.ToolsRepo {
+// New returns the mission-tools provider; missions is required and New panics on nil rather than degrade.
+func New(missions MissionStore, opts ...Option) taskengine.ToolsRepo {
 	if missions == nil {
 		panic("missiontools: mission store is required")
 	}
-	p := &provider{missions: missions, asker: asker, recordDowngrade: func() {}, parkWindow: AttentionParkWindow}
+	p := &provider{missions: missions, recordDowngrade: func() {}, parkWindow: AttentionParkWindow}
 	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
 		opt(p)
 	}
 	return p
@@ -146,9 +168,9 @@ func (p *provider) GetToolsForToolsByName(ctx context.Context, name string) ([]t
 			finishToolSchema(),
 		}, nil
 	}
-	// Not a mission: maybe a session that fired some, so offer the smaller supervisor surface.
-	if p.supervisor != nil && p.resolver != nil && ParentSessionIDFromContext(ctx) != "" {
-		return supervisorTools(), nil
+	// Not a mission: maybe a session that supervises some, so offer the smaller supervisor surface.
+	if p.supervisor != nil && ParentSessionIDFromContext(ctx) != "" {
+		return p.supervisorTools(), nil
 	}
 	return []taskengine.Tool{}, nil
 }
@@ -163,12 +185,18 @@ func (p *provider) Exec(ctx context.Context, _ time.Time, input any, _ bool, cal
 	case ToolNameListMissions, ToolNameAnswer:
 		parentSessionID := ParentSessionIDFromContext(ctx)
 		if parentSessionID == "" {
-			return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: %s is only available to a session that fired missions", call.ToolName)
+			return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: %s is only available to a session that supervises missions", call.ToolName)
 		}
 		if call.ToolName == ToolNameListMissions {
 			return p.execListMissions(ctx, parentSessionID)
 		}
 		return p.execAnswer(ctx, parentSessionID, input, call)
+	case ToolNameStartMission:
+		parentSessionID := ParentSessionIDFromContext(ctx)
+		if parentSessionID == "" {
+			return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: %s is only available to a session that supervises missions; a subagent may not start subagents of its own", call.ToolName)
+		}
+		return p.execStartMission(ctx, parentSessionID, input, call)
 	}
 	missionID := MissionIDFromContext(ctx)
 	if missionID == "" {
@@ -241,7 +269,6 @@ func (p *provider) execAskAttention(ctx context.Context, missionID string, input
 	}
 	callID, _ := ctx.Value(taskengine.ContextKeyToolCallID).(string)
 
-	// Resume path: a run resumed after checkpoint-and-release carries the operator's answer under this call's ID.
 	if ans, ok := taskengine.AttentionAnswerFromContext(ctx, callID); ok {
 		p.heartbeat(ctx, missionID)
 		if ans.Answered && strings.TrimSpace(ans.Text) != "" {
@@ -249,10 +276,9 @@ func (p *provider) execAskAttention(ctx context.Context, missionID string, input
 		}
 		detail = withUnansweredNote(detail, fmt.Errorf("the ask was resolved without an answer while the run was suspended"))
 	} else if p.asker != nil {
-		// Heartbeat before the wait so a unit blocked on an operator doesn't look dead.
 		p.heartbeat(ctx, missionID)
 		ask := AttentionAsk{MissionID: missionID, Summary: summary, Detail: detail}
-		// Park-and-release only where a suspend can land: model-batch execution with a checkpoint saver installed.
+		// Park-and-release only lands under model-batch execution with a checkpoint saver.
 		if callID != "" && taskengine.ToolCallSuspendable(ctx) && taskengine.HasCheckpointSaver(ctx) {
 			ask.AskID = callID
 			ask.ParkWindow = p.parkWindow
@@ -260,28 +286,24 @@ func (p *provider) execAskAttention(ctx context.Context, missionID string, input
 		answer, err := p.asker.RaiseAttention(ctx, ask)
 		if err == nil {
 			p.heartbeat(ctx, missionID)
-			// The answer IS the tool result: the model continues with it in the same turn.
 			return answer, taskengine.DataTypeString, nil
 		}
 		var pending *taskengine.ApprovalPendingError
 		if errors.As(err, &pending) {
-			// Park window elapsed: hand the typed error up unwrapped so the engine suspends the run.
 			return nil, taskengine.DataTypeAny, pending
 		}
-		// No answer coming: fall through to the blocker below rather than failing.
 		detail = withUnansweredNote(detail, err)
 	}
-	// Fallback: no answer channel wired, or nobody answered — record as a durable blocker report.
 	report := &missionservice.Report{Kind: missionservice.ReportKindBlocker, Summary: summary, Detail: detail}
 	if err := p.missions.AddReport(ctx, missionID, report); err != nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: record attention request: %w", err)
 	}
 	p.heartbeat(ctx, missionID)
-	return "attention requested (recorded as blocker — no operator answered)", taskengine.DataTypeString, nil
+	return "attention requested (recorded as blocker — nobody answered)", taskengine.DataTypeString, nil
 }
 
 func withUnansweredNote(detail string, err error) string {
-	note := fmt.Sprintf("(the unit asked for an operator and got no answer: %v)", err)
+	note := fmt.Sprintf("(the unit asked for a decision and got no answer: %v)", err)
 	if strings.TrimSpace(detail) == "" {
 		return note
 	}
@@ -383,17 +405,17 @@ func askAttentionToolSchema() taskengine.Tool {
 		Type: "function",
 		Function: taskengine.FunctionTool{
 			Name:        ToolNameAskAttention,
-			Description: "ASK your operator a question and WAIT for their reply — use it when you cannot proceed without a human: a decision you may not make unattended, a missing fact, an ambiguous instruction. The call BLOCKS until a person answers, and their answer comes back to you as this tool's result, so you continue with it on the same turn. If nobody answers in time your question is recorded as a blocker instead. Use it sparingly — it costs a human's attention and their time to reply — but prefer it over guessing or giving up.",
+			Description: "ASK for a decision you may not make on your own, and WAIT for the reply — use it when you cannot proceed: a judgement outside your intent, a missing fact, an ambiguous instruction. The call BLOCKS until someone answers, and their answer comes back to you as this tool's result, so you continue with it on the same turn. If nobody answers in time your question is recorded as a blocker instead. Use it sparingly — it costs attention and time — but prefer it over guessing or giving up.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"summary": map[string]any{
 						"type":        "string",
-						"description": "A single-line summary of what you need the operator for.",
+						"description": "A single-line summary of the decision you need.",
 					},
 					"detail": map[string]any{
 						"type":        "string",
-						"description": "Optional longer detail.",
+						"description": "Optional longer detail: what you already tried, and what the options are.",
 					},
 				},
 				"required": []string{"summary"},

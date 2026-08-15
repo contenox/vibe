@@ -128,7 +128,7 @@ func TestUnit_LocalToolset_RegistersWorkspaceSearchAlwaysOn(t *testing.T) {
 	t.Cleanup(gt.Shutdown)
 
 	// Registered with the shell OFF, like git: it is a read.
-	tools := localToolset(chatOpts{EffectiveEnableLocalExec: false}, nil, libtracker.NoopTracker{}, gt, missionservice.New(nil), nil)
+	tools := localToolset(chatOpts{EffectiveEnableLocalExec: false}, nil, libtracker.NoopTracker{}, gt, missionservice.New(nil))
 	repo, ok := tools[searchtool.ToolsProviderName]
 	require.True(t, ok, "workspace_search is a read surface and must always be registered")
 

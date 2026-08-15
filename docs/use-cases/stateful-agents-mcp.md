@@ -22,7 +22,11 @@ contenox mcp add fetch --transport stdio \
   --command npx --args "-y,fetch-mcp"
 ```
 
-Save example chains once in your project:
+An agent that just needs one of these servers is shorter as a declaration —
+`mcpServers: [memory]` in `.contenox/agents/<name>.md`, and nothing else; see
+[declaring agents](/docs/guide/agents/). The chains below exist because these
+recipes are pipelines you point `--chain` at, one per server, with the tool
+grant pinned in the file. Save them once in your project:
 
 ```bash
 cat > .contenox/chain-mcp-filesystem.json <<'EOF'

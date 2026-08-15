@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/contenox/contenox/internal/services/agentdecl"
 	"github.com/contenox/contenox/internal/services/setupcheck"
 	"github.com/stretchr/testify/require"
 )
@@ -336,8 +337,8 @@ func TestUnit_StaleDetection_SkipsBetaGatedToolsets(t *testing.T) {
 	onDisk := `{"default_action":"approve","rules":[{"tools":"local_fs","tool":"read_file","action":"allow"}]}`
 
 	off := betaGatedToolsets(false)
-	require.Equal(t, map[string]bool{"goja": true, "shell_session": true, "oracle": true}, off,
-		"the gated set names exactly the beta toolsets (oracle: the attention driver exists only under the opt-in)")
+	require.Equal(t, map[string]bool{"goja": true, "shell_session": true}, off,
+		"the gated set names exactly the beta toolsets")
 	require.Empty(t, missingPolicyToolsets([]byte(shipped), []byte(onDisk), off),
 		"invisible toolsets must not be reported stale")
 
@@ -371,13 +372,23 @@ func TestUnit_StaleDetection_SkipsBetaGatedToolsets(t *testing.T) {
 		"the same envelope is stale once the operator opts in")
 }
 
-// TestUnit_PolicyDirs asserts policyDirs mirrors hitlPolicySource's search path and dedupes when the primary dir is already $HOME/.contenox.
+// TestUnit_PolicyDirs asserts policyDirs mirrors hitlPolicySource's search path,
+// dedupes when the primary dir is already $HOME/.contenox, and orders the
+// envelopes rendered from agent declarations last so a hand-written envelope of
+// the same name shadows a rendered one.
 func TestUnit_PolicyDirs(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	globalDir := filepath.Join(home, ".contenox")
+	generated := func(dir string) string { return filepath.Join(dir, agentdecl.GeneratedDirName) }
 
-	require.Equal(t, []string{"/work/.contenox", globalDir}, policyDirs("/work/.contenox"))
-	require.Equal(t, []string{globalDir}, policyDirs(globalDir), "beam resolves both to ~/.contenox")
-	require.Equal(t, []string{globalDir}, policyDirs(""))
+	require.Equal(t,
+		[]string{"/work/.contenox", globalDir, generated("/work/.contenox"), generated(globalDir)},
+		policyDirs("/work/.contenox"))
+	require.Equal(t,
+		[]string{globalDir, generated(globalDir)},
+		policyDirs(globalDir), "beam resolves both to ~/.contenox")
+	require.Equal(t,
+		[]string{globalDir, generated(globalDir)},
+		policyDirs(""), "an unnamed primary dir contributes nothing, least of all a relative .generated")
 }

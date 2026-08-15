@@ -12,6 +12,7 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/getkin/kin-openapi/openapi3"
@@ -275,6 +276,8 @@ func (h *HITLWrapper) Exec(
 			OnTimeout:   result.OnTimeout,
 			Detail:      result.Detail,
 			SessionID:   askSessionID(ctx),
+			// A unit's ask carries which subagent raised it, or nothing downstream can bound it: the adjudicator declines an unattributed ask and the envelope has no mission to count against.
+			MissionID: missiontools.MissionIDFromContext(ctx),
 		}
 		h.publishDecision(ctx, tools.Name, toolName, args, result, true)
 		h.hitlLog(ctx, "ask raised", "tool", toolName, "approval_id", toolCallID, "rule", result.MatchedRule, "policy", result.PolicyName)
@@ -455,10 +458,35 @@ func (h *HITLWrapper) askDurable(
 		h.hitlLog(ctx, "verdict recorded", "tool", req.ToolName, "approval_id", approvalID, "approved", out.approved)
 	}
 	if !out.approved {
-		reportChange("denied", DenyMessage)
-		return DenyMessage, taskengine.DataTypeString, nil
+		msg := h.denyMessage(ctx, approvalID)
+		reportChange("denied", msg)
+		return msg, taskengine.DataTypeString, nil
 	}
 	return h.inner.Exec(ctx, startTime, input, debug, tools)
+}
+
+// guidanceReader reads the redirect a non-human denial attached to an ask.
+type guidanceReader interface {
+	AskGuidance(ctx context.Context, approvalID string) (by string, guidance string)
+}
+
+// denyMessage tells the caller what actually happened. The default text says a
+// user denied the call, which is false when an adjudicator did — and it drops
+// the redirect that denial carried, which is the whole point of denying with
+// guidance rather than just refusing.
+func (h *HITLWrapper) denyMessage(ctx context.Context, approvalID string) string {
+	reader, ok := h.recorder.(guidanceReader)
+	if !ok {
+		return DenyMessage
+	}
+	by, guidance := reader.AskGuidance(ctx, approvalID)
+	if by == "" {
+		return DenyMessage
+	}
+	if strings.TrimSpace(guidance) == "" {
+		return fmt.Sprintf("Denied by %s per the mission envelope. Do not retry this call; take a different approach.", by)
+	}
+	return fmt.Sprintf("Denied by %s per the mission envelope: %s Do not retry this call.", by, guidance)
 }
 
 func (h *HITLWrapper) deliverLateVerdict(approvalID, toolName string, outcomeCh <-chan askOutcome) {

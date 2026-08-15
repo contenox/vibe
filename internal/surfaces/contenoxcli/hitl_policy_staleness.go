@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/contenox/contenox/internal/services/agentdecl"
 	"github.com/contenox/contenox/internal/services/setupcheck"
 )
 
@@ -100,6 +101,10 @@ func missingPolicyToolsets(shipped, onDisk []byte, gated map[string]bool) []stri
 	return missing
 }
 
+// policyDirs is the envelope search path, strongest first: the resolved
+// .contenox dir, then ~/.contenox, then the envelopes rendered from agent
+// declarations. Generated last is what lets a hand-written envelope of the same
+// name shadow a rendered one — the same ordering the chain roots use.
 func policyDirs(primaryDir string) []string {
 	var dirs []string
 	seen := map[string]bool{}
@@ -110,10 +115,23 @@ func policyDirs(primaryDir string) []string {
 		seen[dir] = true
 		dirs = append(dirs, dir)
 	}
-	add(primaryDir)
-	if home, err := os.UserHomeDir(); err == nil {
-		add(filepath.Join(home, ".contenox"))
+	// Joined only onto a named dir: filepath.Join("", ".generated") is a relative
+	// path, which would resolve against whatever cwd the process happens to hold.
+	addGenerated := func(dir string) {
+		if dir == "" {
+			return
+		}
+		add(filepath.Join(dir, agentdecl.GeneratedDirName))
 	}
+	home, homeErr := os.UserHomeDir()
+	globalDir := ""
+	if homeErr == nil {
+		globalDir = filepath.Join(home, ".contenox")
+	}
+	add(primaryDir)
+	add(globalDir)
+	addGenerated(primaryDir)
+	addGenerated(globalDir)
 	return dirs
 }
 

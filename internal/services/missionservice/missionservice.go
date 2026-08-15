@@ -98,7 +98,10 @@ const (
 	StatusStuck Status = "stuck"
 )
 
-func isTerminalStatus(status Status) bool {
+// IsTerminalStatus reports whether status is one a mission never moves off
+// again, so a caller watching one to rest asks the same question Finish's guard
+// does rather than keeping its own list.
+func IsTerminalStatus(status Status) bool {
 	switch status {
 	case StatusLanded, StatusDerailed, StatusStuck, StatusAbandoned:
 		return true
@@ -106,6 +109,8 @@ func isTerminalStatus(status Status) bool {
 		return false
 	}
 }
+
+func isTerminalStatus(status Status) bool { return IsTerminalStatus(status) }
 
 const missionKVPrefix = "fleet:mission:"
 

@@ -41,7 +41,7 @@ func reportCall(kind, summary string) *taskengine.ToolsCall {
 // TestUnit_MissionTools_ReportFilesAgainstBoundMission pins that a report call lands in the bound mission's reports and stamps a heartbeat.
 func TestUnit_MissionTools_ReportFilesAgainstBoundMission(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	toolCtx := missiontools.WithMissionID(ctx, missionID)
 	out, dt, err := tools.Exec(toolCtx, time.Now(), nil, false, reportCall("finding", "found the leak"))
@@ -64,7 +64,7 @@ func TestUnit_MissionTools_ReportFilesAgainstBoundMission(t *testing.T) {
 // TestUnit_MissionTools_AbsentWithoutMission pins that off a mission the tools are neither listed nor executable.
 func TestUnit_MissionTools_AbsentWithoutMission(t *testing.T) {
 	ctx, svc, _ := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	listed, err := tools.GetToolsForToolsByName(ctx, missiontools.ToolsProviderName)
 	require.NoError(t, err)
@@ -78,7 +78,7 @@ func TestUnit_MissionTools_AbsentWithoutMission(t *testing.T) {
 // TestUnit_MissionTools_ExposedOnMission pins that on a mission all four mission tools are listed.
 func TestUnit_MissionTools_ExposedOnMission(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	listed, err := tools.GetToolsForToolsByName(missiontools.WithMissionID(ctx, missionID), missiontools.ToolsProviderName)
 	require.NoError(t, err)
@@ -101,7 +101,7 @@ func TestUnit_MissionTools_ReportScopedToOwnMission(t *testing.T) {
 	other := &missionservice.Mission{Intent: "other work", AgentName: "runner", HITLPolicyName: "default"}
 	require.NoError(t, svc.Create(ctx, other))
 
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 	_, _, err := tools.Exec(missiontools.WithMissionID(ctx, missionA), time.Now(), nil, false, reportCall("progress", "mine"))
 	require.NoError(t, err)
 
@@ -116,7 +116,7 @@ func TestUnit_MissionTools_ReportScopedToOwnMission(t *testing.T) {
 // TestUnit_MissionTools_ReportDefaultsKind pins that a summary-only report defaults to progress.
 func TestUnit_MissionTools_ReportDefaultsKind(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	call := &taskengine.ToolsCall{
 		Name:     missiontools.ToolsProviderName,
@@ -150,7 +150,7 @@ func TestUnit_MissionTools_ReportDefaultsKind(t *testing.T) {
 // TestUnit_MissionTools_ReportReadsModelArgs pins that the model-driven map[string]any input is read, including refs as a JSON array.
 func TestUnit_MissionTools_ReportReadsModelArgs(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	// The absolute ref must genuinely exist: this test is about arg parsing, not the verification gate.
 	outLog := filepath.Join(t.TempDir(), "out.log")
@@ -177,7 +177,7 @@ func TestUnit_MissionTools_ReportReadsModelArgs(t *testing.T) {
 // TestUnit_MissionTools_ReportReadsModelHandover pins that the model-driven shape carries a nested typed hand-off through to storage.
 func TestUnit_MissionTools_ReportReadsModelHandover(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	input := map[string]any{
 		"kind":    "result",
@@ -206,7 +206,7 @@ func TestUnit_MissionTools_ReportReadsModelHandover(t *testing.T) {
 // TestUnit_MissionTools_ReportReadsDeterministicHandover pins that the deterministic Args path reaches the hand-off as a JSON string.
 func TestUnit_MissionTools_ReportReadsDeterministicHandover(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	call := &taskengine.ToolsCall{
 		Name:     missiontools.ToolsProviderName,
@@ -231,7 +231,7 @@ func TestUnit_MissionTools_ReportReadsDeterministicHandover(t *testing.T) {
 // TestUnit_MissionTools_ReportWithoutHandoverIsLegacy pins that a report with no hand-off stores with a nil Handover.
 func TestUnit_MissionTools_ReportWithoutHandoverIsLegacy(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	_, _, err := tools.Exec(missiontools.WithMissionID(ctx, missionID), time.Now(), nil, false, reportCall("progress", "no hand-off here"))
 	require.NoError(t, err)
@@ -245,7 +245,7 @@ func TestUnit_MissionTools_ReportWithoutHandoverIsLegacy(t *testing.T) {
 // TestUnit_MissionTools_ReportRejectsMalformedHandover pins that a broken hand-off object surfaces a legible error, not a silent drop.
 func TestUnit_MissionTools_ReportRejectsMalformedHandover(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	call := &taskengine.ToolsCall{
 		Name:     missiontools.ToolsProviderName,
@@ -260,7 +260,7 @@ func TestUnit_MissionTools_ReportRejectsMalformedHandover(t *testing.T) {
 // TestUnit_MissionTools_InvalidKindRejected pins that a malformed kind fails loudly through the store's validation.
 func TestUnit_MissionTools_InvalidKindRejected(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	_, _, err := tools.Exec(missiontools.WithMissionID(ctx, missionID), time.Now(), nil, false, reportCall("gossip", "nope"))
 	require.Error(t, err)
@@ -290,7 +290,7 @@ func (f *fakeAsker) RaiseAttention(_ context.Context, ask missiontools.Attention
 func TestUnit_MissionTools_AskAttentionUsesAskerWhenWired(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	asker := &fakeAsker{answer: "staging, and use the seeded fixtures"}
-	tools := missiontools.New(svc, asker)
+	tools := missiontools.New(svc, missiontools.WithAttentionAsker(asker))
 
 	call := &taskengine.ToolsCall{
 		Name:     missiontools.ToolsProviderName,
@@ -313,7 +313,7 @@ func TestUnit_MissionTools_AskAttentionUsesAskerWhenWired(t *testing.T) {
 // TestUnit_MissionTools_AskAttentionFallsBackToBlocker pins that with no asker wired, the request lands as a durable blocker report.
 func TestUnit_MissionTools_AskAttentionFallsBackToBlocker(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	call := &taskengine.ToolsCall{
 		Name:     missiontools.ToolsProviderName,
@@ -333,7 +333,7 @@ func TestUnit_MissionTools_AskAttentionFallsBackToBlocker(t *testing.T) {
 // TestUnit_MissionTools_UnknownMissionSurfacesError pins that a report against a nonexistent mission surfaces not-found, not a silent insert.
 func TestUnit_MissionTools_UnknownMissionSurfacesError(t *testing.T) {
 	ctx, svc, _ := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	_, _, err := tools.Exec(missiontools.WithMissionID(ctx, "no-such-mission"), time.Now(), nil, false, reportCall("progress", "ghost"))
 	require.Error(t, err)
@@ -373,7 +373,7 @@ func planEntryArg(content, status, priority string) map[string]any {
 // TestUnit_MissionTools_PlanSetsSnapshotAndEchoesIDs pins that mission_plan replaces the plan, stamps a heartbeat, and echoes assigned ids.
 func TestUnit_MissionTools_PlanSetsSnapshotAndEchoesIDs(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	call, input := planModelCall("first cut",
 		planEntryArg("survey the codebase", "in_progress", "high"),
@@ -404,7 +404,7 @@ func TestUnit_MissionTools_PlanSetsSnapshotAndEchoesIDs(t *testing.T) {
 // TestUnit_MissionTools_PlanAbsentOffMission pins that off a mission, mission_plan refuses to execute.
 func TestUnit_MissionTools_PlanAbsentOffMission(t *testing.T) {
 	ctx, svc, _ := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	call, input := planModelCall("", planEntryArg("do a thing", "pending", "low"))
 	_, _, err := tools.Exec(ctx, time.Now(), input, false, call)
@@ -418,7 +418,7 @@ func TestUnit_MissionTools_PlanScopedToOwnMission(t *testing.T) {
 	other := &missionservice.Mission{Intent: "other work", AgentName: "runner", HITLPolicyName: "default"}
 	require.NoError(t, svc.Create(ctx, other))
 
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 	call, input := planModelCall("mine", planEntryArg("only on A", "pending", "high"))
 	_, _, err := tools.Exec(missiontools.WithMissionID(ctx, missionA), time.Now(), input, false, call)
 	require.NoError(t, err)
@@ -434,7 +434,7 @@ func TestUnit_MissionTools_PlanScopedToOwnMission(t *testing.T) {
 // TestUnit_MissionTools_PlanReadsDeterministicJSONArgs pins that the deterministic Args path reaches entries as a JSON string.
 func TestUnit_MissionTools_PlanReadsDeterministicJSONArgs(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	call := &taskengine.ToolsCall{
 		Name:     missiontools.ToolsProviderName,
@@ -458,7 +458,7 @@ func TestUnit_MissionTools_PlanReadsDeterministicJSONArgs(t *testing.T) {
 // TestUnit_MissionTools_PlanRejectsEmptySnapshot pins that an empty snapshot fails loudly rather than silently erasing the plan.
 func TestUnit_MissionTools_PlanRejectsEmptySnapshot(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	call := &taskengine.ToolsCall{Name: missiontools.ToolsProviderName, ToolName: missiontools.ToolNamePlan}
 	input := map[string]any{"entries": []any{}}
@@ -470,7 +470,7 @@ func TestUnit_MissionTools_PlanRejectsEmptySnapshot(t *testing.T) {
 // TestUnit_MissionTools_PlanRejectsUnknownStatus pins that a malformed enum surfaces through the store's validation, never coerced.
 func TestUnit_MissionTools_PlanRejectsUnknownStatus(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	call, input := planModelCall("", planEntryArg("bad status", "halfway", "high"))
 	_, _, err := tools.Exec(missiontools.WithMissionID(ctx, missionID), time.Now(), input, false, call)
@@ -481,7 +481,7 @@ func TestUnit_MissionTools_PlanRejectsUnknownStatus(t *testing.T) {
 // TestUnit_MissionTools_PlanMissingEntriesRejected pins that a plan call with no entries argument is rejected, not a nil-plan write.
 func TestUnit_MissionTools_PlanMissingEntriesRejected(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	call := &taskengine.ToolsCall{Name: missiontools.ToolsProviderName, ToolName: missiontools.ToolNamePlan}
 	_, _, err := tools.Exec(missiontools.WithMissionID(ctx, missionID), time.Now(), map[string]any{}, false, call)
@@ -492,7 +492,7 @@ func TestUnit_MissionTools_PlanMissingEntriesRejected(t *testing.T) {
 // TestUnit_MissionTools_PlanCarriesIDsForwardAndGuardsCompleted pins that a carried-forward id keeps identity, and completed content is immutable.
 func TestUnit_MissionTools_PlanCarriesIDsForwardAndGuardsCompleted(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 	mctx := missiontools.WithMissionID(ctx, missionID)
 
 	// Rev 1: one id-less entry, in progress.
@@ -531,7 +531,7 @@ func finishCall(status, reason string) *taskengine.ToolsCall {
 // TestUnit_MissionTools_FinishSetsTerminalStatus pins that mission_finish moves to the named terminal state, records the reason, and leaves a terminal mission unheartbeated.
 func TestUnit_MissionTools_FinishSetsTerminalStatus(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	out, dt, err := tools.Exec(missiontools.WithMissionID(ctx, missionID), time.Now(), nil, false, finishCall("landed", "shipped it"))
 	require.NoError(t, err)
@@ -548,7 +548,7 @@ func TestUnit_MissionTools_FinishSetsTerminalStatus(t *testing.T) {
 // TestUnit_MissionTools_FinishReadsModelStuck pins that the model-driven shape and a stuck verdict both work.
 func TestUnit_MissionTools_FinishReadsModelStuck(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	call := &taskengine.ToolsCall{Name: missiontools.ToolsProviderName, ToolName: missiontools.ToolNameFinish}
 	input := map[string]any{"status": "stuck", "reason": "cannot decide alone"}
@@ -563,7 +563,7 @@ func TestUnit_MissionTools_FinishReadsModelStuck(t *testing.T) {
 // TestUnit_MissionTools_FinishRequiresStatus pins that a finish call with no status is rejected before it reaches the store.
 func TestUnit_MissionTools_FinishRequiresStatus(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	_, _, err := tools.Exec(missiontools.WithMissionID(ctx, missionID), time.Now(), nil, false, finishCall("", "no status"))
 	require.Error(t, err)
@@ -573,7 +573,7 @@ func TestUnit_MissionTools_FinishRequiresStatus(t *testing.T) {
 // TestUnit_MissionTools_FinishRejectsNonTerminal pins that a non-terminal target (open) is refused by Finish's guard.
 func TestUnit_MissionTools_FinishRejectsNonTerminal(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	_, _, err := tools.Exec(missiontools.WithMissionID(ctx, missionID), time.Now(), nil, false, finishCall("open", "not terminal"))
 	require.Error(t, err)
@@ -583,7 +583,7 @@ func TestUnit_MissionTools_FinishRejectsNonTerminal(t *testing.T) {
 // TestUnit_MissionTools_FinishIdempotentThenConflict pins that a same-status repeat is a no-op and a different-status repeat is a conflict.
 func TestUnit_MissionTools_FinishIdempotentThenConflict(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 	mctx := missiontools.WithMissionID(ctx, missionID)
 
 	_, _, err := tools.Exec(mctx, time.Now(), nil, false, finishCall("landed", "done"))
@@ -600,7 +600,7 @@ func TestUnit_MissionTools_FinishIdempotentThenConflict(t *testing.T) {
 // TestUnit_MissionTools_FinishAbsentOffMission pins that off a mission, mission_finish refuses to execute.
 func TestUnit_MissionTools_FinishAbsentOffMission(t *testing.T) {
 	ctx, svc, _ := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	_, _, err := tools.Exec(ctx, time.Now(), nil, false, finishCall("landed", "should not run"))
 	require.Error(t, err)
@@ -611,7 +611,7 @@ func TestUnit_MissionTools_FinishAbsentOffMission(t *testing.T) {
 func TestUnit_MissionTools_AskAttentionFallsBackWhenUnanswered(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	asker := &fakeAsker{err: errors.New("attention ask went unanswered")}
-	tools := missiontools.New(svc, asker)
+	tools := missiontools.New(svc, missiontools.WithAttentionAsker(asker))
 
 	call := &taskengine.ToolsCall{
 		Name:     missiontools.ToolsProviderName,
@@ -620,7 +620,7 @@ func TestUnit_MissionTools_AskAttentionFallsBackWhenUnanswered(t *testing.T) {
 	}
 	out, _, err := tools.Exec(missiontools.WithMissionID(ctx, missionID), time.Now(), nil, false, call)
 	require.NoError(t, err, "an unanswered ask is a fallback, never a tool failure")
-	require.Contains(t, out, "no operator answered")
+	require.Contains(t, out, "nobody answered")
 
 	reports, err := svc.ListReports(ctx, missionID, 10)
 	require.NoError(t, err)
@@ -730,7 +730,7 @@ func TestUnit_MissionTools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 	planSchema := doc.Components.Schemas["MissionPlanResponse"]
 	require.True(t, planSchema.Value.Type.Is("object"))
 	planCtx, svc, missionID := setup(t)
-	out, dt, err := missiontools.New(svc, nil).Exec(missiontools.WithMissionID(planCtx, missionID), time.Now(), map[string]any{
+	out, dt, err := missiontools.New(svc).Exec(missiontools.WithMissionID(planCtx, missionID), time.Now(), map[string]any{
 		"entries":     []any{map[string]any{"content": "read the code", "status": "in_progress", "priority": "high"}},
 		"explanation": "first cut",
 	}, false, &taskengine.ToolsCall{Name: missiontools.ToolsProviderName, ToolName: missiontools.ToolNamePlan})

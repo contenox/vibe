@@ -9,12 +9,12 @@ In [the vault tutorial](/docs/guide/tutorial-vault-agent/) you drove an agent by
 typing a prompt and watching it work. This one you fire and leave:
 
 ```bash
-contenox mission fire chain-vaultfiler "File every file in inbox/ into the vault as a note" \
+contenox mission fire vaultfiler "File every file in inbox/ into the vault as a note" \
   --policy hitl-policy-vault.json --wait
 ```
 
 ```
-Mission fired at agent "chain-vaultfiler" under envelope "hitl-policy-vault.json".
+Mission fired at agent "vaultfiler" under envelope "hitl-policy-vault.json".
 ```
 
 A **mission** is one intent, one agent, one envelope, run with nobody watching.
@@ -41,8 +41,10 @@ Four things, and it is worth knowing why before you write any JSON:
 
 ## 1. Name the file so the agent exists
 
-Discovery declares every `chain-agent-*.json` file as a dispatchable agent.
-Rename your chain:
+A [declared agent](/docs/guide/agents/) already has a name — its frontmatter
+gave it one. The vault agent is a chain you wrote by hand, so it needs the file
+convention instead: discovery registers every `chain-agent-*.json` file as a
+dispatchable agent. Rename your chain:
 
 ```bash
 mv .contenox/vault-filer.json .contenox/chain-agent-vaultfiler.json
@@ -52,7 +54,7 @@ Then set the chain's `id`, because **the `id` is the agent's name — not the
 filename**:
 
 ```json
-{ "id": "chain-vaultfiler", ... }
+{ "id": "vaultfiler", ... }
 ```
 
 Confirm it exists:
@@ -63,7 +65,7 @@ contenox agent list
 
 ```
 ID                                    NAME              SOURCE      KIND    ENABLED
-0df94eac-a272-47bd-a044-ad8bb2e4f38c  chain-vaultfiler  discovered  chain   true
+0df94eac-a272-47bd-a044-ad8bb2e4f38c  vaultfiler  discovered  chain   true
 ```
 
 `discovered` means it came from a file on disk, not from a manual registration.
@@ -106,7 +108,7 @@ cannot finish, call mission.mission_finish with `derailed` or `stuck` and say wh
 Three verdicts, and they mean different things to whoever reads the record later:
 `landed` for done, `derailed` for failed, `stuck` for hit a wall it could not get
 past alone. There is also `mission.mission_ask_attention` for a question or a
-blocker it must not decide by itself — [the oracle](#8-optional-let-an-agent-answer-the-routine-questions)
+decision it must not make by itself — [the oracle](#8-optional-let-an-agent-answer-the-routine-asks)
 below can sometimes answer those.
 
 **A mission with no `mission_finish` never ends.** It sits at `open` with a
@@ -226,7 +228,7 @@ it out and the answer is no.
 ## 6. Fire it
 
 ```bash
-contenox mission fire chain-vaultfiler "File every file in inbox/ into the vault as a note" \
+contenox mission fire vaultfiler "File every file in inbox/ into the vault as a note" \
   --policy hitl-policy-vault.json --wait
 ```
 
@@ -248,7 +250,7 @@ contenox mission list
 
 ```
 ID                                    AGENT             ENVELOPE                STATUS   AGE
-a1092bea-a498-45cb-8ace-fe6dde43cdca  chain-vaultfiler  hitl-policy-vault.json  landed   1m
+a1092bea-a498-45cb-8ace-fe6dde43cdca  vaultfiler  hitl-policy-vault.json  landed   1m
 ```
 
 ```bash
@@ -266,7 +268,7 @@ A mission that did what you asked proves nothing about containment. Ask for
 something the envelope forbids:
 
 ```bash
-contenox mission fire chain-vaultfiler \
+contenox mission fire vaultfiler \
   "Write a file named escape.md in the workspace root, NOT inside vault/. Attempt the write." \
   --policy hitl-policy-vault.json --wait
 ```
@@ -287,35 +289,53 @@ Test this against a path your `system_instruction` says nothing about. If you as
 for something the prompt already forbids, the model will refuse on its own and
 you will have proved nothing about the envelope.
 
-## 8. Optional: let an agent answer the routine questions
+## 8. Optional: let an agent answer the routine asks
 
-When a unit calls `mission_ask_attention`, the default is that it waits for a
-human. `--oracle` mounts a reviewer that may answer the routine ones itself,
-inside the `attention` bounds you set in step 5:
+When a subagent calls `mission_ask_attention`, or makes a tool call your
+envelope put on the `approve` tier, the default is that it waits for a human.
+An **oracle** is a reviewer that may rule on the routine ones itself, inside the
+`attention` bounds you set in step 5. It is a configured default, not a flag:
 
 ```bash
-contenox mission fire chain-vaultfiler "<intent>" \
-  --policy hitl-policy-vault.json --oracle --wait
+contenox config set default-oracle-chain chain-oracle-default.json
+```
+
+That alone lets it answer *questions*. To let it rule on gated *tool calls* as
+well, two separate grants have to agree — the host's, and this subagent's
+envelope:
+
+```bash
+contenox config set oracle-approves-tool-calls true
+```
+
+```json
+{ "attention": { "allowAgentApprovals": true, "maxAgentApprovals": 10 } }
 ```
 
 It answers when the mission's own intent already contains the answer:
 
 ```
-oracle: reviewing ask c5dfb1ae (mission d8e146d2): Confirm filename convention
-oracle: answered ask c5dfb1ae in 8.922s as agent "oracle": "Use kebab-case for all note filenames."
+oracle: reviewing attention ask c5dfb1ae (subagent d8e146d2): Confirm filename convention
+oracle: answered ask c5dfb1ae in 8.922s: "Use kebab-case for all note filenames."
 ```
 
 …and refuses when the question is a real decision:
 
 ```
-oracle: reviewing ask 56f0800b (mission a1092bea): Use Title Case or kebab-case for note filenames?
-oracle: WAIT for ask 56f0800b (5.508s) — the question stays with a human
+oracle: reviewing attention ask 56f0800b (subagent a1092bea): Use Title Case or kebab-case for note filenames?
+oracle: WAIT for ask 56f0800b (5.508s) — it stays with a human
 ```
 
 The difference between those two runs is only the intent. The first said which
 convention to use, so the question was already answered and the oracle relayed
 it. The second did not, so it stayed with a person and the run suspended on the
-pending ask. Details in [the attention oracle](/docs/use-cases/auto-attention/).
+pending ask.
+
+That is the lesson worth taking from step 8: **the oracle's quality is your
+intent's quality.** It judges nothing except against what you wrote. A vague
+intent does not get smarter answers — it gets more `wait`s.
+
+Details in [the oracle](/docs/use-cases/auto-attention/).
 
 ## When a mission goes wrong
 
@@ -342,7 +362,8 @@ guessing.
 
 ## Next
 
+- [Declaring agents](/docs/guide/agents/) — the one-file road; a declared agent is dispatchable the moment it lands.
 - [Missions](/docs/guide/missions/) — sessions, missions and runs compared.
-- [The attention oracle](/docs/use-cases/auto-attention/) — the reviewer in step 8.
+- [The oracle](/docs/use-cases/auto-attention/) — the reviewer in step 8.
 - [Chain naming](/docs/guide/chain-naming/) — the file-to-agent rule in full.
 - [HITL policies](/docs/guide/hitl/) — the envelope grammar.

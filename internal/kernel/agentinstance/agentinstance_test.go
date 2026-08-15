@@ -432,6 +432,44 @@ func TestManager_Chain_DefaultsToTheRunningExecutable(t *testing.T) {
 		"a chain agent's sandbox workspace is the caller's cwd (it declares none of its own)")
 }
 
+// TestManager_Chain_ForwardsTheHostDatabase pins the handoff a dispatched unit
+// needs to report at all: its mission row lives in the database the dispatching
+// host opened, so the spawn must name that database rather than let the child
+// resolve its own. Without it every mission tool the unit calls fails not-found
+// and the run only ends at its timeout.
+func TestManager_Chain_ForwardsTheHostDatabase(t *testing.T) {
+	_, _, svc := setupRegistry(t)
+	chainPath := filepath.Join(t.TempDir(), "agent-fixture.json")
+	agent := &runtimetypes.Agent{Name: "chain-unit", Enabled: true}
+	require.NoError(t, agent.SetChainConfig(runtimetypes.ChainConfig{Path: chainPath}))
+
+	hostDB := filepath.Join(t.TempDir(), "host.db")
+	mgr := New(svc, WithSelfExecutable("/nonexistent/contenox"), WithSelfDBPath(hostDB))
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	spawner, err := mgr.(*manager).chainSpawner(context.Background(), agent, "/tmp/chain-cwd")
+	require.NoError(t, err)
+	require.Equal(t, hostDB, spawner.(*agenthost.ExternalACPAgent).Config.Env[ChainDBEnvVar])
+}
+
+// TestManager_Chain_OmitsDatabaseWhenHostHasNone pins that an unset host database
+// adds no env var, leaving a child on the default database rather than one named
+// by an empty string.
+func TestManager_Chain_OmitsDatabaseWhenHostHasNone(t *testing.T) {
+	_, _, svc := setupRegistry(t)
+	chainPath := filepath.Join(t.TempDir(), "agent-fixture.json")
+	agent := &runtimetypes.Agent{Name: "chain-unit", Enabled: true}
+	require.NoError(t, agent.SetChainConfig(runtimetypes.ChainConfig{Path: chainPath}))
+
+	mgr := New(svc, WithSelfExecutable("/nonexistent/contenox"))
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	spawner, err := mgr.(*manager).chainSpawner(context.Background(), agent, "/tmp/chain-cwd")
+	require.NoError(t, err)
+	_, present := spawner.(*agenthost.ExternalACPAgent).Config.Env[ChainDBEnvVar]
+	require.False(t, present)
+}
+
 func TestManager_Start_UnknownAgent(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	mgr := New(svc)

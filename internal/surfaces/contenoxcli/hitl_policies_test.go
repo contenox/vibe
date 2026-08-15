@@ -10,7 +10,6 @@ import (
 
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/localtools"
-	"github.com/contenox/contenox/internal/services/oracletools"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -420,43 +419,6 @@ func TestUnit_PolicyPresetUpgrade(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, stale)
 	})
-}
-
-// TestUnit_OraclePolicy_GrantsEveryDeclaredOracleTool asserts the oracle
-// envelope allows the tools oracletools actually declares. The preset spells
-// them as string literals while the package exports constants, and the
-// envelope is default_action:deny — so a rename fails CLOSED (the verdict tool
-// denied, the chain never settles, every ask WAITs). Asserted over the
-// declared tool list, not one name, so a new oracle tool is covered too.
-func TestUnit_OraclePolicy_GrantsEveryDeclaredOracleTool(t *testing.T) {
-	t.Parallel()
-	svc := seededPolicyService(t, "hitl-policy-oracle.json", hitlPolicyOracle)
-	ctx := context.Background()
-
-	// The provider lists its model-facing tools only inside a bound execution.
-	bound := oracletools.WithBinding(ctx, oracletools.NewAskBinding("ask-1", `{"askId":"ask-1"}`))
-	declared, err := oracletools.New(deniedAnswerer{}).GetToolsForToolsByName(bound, oracletools.ToolsProviderName)
-	require.NoError(t, err)
-	require.NotEmpty(t, declared)
-
-	names := []string{oracletools.ToolNameVerdictState} // the gate: never advertised, still evaluated
-	for _, tool := range declared {
-		names = append(names, tool.Function.Name)
-	}
-	for _, name := range names {
-		r, err := svc.Evaluate(ctx, oracletools.ToolsProviderName, name, map[string]any{"verdict": "wait", "askId": "ask-1"})
-		require.NoError(t, err)
-		assert.Equalf(t, hitlservice.ActionAllow, r.Action,
-			"oracle.%s must be allowed — the envelope denies by default, so a missing rule silently WAITs every ask", name)
-	}
-}
-
-// deniedAnswerer satisfies oracletools.Answerer for listing-only use; New
-// panics on a nil answerer and no delivery happens here.
-type deniedAnswerer struct{}
-
-func (deniedAnswerer) Answer(context.Context, string, string) error {
-	return &oracletools.AnswerRefusedError{Reason: "listing only"}
 }
 
 // TestUnit_NoFilePolicyFallback_FailsClosed asserts the no-file fallback has no allow/deny tiers of its own — everything asks, since rules live only in the seeded, readable presets.

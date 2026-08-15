@@ -41,6 +41,9 @@ type InProcessDeps struct {
 	// WorkspaceID is the workspace the host publishes mission events under, forwarded to every chain-kind child; empty leaves the child to its own default.
 	WorkspaceID string
 
+	// DBPath is the database file this host opened, forwarded to every chain-kind child so a dispatched unit reports into the same store its mission row lives in; empty leaves the child to resolve its own, which is only correct when the host is on the default database.
+	DBPath string
+
 	// Tracker degrades to a Noop when nil, exactly as New does.
 	Tracker libtracker.ActivityTracker
 
@@ -89,6 +92,9 @@ func BuildInProcess(ctx context.Context, deps InProcessDeps) (Service, agentregi
 	if deps.WorkspaceID != "" {
 		kernelOpts = append(kernelOpts, agentinstance.WithWorkspaceID(deps.WorkspaceID))
 	}
+	if deps.DBPath != "" {
+		kernelOpts = append(kernelOpts, agentinstance.WithSelfDBPath(deps.DBPath))
+	}
 	kernel := agentinstance.New(agents, kernelOpts...)
 
 	operatorInbox := operatorinbox.New(deps.DB, operatorinbox.WithEventPublisher(deps.Bus))
@@ -123,6 +129,10 @@ func BuildInProcess(ctx context.Context, deps InProcessDeps) (Service, agentregi
 		if reader, ok := hitlservice.New(deps.PolicySource, runtimetypes.LocalTenantID, nil, deps.Tracker).(hitlservice.ComputeBoundsReader); ok {
 			opts = append(opts, WithComputeBounds(reader))
 		}
+	}
+	// The host's own HITL instance: the one that recorded the adjudicated verdicts.
+	if reader, ok := deps.HITL.(guidanceReader); ok && deps.HITL != nil {
+		opts = append(opts, WithAdjudicationGuidance(reader))
 	}
 	if raw := clikv.Read(ctx, runtimetypes.New(deps.DB.WithoutTransaction()), MaxParallelConfigKey); raw != "" {
 		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {

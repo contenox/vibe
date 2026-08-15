@@ -90,25 +90,6 @@ func (m *MacroEnv) ExecEnv(
 				return nil, DataTypeAny, nil, fmt.Errorf("task %s: system_instruction macro error: %w", t.ID, err)
 			}
 
-			var allowed []string
-			if len(allowlist) > 0 {
-				allowed, _ = resolveToolsNames(ctx, allowlist, m.toolsProvider)
-			}
-
-			if len(allowed) > 0 && !strings.Contains(t.SystemInstruction, "Available tools") && !strings.Contains(t.SystemInstruction, "tool") {
-				summary, _ := m.renderToolsAndToolsJSON(ctx, allowed)
-				if summary != "" {
-					t.SystemInstruction += "\n\nAvailable tools (tools -> function names):\n" + summary
-				}
-			}
-
-			if containsAll(allowed, "local_fs", "local_shell") {
-				t.SystemInstruction += "\n\nTOOL PREFERENCE: For inspecting or modifying files in the project, prefer the local_fs.* tools over their local_shell equivalents (cat / head / tail / grep / sed against files). local_fs enforces sandbox boundaries, output-size limits, denied-path policies, and a read-before-write contract that local_shell does not. Use local_shell only for genuine shell operations: running tests, builds, git, environment inspection."
-			}
-
-			if !strings.Contains(t.SystemInstruction, "Host: os=") {
-				t.SystemInstruction += fmt.Sprintf("\n\nHost: os=%s arch=%s", runtime.GOOS, runtime.GOARCH)
-			}
 		}
 
 		if t.ExecuteConfig != nil {
@@ -227,6 +208,15 @@ func (m *MacroEnv) expandOne(ctx context.Context, chain *TaskChainDefinition, al
 			return resolveVarFallback(vars, fallback)
 		}
 		return "", fmt.Errorf("template var %q is not set", name)
+	case "tools":
+		if m.toolsProvider == nil || payload != "" {
+			return original, nil
+		}
+		allowed, err := resolveToolsNames(ctx, allowlist, m.toolsProvider)
+		if err != nil || len(allowed) == 0 {
+			return "{}", nil
+		}
+		return m.renderToolsAndToolsJSON(ctx, allowed)
 	case "host":
 		switch payload {
 		case "os":
@@ -325,22 +315,6 @@ func parseMacroInt(field, value string) (*int, error) {
 		return nil, fmt.Errorf("%s must be non-negative, got %d", field, n)
 	}
 	return &n, nil
-}
-
-func containsAll(names []string, required ...string) bool {
-	if len(required) == 0 {
-		return true
-	}
-	have := make(map[string]struct{}, len(names))
-	for _, n := range names {
-		have[n] = struct{}{}
-	}
-	for _, r := range required {
-		if _, ok := have[r]; !ok {
-			return false
-		}
-	}
-	return true
 }
 
 func sortedCopy(names []string) []string {

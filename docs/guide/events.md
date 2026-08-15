@@ -7,7 +7,7 @@ description: The durable local event log, operator-authored trigger files that f
 
 Contenox's internal domain events — mission reports, status changes, plan revisions, attention asks — land in a durable, append-only log inside the local database. Operator-authored `trigger-*.json` files bind an event type to a task chain, and firing happens on two paths that reconcile through one durable record:
 
-- **Live, in-process.** A host that runs an engine (`contenox acp`, `contenox beam`, `contenox mission fire` when it builds one) fires matching triggers the moment it appends an event — same process, same engine, no extra daemon.
+- **Live, in-process.** A host that runs an engine (`contenox acp`, or `contenox mission fire` when it builds one) fires matching triggers the moment it appends an event — same process, same engine, no extra daemon.
 - **Catch-up.** `contenox events dispatch` reads the log from a durable cursor and fires whatever was appended while no engine-running host was up. It is a foreground process, not a daemon: you keep it alive with the tools you already trust — tmux, systemd, `nohup` — and while nothing is running, events simply wait in the log.
 
 Both paths claim each firing in the same durable table before running it, so a (trigger, event) pair fires at most once no matter which path saw it first. That is the Unix stance, held on purpose: process supervision is a solved problem, and the durable cursor means stopping and starting loses nothing.
@@ -97,7 +97,7 @@ A trigger grants timing, never capability — the fired chain runs under an oper
 
 ## In-process firing: the live path
 
-No command turns the live path on — it is part of running a host. When an engine-running host (`contenox acp`, `contenox beam`, or a `contenox mission fire` that built an engine for `--oracle` or for loaded triggers) appends an event under opt-in-beta, it fires matching triggers immediately, in its own process, on its own engine. The firing is asynchronous to the append: a chain failure is recorded on the firing record and never fails or delays the event's append. A host that stops mid-firing leaves that firing claimed, exactly like a dispatcher crash would — and the same stale-claim takeover (see [inspecting firings](#inspecting-firings-events-firings)) recovers both.
+No command turns the live path on — it is part of running a host. When an engine-running host (`contenox acp`, or a `contenox mission fire` that built an engine for loaded triggers) appends an event under opt-in-beta, it fires matching triggers immediately, in its own process, on its own engine. The firing is asynchronous to the append: a chain failure is recorded on the firing record and never fails or delays the event's append. A host that stops mid-firing leaves that firing claimed, exactly like a dispatcher crash would — and the same stale-claim takeover (see [inspecting firings](#inspecting-firings-events-firings)) recovers both.
 
 Events appended by a process that runs no engine (`contenox mission stop`, a bare read verb) fire nothing live; they wait in the log for the catch-up dispatcher.
 
@@ -206,7 +206,7 @@ Each firing executes its chain through the same path `contenox run` uses, under 
 ## Next
 
 - [Event-driven chains: three stories (beta)](/docs/use-cases/event-driven-chains/) — the trigger tier in use: a phone buzz on `attention_asked`, a completion summary on `status_changed`, and the firing record as an audit trail
-- [The attention oracle (beta)](/docs/use-cases/auto-attention/) — `mission fire --oracle`: an in-process driver answers routine mission questions (no trigger, no dispatcher involved)
+- [The oracle](/docs/use-cases/auto-attention/) — an in-process adjudicator rules on a subagent's routine asks (no trigger, no dispatcher involved)
 - [HITL policies](/docs/guide/hitl/) — the envelopes fired chains run under
 - [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) — how the referenced files resolve
 - [`contenox events` reference](/docs/reference/contenox-cli/#contenox-events) — every flag

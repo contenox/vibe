@@ -106,8 +106,7 @@ func (s *store) ResolveHITLApproval(ctx context.Context, id string, state HITLAp
 type AgentAnswerBound struct {
 	// MissionID scopes the count to one mission's asks.
 	MissionID string
-	// ToolsName and ToolName are the pair that marks a row as an attention ask
-	// rather than a permission one.
+	// ToolsName and ToolName narrow the count to one tool identity; empty matches every row, which is how a permission-ask bound spans the varying tools a unit gates on.
 	ToolsName string
 	ToolName  string
 	// ResolutionLike is the SQL LIKE pattern a resolution written by an agent
@@ -126,8 +125,8 @@ func (s *store) ResolveHITLApprovalWithinBound(ctx context.Context, id string, b
 		WHERE id = $1 AND state = 'pending'
 		  AND (SELECT COUNT(*) FROM hitl_approvals prior
 		       WHERE prior.mission_id = $5
-		         AND prior.tools_name = $6
-		         AND prior.tool_name = $7
+		         AND ($6 = '' OR prior.tools_name = $6)
+		         AND ($7 = '' OR prior.tool_name = $7)
 		         AND prior.resolution LIKE $8) < $9`,
 		id, string(state), nullableJSON(resolution), resolvedAt,
 		bound.MissionID, bound.ToolsName, bound.ToolName, bound.ResolutionLike, bound.Max,

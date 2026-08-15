@@ -1,12 +1,14 @@
 ---
-description: Copy-paste chains for real work — commit messages, release notes, CRM writes, codebase docs, and browser automation.
+description: Copy-paste recipes for real work — commit messages, release notes, CRM writes, codebase docs, and browser automation.
 ---
 
 # Cookbook
 
 Production-ready, copy-paste patterns for automating real work with `contenox run` and friends.
 
-Each recipe is a **pre-built solution**: pipe data in, the model executes your chain, you get structured output back. Stateless runs stay composable with the rest of your shell.
+Each recipe is a **pre-built solution**: pipe data in, the model does the work, you get structured output back. Stateless runs stay composable with the rest of your shell.
+
+Most recipes here are written as chain files rather than [agent declarations](/docs/guide/agents/), because a recipe is a pipeline you point at — a fixed shape you can diff — rather than an agent you fire at an intent. Where a recipe needs branching, a per-step model, or a declared human gate, the chain is the only tier that says so.
 
 > **Prerequisites**
 > - Run `contenox init` in your project once, then either point Contenox at a local Ollama model or configure a cloud backend — see [Quickstart](/docs/guide/quickstart/).
@@ -31,5 +33,5 @@ Several recipes below are one branch of a router rather than a standalone chain:
 - [The nested permission bomb](/docs/use-cases/nested-permission-bomb/) — give a workflow its own scoped credential and authored HITL policy instead of inheriting the operator's access
 - [Leads → HubSpot](/docs/use-cases/leads-to-hubspot/) — pipe a leads file into HubSpot CRM via an OpenAPI sub-spec
 - [HubSpot via MCP](/docs/use-cases/hubspot-mcp/) — OAuth + pre-issued client credentials, works for any vendor MCP without dynamic registration
-- [Auto-attention mode (beta)](/docs/use-cases/auto-attention/) — an oracle chain answers routine mission questions so unattended runs finish; consequential asks still wait for you
+- [The oracle](/docs/use-cases/auto-attention/) — an adjudicating agent rules on a subagent's routine asks so unattended runs finish; consequential ones still wait for you
 - [Event-driven chains: three stories (beta)](/docs/use-cases/event-driven-chains/) — a trigger buzzes your phone when a mission asks for a human, another writes the completion summary, and `contenox events firings` keeps both honest

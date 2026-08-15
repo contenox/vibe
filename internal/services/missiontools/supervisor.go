@@ -12,11 +12,11 @@ import (
 	"github.com/contenox/contenox/internal/services/missionservice"
 )
 
-// ToolNameListMissions and ToolNameAnswer are the supervisor tools, unlocked for a session that HAS missions rather than IS one.
+// The supervisor tools, unlocked for a session that HAS subagents rather than IS one.
 const (
-	// ToolNameListMissions lists the missions this session fired.
+	// ToolNameListMissions lists the subagents this session fired.
 	ToolNameListMissions = "mission_list"
-	// ToolNameAnswer answers a question raised by one of this session's missions.
+	// ToolNameAnswer answers a question raised by one of this session's subagents.
 	ToolNameAnswer = "mission_answer"
 )
 
@@ -40,15 +40,15 @@ type PendingAsk struct {
 	AskedAt   string `json:"askedAt,omitempty"`
 }
 
-// AttentionResolver is the answering half of the supervisor surface — find what a mission is waiting on, and answer it — kept separate from SupervisorStore since the two live in different services.
+// AttentionResolver is the answering half of the supervisor surface: find what a subagent is waiting on, and answer it.
 type AttentionResolver interface {
 	// PendingAsks returns the unanswered questions for missionID.
 	PendingAsks(ctx context.Context, missionID string) ([]PendingAsk, error)
-	// AnswerAsAgent resolves askID with text as an agent answer rather than a human one; an *AnswerRefusedError means the envelope declined it, any other error is plumbing.
+	// AnswerAsAgent resolves askID with text as an agent answer; an *AnswerRefusedError means the envelope declined it.
 	AnswerAsAgent(ctx context.Context, askID, text string) error
 }
 
-// AnswerRefusedError is the mission envelope declining an agent answer, a refusal rather than broken plumbing; this package discards Reason, so the resolver must log it itself or the denial is invisible.
+// AnswerRefusedError is the mission envelope declining an agent answer. Reason is discarded here, so the resolver must state it on its own trace.
 type AnswerRefusedError struct{ Reason string }
 
 func (e *AnswerRefusedError) Error() string { return e.Reason }
@@ -70,17 +70,29 @@ func ParentSessionIDFromContext(ctx context.Context) string {
 	return id
 }
 
-func supervisorTools() []taskengine.Tool {
-	return []taskengine.Tool{listMissionsToolSchema(), answerToolSchema()}
+func (p *provider) supervisorTools() []taskengine.Tool {
+	tools := []taskengine.Tool{listMissionsToolSchema(p.resolver != nil)}
+	if p.canSpawn() {
+		tools = append(tools, startMissionToolSchema())
+	}
+	if p.resolver != nil {
+		tools = append(tools, answerToolSchema())
+	}
+	return tools
 }
 
-func listMissionsToolSchema() taskengine.Tool {
+func listMissionsToolSchema(canAnswer bool) taskengine.Tool {
+	description := "List the subagents YOU fired from this session — their intent, status, last heartbeat, and latest reports. " +
+		"Call it when you need to know what your subagents are doing, or before answering the user about them."
+	if canAnswer {
+		description = "List the subagents YOU fired from this session — their intent, status, last heartbeat, latest reports, and any QUESTION a subagent is currently waiting on you to answer. " +
+			"Call it when you need to know what your subagents are doing, before answering the user about them, or to get the `askId` you need for " + ToolNameAnswer + "."
+	}
 	return taskengine.Tool{
 		Type: "function",
 		Function: taskengine.FunctionTool{
-			Name: ToolNameListMissions,
-			Description: "List the missions YOU fired from this session — their intent, status, last heartbeat, latest reports, and any QUESTION a unit is currently waiting on you to answer. " +
-				"Call it when you need to know what your subagents are doing, before answering the user about them, or to get the `askId` you need for " + ToolNameAnswer + ".",
+			Name:        ToolNameListMissions,
+			Description: description,
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -94,8 +106,8 @@ func answerToolSchema() taskengine.Tool {
 		Type: "function",
 		Function: taskengine.FunctionTool{
 			Name: ToolNameAnswer,
-			Description: "Answer a QUESTION one of your own mission units is blocked on. The unit is parked waiting for this: your text becomes the result of the tool call it asked with, and it continues immediately. " +
-				"Get `askId` from " + ToolNameListMissions + " (or from the question you were just shown). Answer only what you actually know — if the answer needs the user, ask THEM first and relay it; a confident wrong answer sends the unit down the wrong path.",
+			Description: "Answer a QUESTION one of your own subagents is blocked on. The subagent is parked waiting for this: your text becomes the result of the tool call it asked with, and it continues immediately. " +
+				"Get `askId` from " + ToolNameListMissions + " (or from the question you were just shown). Answer only what you actually know — if the answer needs the user, ask THEM first and relay it; a confident wrong answer sends the subagent down the wrong path.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -105,7 +117,7 @@ func answerToolSchema() taskengine.Tool {
 					},
 					"answer": map[string]any{
 						"type":        "string",
-						"description": "The answer, in your own words — what the unit needs to proceed.",
+						"description": "The answer, in your own words — what the subagent needs to proceed.",
 					},
 				},
 				"required": []string{"askId", "answer"},
@@ -174,7 +186,7 @@ func (p *provider) execAnswer(ctx context.Context, parentSessionID string, input
 
 	missions, err := p.supervisor.MissionsFiredBy(ctx, parentSessionID, supervisorMissionLimit)
 	if err != nil {
-		return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: resolve your missions: %w", err)
+		return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: resolve your subagents: %w", err)
 	}
 	for _, m := range missions {
 		asks, err := p.resolver.PendingAsks(ctx, m.ID)
@@ -188,14 +200,13 @@ func (p *provider) execAnswer(ctx context.Context, parentSessionID string, input
 			if err := p.resolver.AnswerAsAgent(ctx, askID, answer); err != nil {
 				var refused *AnswerRefusedError
 				if errors.As(err, &refused) {
-					// A plain result, not an error, so the model stops rather than retrying a denial that cannot change.
+					// A result, not an error, so the model stops rather than retrying a denial that cannot change.
 					return fmt.Sprintf("answer denied per policy for ask %s.", askID), taskengine.DataTypeString, nil
 				}
 				return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: answer %s: %w", askID, err)
 			}
-			return fmt.Sprintf("answered %s — unit %q has your reply and continues", askID, m.AgentName), taskengine.DataTypeString, nil
+			return fmt.Sprintf("answered %s — subagent %q has your reply and continues", askID, m.AgentName), taskengine.DataTypeString, nil
 		}
 	}
-	// Not found among the caller's own pending asks: not theirs, or already resolved — one honest message either way.
-	return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: %q is not a question your missions are currently waiting on (already answered, expired, or not yours)", askID)
+	return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: %q is not a question your subagents are currently waiting on (already answered, expired, or not yours)", askID)
 }

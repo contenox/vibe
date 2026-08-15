@@ -14,6 +14,7 @@ func TestUnit_MissionMeta_CarriesComputeAllowlistsAcrossTheWire(t *testing.T) {
 		"mission-123",
 		[]string{"gemini-2.5-flash", " gpt-5 "},
 		[]string{"my-ollama"},
+		"hitl-policy-mission.json",
 	)
 	require.NotNil(t, raw)
 
@@ -32,12 +33,12 @@ func TestUnit_MissionMeta_UnboundedMissionIsWireIdentical(t *testing.T) {
 	)
 	require.JSONEq(t,
 		string(missionservice.MarshalMissionMeta("m-1")),
-		string(missionservice.MarshalMissionMetaBounded("m-1", nil, nil)),
+		string(missionservice.MarshalMissionMetaBounded("m-1", nil, nil, "")),
 	)
 	// Lists that are present but blank are not a bound either.
 	require.JSONEq(t,
 		string(missionservice.MarshalMissionMeta("m-1")),
-		string(missionservice.MarshalMissionMetaBounded("m-1", []string{"", "  "}, []string{})),
+		string(missionservice.MarshalMissionMetaBounded("m-1", []string{"", "  "}, []string{}, "")),
 	)
 }
 
@@ -66,7 +67,7 @@ func TestUnit_MissionMeta_FailsSoftAndDefaultsToUnbounded(t *testing.T) {
 // TestUnit_MissionMeta_LegacyParserStillReportsTheID pins that ParseMissionMeta keeps its contract now that it delegates.
 func TestUnit_MissionMeta_LegacyParserStillReportsTheID(t *testing.T) {
 	id, ok := missionservice.ParseMissionMeta(
-		missionservice.MarshalMissionMetaBounded("m-7", []string{"only-model"}, nil),
+		missionservice.MarshalMissionMetaBounded("m-7", []string{"only-model"}, nil, ""),
 	)
 	require.True(t, ok)
 	require.Equal(t, "m-7", id)

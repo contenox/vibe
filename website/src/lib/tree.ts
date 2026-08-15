@@ -57,7 +57,7 @@ export async function buildDocsTree(): Promise<TreeNode> {
 export async function buildNavSections(): Promise<{ name: string; url: string }[]> {
   const tree = await buildDocsTree();
   // Display overrides for sections whose directory name isn't the label.
-  const labels: Record<string, string> = { rnd: 'Lab' };
+  const labels: Record<string, string> = { rnd: 'Lab', specification: 'Formats' };
   return tree.children
     .filter((n) => n.url || n.children.length > 0)
     .map((n) => ({

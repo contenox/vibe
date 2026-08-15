@@ -11,16 +11,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// recordingAnswerer records deliveries; err scripts the next outcomes.
+// recordingAnswerer records deliveries; errs scripts the next outcomes.
 type recordingAnswerer struct {
-	calls []string
-	texts []string
-	errs  []error
+	calls     []string
+	texts     []string
+	decisions []bool
+	guidances []string
+	errs      []error
 }
 
-func (a *recordingAnswerer) Answer(_ context.Context, askID, text string) error {
-	a.calls = append(a.calls, askID)
-	a.texts = append(a.texts, text)
+func (a *recordingAnswerer) next() error {
 	if len(a.errs) > 0 {
 		err := a.errs[0]
 		a.errs = a.errs[1:]
@@ -29,14 +29,32 @@ func (a *recordingAnswerer) Answer(_ context.Context, askID, text string) error 
 	return nil
 }
 
+func (a *recordingAnswerer) Answer(_ context.Context, askID, text string) error {
+	a.calls = append(a.calls, askID)
+	a.texts = append(a.texts, text)
+	return a.next()
+}
+
+func (a *recordingAnswerer) Decide(_ context.Context, askID string, approve bool, guidance string) error {
+	a.calls = append(a.calls, askID)
+	a.decisions = append(a.decisions, approve)
+	a.guidances = append(a.guidances, guidance)
+	return a.next()
+}
+
 const askID = "ask-42"
 const inputJSON = `{"askId":"ask-42","summary":"proceed?"}`
 
 func boundProvider(t *testing.T) (taskengine.ToolsRepo, *recordingAnswerer, *oracletools.AskBinding, context.Context) {
 	t.Helper()
+	return boundProviderOfKind(t, oracletools.AskKindAttention)
+}
+
+func boundProviderOfKind(t *testing.T, kind oracletools.AskKind) (taskengine.ToolsRepo, *recordingAnswerer, *oracletools.AskBinding, context.Context) {
+	t.Helper()
 	answerer := &recordingAnswerer{}
 	p := oracletools.New(answerer)
-	binding := oracletools.NewAskBinding(askID, inputJSON)
+	binding := oracletools.NewAskBinding(askID, kind, inputJSON)
 	return p, answerer, binding, oracletools.WithBinding(context.Background(), binding)
 }
 
@@ -114,9 +132,9 @@ func TestUnit_OracleTools_ValidationMatrix(t *testing.T) {
 		want []string
 	}{
 		{
-			name: "unknown verdict names the exact schema",
+			name: "a permission verdict on a question names the exact schema",
 			args: map[string]any{"verdict": "approve", "askId": askID},
-			want: []string{`invalid verdict "approve"`, `{"verdict":"wait"|"answer"`, "submit the verdict via submit_verdict again"},
+			want: []string{`invalid verdict "approve"`, "this ask is a QUESTION", `{"verdict":"answer"|"wait"`, "submit the verdict via submit_verdict again"},
 		},
 		{
 			name: "missing verdict names the exact schema",
@@ -192,15 +210,15 @@ func TestUnit_OracleTools_AnswerDeliversAndSettles(t *testing.T) {
 func TestUnit_OracleTools_PolicyDenialIsPlainAndOpen(t *testing.T) {
 	p, answerer, binding, ctx := boundProvider(t)
 	answerer.errs = []error{
-		&oracletools.AnswerRefusedError{Reason: "envelope forbids"},
-		&oracletools.AnswerRefusedError{Reason: "envelope forbids"},
+		&oracletools.RefusedError{Reason: "envelope forbids"},
+		&oracletools.RefusedError{Reason: "envelope forbids"},
 	}
 
 	out, err := submit(t, p, ctx, map[string]any{"verdict": "answer", "answer": "yes", "askId": askID})
 	require.NoError(t, err)
 	require.False(t, out.accepted)
 	require.Empty(t, out.outcome)
-	require.Equal(t, "answer denied per policy for ask ask-42.", out.message,
+	require.Equal(t, "verdict refused per policy for ask ask-42.", out.message,
 		"a denial is one plain statement: no bound counts, no remedy, no alternative")
 	require.Equal(t, oracletools.OutcomeNone, binding.Outcome(), "a denial never settles the contract")
 
@@ -288,8 +306,8 @@ func TestUnit_OracleTools_PublishedSchemaMatchesToolDescriptor(t *testing.T) {
 	req := doc.Components.Schemas["SubmitVerdictRequest"]
 	require.NotNil(t, req, "the request contract is declared")
 	require.ElementsMatch(t, []string{"verdict", "askId"}, req.Value.Required)
-	require.Len(t, req.Value.Properties, 3)
-	require.ElementsMatch(t, []any{"wait", "answer"}, req.Value.Properties["verdict"].Value.Enum,
+	require.Len(t, req.Value.Properties, 4)
+	require.ElementsMatch(t, []any{"approve", "deny", "answer", "wait"}, req.Value.Properties["verdict"].Value.Enum,
 		"the allowed verdicts are declared as an enum, not prose")
 	for name, prop := range req.Value.Properties {
 		require.Truef(t, prop.Value.Type.Is("string"), "%s is typed", name)
@@ -304,7 +322,7 @@ func TestUnit_OracleTools_PublishedSchemaMatchesToolDescriptor(t *testing.T) {
 		require.NotEmptyf(t, prop.Value.Description, "%s is described", name)
 	}
 	require.True(t, resp.Value.Properties["accepted"].Value.Type.Is("boolean"))
-	require.ElementsMatch(t, []any{"", "wait", "answered"}, resp.Value.Properties["outcome"].Value.Enum)
+	require.ElementsMatch(t, []any{"", "wait", "answered", "approved", "denied"}, resp.Value.Properties["outcome"].Value.Enum)
 
 	gateResp := doc.Components.Schemas["VerdictStateResponse"]
 	require.NotNil(t, gateResp, "the deterministic gate's response is declared too")
@@ -342,4 +360,54 @@ func TestUnit_OracleTools_PublishedSchemaMatchesToolDescriptor(t *testing.T) {
 		require.ElementsMatch(t, declared.Value.Enum, asAny,
 			"%s: descriptor and published schema must declare the same values", name)
 	}
+}
+
+// TestUnit_OracleTools_PermissionVerdicts pins the gated-tool-call half: the
+// binding's kind decides which verdict set is legal, approve and deny both
+// settle through Decide, and only a denial carries guidance.
+func TestUnit_OracleTools_PermissionVerdicts(t *testing.T) {
+	t.Run("approve settles and carries no guidance", func(t *testing.T) {
+		p, res, binding, ctx := boundProviderOfKind(t, oracletools.AskKindPermission)
+		out, err := submit(t, p, ctx, map[string]any{"verdict": "approve", "guidance": "ignored", "askId": askID})
+		require.NoError(t, err)
+		require.True(t, out.accepted)
+		require.Equal(t, "approved", out.outcome)
+		require.Equal(t, []string{askID}, res.calls)
+		require.Equal(t, []bool{true}, res.decisions)
+		require.Equal(t, []string{""}, res.guidances, "guidance is a denial's field; an approval drops it")
+		require.Equal(t, oracletools.OutcomeApproved, binding.Outcome())
+	})
+
+	t.Run("deny settles and keeps its guidance", func(t *testing.T) {
+		p, res, binding, ctx := boundProviderOfKind(t, oracletools.AskKindPermission)
+		out, err := submit(t, p, ctx, map[string]any{"verdict": "deny", "guidance": "read it instead of deleting it", "askId": askID})
+		require.NoError(t, err)
+		require.True(t, out.accepted)
+		require.Equal(t, "denied", out.outcome)
+		require.Equal(t, []bool{false}, res.decisions)
+		require.Equal(t, []string{"read it instead of deleting it"}, res.guidances)
+		require.Equal(t, oracletools.OutcomeDenied, binding.Outcome())
+		require.Equal(t, "read it instead of deleting it", binding.Guidance())
+	})
+
+	t.Run("wait settles either kind without deciding", func(t *testing.T) {
+		p, res, binding, ctx := boundProviderOfKind(t, oracletools.AskKindPermission)
+		out, err := submit(t, p, ctx, map[string]any{"verdict": "wait", "askId": askID})
+		require.NoError(t, err)
+		require.True(t, out.accepted)
+		require.Equal(t, "wait", out.outcome)
+		require.Empty(t, res.calls)
+		require.Equal(t, oracletools.OutcomeWait, binding.Outcome())
+	})
+
+	t.Run("an answer verdict on a gated call is corrective", func(t *testing.T) {
+		p, res, binding, ctx := boundProviderOfKind(t, oracletools.AskKindPermission)
+		out, err := submit(t, p, ctx, map[string]any{"verdict": "answer", "answer": "sure", "askId": askID})
+		require.NoError(t, err)
+		require.False(t, out.accepted)
+		require.Contains(t, out.message, "this ask is a GATED TOOL CALL")
+		require.Contains(t, out.message, `{"verdict":"approve"|"deny"|"wait"`)
+		require.Empty(t, res.calls, "a verdict of the wrong kind never reaches the resolver")
+		require.Equal(t, oracletools.OutcomeNone, binding.Outcome())
+	})
 }

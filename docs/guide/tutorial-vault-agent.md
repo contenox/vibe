@@ -12,6 +12,12 @@ to touch anything except the vault.
 
 That is what you will build here. Two files, one command.
 
+Most agents are one Markdown file and nothing else — that road is
+[your first agent](/docs/guide/tutorial-first-agent/), and it is shorter. This
+one takes the other road on purpose: the write fence has to be a guarantee
+rather than an instruction, and the loop has a hard round budget. So you write
+the chain and the envelope yourself, and the engine runs exactly what you wrote.
+
 The integration with Obsidian is the part with no work in it: **an Obsidian
 vault is a folder of markdown files.** There is no API to call and no plugin to
 install. Point the agent's filesystem tool at the vault folder and it is
@@ -338,5 +344,6 @@ change shape — only the tool names in the rules do.
 ## Next
 
 - [Guardrails](/docs/guide/guardrails/) — the six declarations that scope an agent.
-- [Your first chain](/docs/guide/first-chain/) — the chain format in full.
+- [Declaring agents](/docs/guide/agents/) — the one-file road, for the next agent that does not need a fence this hard.
+- [Writing a chain by hand](/docs/guide/first-chain/) — the chain format in full.
 - [HITL policies](/docs/guide/hitl/) — the envelope grammar and every operator.

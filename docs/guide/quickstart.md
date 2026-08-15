@@ -58,11 +58,37 @@ Run this once in each project directory you want Contenox to work in:
 contenox init
 ```
 
-This creates the project-local `.contenox/workspace.id` marker; the default chains and HITL policy presets live globally in `~/.contenox` (a workspace-local file with the same name overrides its global counterpart). See [Your first chain](/docs/guide/first-chain/) for the full layout.
+This creates the project-local `.contenox/workspace.id` marker and seeds `agents/` and `agents.toml`. The HITL policy presets live in `~/.contenox`, the shipped chains under `~/.contenox/system/`; a workspace-local file with the same name overrides its global counterpart.
 
 ---
 
-## 4. Start working
+## 4. Declare an agent
+
+An agent is one file. `.contenox/agents/reviewer.md`:
+
+```markdown
+---
+name: reviewer
+description: Reviews a file for correctness problems
+tools: Read, Glob, Grep
+---
+
+You are a code reviewer. Read the file you are asked about, then list the
+problems you can point at in what you actually read.
+```
+
+No build step — the next run picks it up:
+
+```bash
+contenox agent list
+contenox mission fire reviewer "review payments.go" --wait
+```
+
+The frontmatter says how to run it, the body becomes its system prompt. Budgets, retries and shell allowlists go in [`agents.toml`](/docs/reference/agents-config/) beside it. See [Declaring agents](/docs/guide/agents/).
+
+---
+
+## 5. Start working
 
 Pass a prompt straight to the CLI. The session persists, so the next
 invocation carries the conversation forward:
@@ -83,9 +109,9 @@ contenox chat -e
 
 ---
 
-## 5. Optional editor use
+## 6. Optional editor use
 
-Contenox can also run inside editor or desktop clients that speak ACP. The same chains, model config, tools, and HITL policy are used either way:
+Contenox can also run inside editor or desktop clients that speak ACP. The same agents, model config, tools, and HITL policy are used either way:
 
 - [Use from Zed](/docs/integrations/editors/zed/)
 - [Use from JetBrains](/docs/integrations/editors/jetbrains/)
@@ -114,8 +140,10 @@ If you're not sure, start with [Ollama](/docs/integrations/providers/ollama/) fo
 
 ## Next steps
 
-- [**Your first chain**](/docs/guide/first-chain/) — author your own agent in five edits
-- [Core concepts](/docs/guide/concepts/) — how chains, tasks, and tools fit together
+- [**Tutorial: your first agent**](/docs/guide/tutorial-first-agent/) — one file, what contenox builds behind it, and where the knobs are
+- [Declaring agents](/docs/guide/agents/) — the full frontmatter, skills, and the tools an agent brings with it
+- [Core concepts](/docs/guide/concepts/) — how agents, chains, tasks, and tools fit together
+- [Writing a chain by hand](/docs/guide/first-chain/) — for the agent that has outgrown a declaration
 - [How contenox compares](/docs/guide/comparison/) — what it shares with the coding agents, and the three things that are built differently
 - [MCP integration](/docs/integrations/tools/mcp/) — connect external tools
 - [Workspace index & search](/docs/guide/search/) — ask the repo a question, get file:line citations back

@@ -9,6 +9,11 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
+// SystemDirName is the subdirectory of a contenox directory holding the
+// shipped chain files. Defined here because this is the lowest package that
+// resolves one; contenoxcli's init writes them there.
+const SystemDirName = "system"
+
 const (
 	defaultChainFilename = "chain-agent-acp.json"
 	chainPathEnv         = "CONTENOX_ACP_CHAIN_PATH"
@@ -40,7 +45,12 @@ func LoadChainRegistryFrom(filename, envVar string) (*ChainRegistry, error) {
 		if err != nil {
 			return nil, fmt.Errorf("acpsvc: cannot determine home directory and %s is not set: %w", envVar, err)
 		}
+		// An operator copy at the top level wins over the shipped one under
+		// system/, matching how every other chain file resolves.
 		path = filepath.Join(home, ".contenox", filename)
+		if _, statErr := os.Stat(path); statErr != nil {
+			path = filepath.Join(home, ".contenox", SystemDirName, filename)
+		}
 	}
 
 	data, err := os.ReadFile(path)

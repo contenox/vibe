@@ -10,6 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	"github.com/contenox/contenox/internal/models/backendservice"
 	"github.com/contenox/contenox/internal/models/runtimestate"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
@@ -303,6 +304,12 @@ func resolveDBPath(cmd *cobra.Command) (string, error) {
 	}
 	if dbFlag != "" {
 		return filepath.Abs(dbFlag)
+	}
+	// A unit dispatched by another contenox process inherits its parent's database,
+	// so its mission writes land on the row that dispatched it. An explicit --db
+	// still wins; see agentinstance.ChainDBEnvVar.
+	if inherited := strings.TrimSpace(os.Getenv(agentinstance.ChainDBEnvVar)); inherited != "" {
+		return filepath.Abs(inherited)
 	}
 	return globalDBPath()
 }

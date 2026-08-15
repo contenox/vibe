@@ -81,7 +81,7 @@ func TestUnit_LocalToolset_MissionToolsCarryTheAskerAndThePublisher(t *testing.T
 	t.Cleanup(gt.Shutdown)
 
 	asker := &recordingAsker{answer: "the main branch"}
-	tools := localToolset(chatOpts{}, db, libtracker.NoopTracker{}, gt, missions, asker)
+	tools := localToolset(chatOpts{}, db, libtracker.NoopTracker{}, gt, missions, missiontools.WithAttentionAsker(asker))
 	repo := tools[missiontools.ToolsProviderName]
 	require.NotNil(t, repo, "the resume path needs the mission tools registered")
 

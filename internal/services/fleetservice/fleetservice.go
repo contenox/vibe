@@ -73,6 +73,7 @@ type service struct {
 	tracker         libtracker.ActivityTracker
 	computeBounds   hitlservice.ComputeBoundsReader
 	policyValidator hitlservice.PolicyValidator
+	guidance        guidanceReader
 	maxParallel     int
 	admission       sync.Mutex
 }
@@ -88,6 +89,11 @@ func WithPolicyValidator(v hitlservice.PolicyValidator) Option {
 // WithComputeBounds wires the reader the drive loop consults for maxTurns and maxTokens; maxToolCalls is enforced separately by the answerer.
 func WithComputeBounds(r hitlservice.ComputeBoundsReader) Option {
 	return func(s *service) { s.computeBounds = r }
+}
+
+// WithAdjudicationGuidance wires the reader the nudge turn consults for the redirects an adjudicating agent left on refused calls.
+func WithAdjudicationGuidance(r guidanceReader) Option {
+	return func(s *service) { s.guidance = r }
 }
 
 // New returns a Service driving instances and agents; missions is required, a nil tracker degrades to a Noop, and an absent cwd defaults to projectRoot (see resolveCwd).
@@ -177,7 +183,7 @@ func (s *service) Dispatch(ctx context.Context, req DispatchRequest) (DispatchRe
 	dispatchBounds := s.dispatchResolutionBounds(ctx, req.HITLPolicyName)
 	sessionID, err := s.instances.OpenSession(ctx, instanceID, agentinstance.SessionSpec{
 		Cwd:  cwd,
-		Meta: missionservice.MarshalMissionMetaBounded(missionID, dispatchBounds.ModelAllowlist, dispatchBounds.BackendAllowlist),
+		Meta: missionservice.MarshalMissionMetaBounded(missionID, dispatchBounds.ModelAllowlist, dispatchBounds.BackendAllowlist, req.HITLPolicyName),
 	})
 	if err != nil {
 		_ = s.instances.Stop(instanceID)
@@ -257,7 +263,7 @@ func (s *service) driveUnattendedMission(ctx context.Context, run missionRun) {
 		s.finishComputeStuck(ctx, run.missionID, turnsExhaustedReason(bounds), reportChange)
 		return
 	}
-	stop, err = s.promptTurn(ctx, run, []libacp.ContentBlock{libacp.NewTextContent(missionNudge)})
+	stop, err = s.promptTurn(ctx, run, []libacp.ContentBlock{libacp.NewTextContent(s.nudgeText(ctx, run.missionID))})
 	if err != nil {
 		s.failTurn(ctx, run, err, reportErr, reportChange)
 		return
@@ -433,18 +439,44 @@ func (s *service) lastAgentText(instanceID string, sessionID libacp.SessionID) s
 }
 
 var (
-	toolAskAttention = missiontools.ToolsProviderName + "." + missiontools.ToolNameAskAttention
-	toolReport       = missiontools.ToolsProviderName + "." + missiontools.ToolNameReport
-	toolFinish       = missiontools.ToolsProviderName + "." + missiontools.ToolNameFinish
+	toolReport = missiontools.ToolsProviderName + "." + missiontools.ToolNameReport
+	toolAsk    = missiontools.ToolsProviderName + "." + missiontools.ToolNameAskAttention
+	toolFinish = missiontools.ToolsProviderName + "." + missiontools.ToolNameFinish
 )
 
-var missionPreamble = fmt.Sprintf(`You are running as an UNATTENDED mission unit. No human is reading this conversation — replying in prose reaches no one. You reach your operator ONLY through your mission tools:
-- %s: ask a question, or flag a blocker you must not decide alone.
-- %s: record real progress, a finding, or a result.
+var missionPreamble = fmt.Sprintf(`You are running as an UNATTENDED mission unit. No human is reading this conversation — replying in prose reaches no one. You reach outside this session ONLY through your mission tools:
+- %s: record real progress, a finding, a blocker, or a result.
+- %s: ask for a decision you may not make alone, and WAIT for the reply. It comes back as this tool's result, so you continue with it on the same turn. Nobody may be listening — if the reply does not come, your question is filed as a blocker and you carry on.
 - %s: end the mission with a verdict, once the work is truly done.
-Do the work with your other tools. When you need the operator, or have something worth their attention, call a mission tool. Chat text alone will not be seen.`, toolAskAttention, toolReport, toolFinish)
+Do the work with your other tools. Decide what you can from the intent you were given; ask only for what the intent genuinely does not settle. Chat text alone will not be seen.`, toolReport, toolAsk, toolFinish)
 
-var missionNudge = fmt.Sprintf(`Your last turn ended without reaching your operator, and no human is reading this chat. To reach your operator now, call %s (a question or a blocker) or %s (progress, a finding, or a result); to end the mission, call %s. If you are not done, keep working with your other tools and report when you have something. Do not answer in prose alone — it will not be seen.`, toolAskAttention, toolReport, toolFinish)
+var missionNudge = fmt.Sprintf(`Your last turn ended without reaching outside this session, and no human is reading this chat. To reach your operator now, call %s (progress, a finding, a blocker, or a result); if you are blocked on a decision you may not make alone, call %s and wait for the reply; to end the mission, call %s. If you are not done, keep working with your other tools and report when you have something. Do not answer in prose alone — it will not be seen.`, toolReport, toolAsk, toolFinish)
+
+// guidanceReader is the optional adjudication half of hitlservice; a host that
+// wired no adjudicator satisfies it with nothing to report.
+type guidanceReader interface {
+	AgentGuidanceFor(ctx context.Context, missionID string) ([]hitlservice.GuidanceNote, error)
+}
+
+// nudgeText prefixes the nudge with why the unit's calls were refused. A
+// refusal it never saw a reason for is the thing that leaves it circling.
+func (s *service) nudgeText(ctx context.Context, missionID string) string {
+	if s.guidance == nil {
+		return missionNudge
+	}
+	notes, err := s.guidance.AgentGuidanceFor(ctx, missionID)
+	if err != nil || len(notes) == 0 {
+		return missionNudge
+	}
+	var b strings.Builder
+	b.WriteString("Some of your tool calls were refused, each with a redirect you did not see:\n")
+	for _, n := range notes {
+		fmt.Fprintf(&b, "- %s.%s was refused: %s\n", n.ToolsName, n.ToolName, n.Guidance)
+	}
+	b.WriteString("\nTake those redirects and continue. ")
+	b.WriteString(missionNudge)
+	return b.String()
+}
 
 const silentTurnBlockerLead = "unit ended two turns without reporting"
 

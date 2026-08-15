@@ -215,7 +215,7 @@ It prints:
 
 ```
 Bundle: /home/you/contenox-doctor-20260805-142230.zip
-  Contents: doctor.json, build.txt, and any telemetry.log / beam.log found.
+  Contents: doctor.json, build.txt, and any telemetry.log found.
   Redacted: 3 credential-shaped value(s). Review the file before sharing it.
   Report:   https://github.com/contenox/contenox/issues/new?title=…&body=…
 ```
@@ -226,7 +226,7 @@ Bundle: /home/you/contenox-doctor-20260805-142230.zip
 |---|---|
 | `doctor.json` | The full `doctor` report, exactly as `--json` renders it |
 | `build.txt` | contenox version, Go version, platform, module, and VCS/build settings |
-| `logs/<source>/<name>` | The **last 256 KB** of each `telemetry.log` and `beam.log` found, looked for in the workspace `.contenox`, beside the database, and in `~/.contenox` — the member name records which |
+| `logs/<source>/<name>` | The **last 256 KB** of each `telemetry.log` found, looked for in the workspace `.contenox`, beside the database, and in `~/.contenox` — the member name records which |
 
 **What is redacted.** Every member is passed through the same credential scrubber on the way in, including `doctor.json`, whose backend URLs can carry a key in the query string. It matches named assignments (`api_key=`, `token:`, `authorization=`, …), URL userinfo (`scheme://user:secret@host`), bearer tokens, and recognizable provider key shapes — OpenAI, Anthropic, Google, GitHub, AWS access key ids, Google OAuth tokens. The field names and punctuation survive so a redacted log stays greppable; the value becomes `[REDACTED]`.
 

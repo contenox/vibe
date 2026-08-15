@@ -47,6 +47,11 @@ type Deps struct {
 	// fleetservice.InProcessDeps.WorkspaceID.
 	WorkspaceID string
 
+	// DBPath is the database file the host opened, forwarded to dispatched
+	// chain-kind units so their mission writes land where the mission row is.
+	// See fleetservice.InProcessDeps.DBPath.
+	DBPath string
+
 	// WorkspaceRoots is the host's workspace-root allowlist, so a dispatched
 	// unit is bounded by the same roots the firing session is. Nil configures
 	// no allowlist. See fleetservice.InProcessDeps.WorkspaceRoots.
@@ -69,20 +74,18 @@ func BuildInProcessFleet(ctx context.Context, deps Deps) (fleetservice.Service, 
 		ProjectRoot:    projectRoot,
 		WorkspaceRoots: deps.WorkspaceRoots,
 		WorkspaceID:    deps.WorkspaceID,
+		DBPath:         deps.DBPath,
 		Tracker:        deps.Tracker,
 		PolicySource:   deps.PolicySource,
+		// Without it the kernel cancels every gated call a viewer-less unit
+		// raises, so the ask is refused before any adjudicator can rule on it.
+		HITL:           deps.HITL,
 		DiscoverAgents: deps.DiscoverAgents,
 		SessionDeliverer: func(kernel agentinstance.Manager) reportrouter.SessionDeliverer {
 			return missionReportDeliverer{
 				chat:   func() contenoxSessionDeliverer { return chatDeliverer(deps.Transport()) },
 				kernel: kernel,
 			}
-		},
-		AgentSupervisor: agentAnswerOffer{
-			hitl:     deps.HITL,
-			missions: deps.Missions,
-			prompter: transportPrompter{transport: deps.Transport},
-			tracker:  deps.Tracker,
 		},
 		Stderr: os.Stderr,
 	})

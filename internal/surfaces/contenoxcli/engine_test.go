@@ -116,13 +116,13 @@ func TestUnit_LocalToolset_GitIsAlwaysOnAndShellIsGated(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(gt.Shutdown)
 
-	off := localToolset(chatOpts{EffectiveEnableLocalExec: false}, nil, tracker, gt, missionservice.New(nil), nil)
+	off := localToolset(chatOpts{EffectiveEnableLocalExec: false}, nil, tracker, gt, missionservice.New(nil))
 	require.Contains(t, off, "git", "git must be registered even with the shell off")
 	require.Contains(t, off, "local_fs")
 	require.NotContains(t, off, gojatool.ToolsProviderName, "goja is a beta surface, absent without opt-in-beta")
 	require.NotContains(t, off, "local_shell", "the shell stays opt-in")
 
-	on := localToolset(chatOpts{EffectiveEnableLocalExec: true, EffectiveHITL: true, EffectiveOptInBeta: true}, nil, tracker, gt, missionservice.New(nil), nil)
+	on := localToolset(chatOpts{EffectiveEnableLocalExec: true, EffectiveHITL: true, EffectiveOptInBeta: true}, nil, tracker, gt, missionservice.New(nil))
 	require.Contains(t, on, "git")
 	require.Contains(t, on, "local_shell")
 	require.Contains(t, on, gojatool.ToolsProviderName, "goja registers under opt-in-beta")

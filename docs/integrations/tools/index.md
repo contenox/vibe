@@ -17,7 +17,9 @@ Chain starts
                       └─ Result appended to history → model continues
 ```
 
-In your chain JSON, specify which tools the task can use via the `execute_config.tools` allowlist:
+An [agent declaration](/docs/guide/agents/) names its tools on one line — `tools: Read, Glob, Grep` — and omitting the line inherits every tool. That is where most tool scoping happens.
+
+In the chain behind it, and in a chain you author yourself, the same allowlist is `execute_config.tools`, per task:
 
 ```json
 "execute_config": {
@@ -39,11 +41,13 @@ Pattern support:
 
 Unknown names in an exact list are silently ignored — if `local_shell` is disabled the chain still runs.
 
-Use `{{toolservice:list}}` in your `system_instruction` to inject the live tool manifest. This macro respects the task's `tools` allowlist — the model only sees what the task permits:
+Use `{{tools}}` in your `system_instruction` to inject the live tool manifest. It respects the task's `tools` allowlist — the model only sees what the task permits:
 
 ```json
-"system_instruction": "You are a helpful assistant. Available tools: {{toolservice:list}}."
+"system_instruction": "You are a helpful assistant. Available tools: {{tools}}."
 ```
+
+Nothing is added to a `system_instruction` that it does not declare.
 
 ## Template variables
 
@@ -55,7 +59,10 @@ System instructions and `prompt_template` fields support the following macros:
 | `{{now}}` | Current time in RFC3339 format |
 | `{{now:<layout>}}` | Current time in Go time layout (e.g. `{{now:2006-01-02}}`) |
 | `{{chain:id}}` | ID of the currently executing chain |
-| `{{toolservice:list}}` | JSON object mapping tools name → array of tool names (respects task `tools` allowlist) |
+| `{{tools}}` | JSON object mapping toolset name → array of tool names (respects task `tools` allowlist) |
+| `{{host:os}}` | Host operating system (`linux`, `darwin`, `windows`) |
+| `{{host:arch}}` | Host architecture (`amd64`, `arm64`) |
+| `{{toolservice:list}}` | Same as `{{tools}}` |
 | `{{toolservice:tools}}` | JSON array of tools names available to the task |
 | `{{toolservice:tools <name>}}` | JSON array of tool names for a specific tool |
 

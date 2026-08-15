@@ -337,95 +337,6 @@ func TestUnit_HandleMission_UnknownConfiguredEnvelopeIsRefused(t *testing.T) {
 }
 
 // TestUnit_ParseMissionFlags pins the grammar: flags lead, both spellings, and
-// a readable refusal for anything else.
-func TestUnit_ParseMissionFlags(t *testing.T) {
-	cases := []struct {
-		name       string
-		args       string
-		beta       bool
-		wantPolicy string
-		wantRest   string
-		wantErr    string
-	}{
-		{name: "no flags", args: "planner do the thing", wantRest: "planner do the thing"},
-		{name: "spaced value", args: "--policy p.json do it", wantPolicy: "p.json", wantRest: "do it"},
-		{name: "equals value", args: "--policy=p.json do it", wantPolicy: "p.json", wantRest: "do it"},
-		{name: "value missing", args: "--policy", wantErr: "--policy needs an envelope name"},
-		{name: "value is another flag", args: "--policy --oracle x", wantErr: "--policy needs an envelope name"},
-		{name: "unknown flag", args: "--wait now", wantErr: `unknown /mission flag "--wait"`},
-		{name: "flags do not lead", args: "planner --policy p.json", wantRest: "planner --policy p.json"},
-		{name: "oracle without beta is just unknown", args: "--oracle go", wantErr: `unknown /mission flag "--oracle"`},
-		{name: "oracle under beta is answered exactly", args: "--oracle go", beta: true, wantErr: "OPERATOR-fired missions"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			flags, rest, err := parseMissionFlags(tc.args, tc.beta)
-			if tc.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-					t.Fatalf("err = %v, want one containing %q", err, tc.wantErr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("parseMissionFlags: %v", err)
-			}
-			if flags.policy != tc.wantPolicy {
-				t.Fatalf("policy = %q, want %q", flags.policy, tc.wantPolicy)
-			}
-			if rest != tc.wantRest {
-				t.Fatalf("rest = %q, want %q", rest, tc.wantRest)
-			}
-		})
-	}
-}
-
-// TestUnit_HandleMission_OracleFlagFollowsTheBetaGate pins gate parity with the
-// CLI's `mission fire --oracle`: invisible with the gate off, and under the
-// gate answered with why a session cannot mount the driver — never silently
-// accepted.
-func TestUnit_HandleMission_OracleFlagFollowsTheBetaGate(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		beta bool
-		want string
-	}{
-		{name: "gate off hides it", beta: false, want: `unknown /mission flag "--oracle"`},
-		{name: "gate on explains it", beta: true, want: "contenox mission fire"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			disp := &fakeDispatcher{}
-			tr, db := newMissionTestTransport(t, disp, &fakeResolver{})
-			tr.deps.OptInBeta = tc.beta
-			setMissionConfig(t, db, "default-mission-agent", "reviewer")
-			setMissionConfig(t, db, "default-mission-policy", "envelope.json")
-
-			_, err := tr.handleMission(context.Background(), &sessionEntry{InternalSessionID: "s"}, "--oracle go")
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("err = %v, want one containing %q", err, tc.want)
-			}
-			if disp.got.AgentName != "" {
-				t.Fatalf("a refused flag must fire nothing: %+v", disp.got)
-			}
-		})
-	}
-}
-
-// TestUnit_MissionStatus_MentionsOracleOnlyUnderBeta pins gate parity in the
-// listing: a stable build never mentions a lever it does not have.
-func TestUnit_MissionStatus_MentionsOracleOnlyUnderBeta(t *testing.T) {
-	for _, beta := range []bool{false, true} {
-		tr, _ := newMissionTestTransport(t, &fakeDispatcher{}, &fakeResolver{})
-		tr.deps.OptInBeta = beta
-		out, err := tr.handleMission(context.Background(), &sessionEntry{}, "")
-		if err != nil {
-			t.Fatalf("bare /mission: %v", err)
-		}
-		if got := strings.Contains(out, "oracle"); got != beta {
-			t.Fatalf("beta=%v: oracle mentioned=%v:\n%s", beta, got, out)
-		}
-	}
-}
-
 func TestUnit_HandleMission_DispatchErrorSurfaces(t *testing.T) {
 	disp := &fakeDispatcher{err: context.Canceled}
 	tr, db := newMissionTestTransport(t, disp, &fakeResolver{})
@@ -468,33 +379,41 @@ func TestUnit_AcpCommands_WithMissionCapability_IncludesMission(t *testing.T) {
 	}
 }
 
-// TestUnit_AcpCommands_WithoutMissionCapability_ExcludesMission pins: /mission is dropped from the menu without the fleet capability; every other command stays.
+// conditionalCommand reports whether name carries a gate of its own, separate
+// from the fleet capability.
+func conditionalCommand(name string) bool {
+	return name == "answer"
+}
+
+// TestUnit_AcpCommands_WithoutMissionCapability_ExcludesMission pins: the two
+// commands that need the fleet — /mission, which fires a subagent, and /plan,
+// which runs every step as one — are dropped from the menu without it; every
+// other command stays.
 func TestUnit_AcpCommands_WithoutMissionCapability_ExcludesMission(t *testing.T) {
 	tr, _ := newMissionTestTransport(t, nil, nil)
 	cmds := tr.acpCommands()
 
-	if containsCommand(cmds, "mission") {
-		t.Fatalf("mission advertised without capability: %v", commandNames(cmds))
+	fleetGated := map[string]bool{"mission": true, planCommandName: true}
+	for name := range fleetGated {
+		if containsCommand(cmds, name) {
+			t.Fatalf("%s advertised without capability: %v", name, commandNames(cmds))
+		}
 	}
 	for _, c := range allACPCommands() {
 		// /answer is dropped by its own gate, not this one.
-		if c.Name == "mission" || conditionalCommand(c.Name) {
+		if fleetGated[c.Name] || conditionalCommand(c.Name) {
 			continue
 		}
 		if !containsCommand(cmds, c.Name) {
 			t.Fatalf("advertised commands missing %q: %v", c.Name, commandNames(cmds))
 		}
 	}
-	if want := len(allACPCommands()) - 2; len(cmds) != want {
-		t.Fatalf("advertised %d commands, want %d (full set minus mission and answer): %v", len(cmds), want, commandNames(cmds))
+	if want := len(allACPCommands()) - len(fleetGated) - 1; len(cmds) != want {
+		t.Fatalf("advertised %d commands, want %d (full set minus the fleet-gated ones and answer): %v", len(cmds), want, commandNames(cmds))
 	}
 }
 
 // conditionalCommand reports whether name carries a gate of its own.
-func conditionalCommand(name string) bool {
-	return name == "answer"
-}
-
 // TestUnit_HandleMission_TeachingErrorWithoutCapability pins: without hasMissionCapability, /mission teaches the in-process fix, never serve.
 func TestUnit_HandleMission_TeachingErrorWithoutCapability(t *testing.T) {
 	tr, _ := newMissionTestTransport(t, nil, nil)

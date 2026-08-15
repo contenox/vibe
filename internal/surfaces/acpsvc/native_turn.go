@@ -265,7 +265,8 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 		turnCtx = missiontools.WithWorkdir(turnCtx, sess.Cwd)
 		turnCtx = llmrepo.WithResolutionBounds(turnCtx, sess.resolutionBounds())
 	}
-	if sess.FiredMissions && sess.InternalSessionID != "" {
+	// Mirrors prompt.go: capability, not history, unlocks the supervisor tools.
+	if sess.MissionID == "" && sess.InternalSessionID != "" && t.hasMissionCapability() {
 		turnCtx = missiontools.WithParentSessionID(turnCtx, sess.InternalSessionID)
 	}
 

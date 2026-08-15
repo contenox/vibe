@@ -93,7 +93,7 @@ func (t *Transport) handleMission(ctx context.Context, sess *sessionEntry, args 
 		return t.missionStatus(ctx, store), nil
 	}
 
-	flags, rest, err := parseMissionFlags(args, t.deps.OptInBeta)
+	flags, rest, err := parseMissionFlags(args)
 	if err != nil {
 		return "", err
 	}
@@ -161,12 +161,6 @@ const missionUsageLine = "usage: /mission [--policy <envelope>] [agent-name] <in
 // /policy is a different setting and does not bound a dispatched unit.
 const missionPolicyFlag = "policy"
 
-// missionOracleFlag is `contenox mission fire --oracle`'s name, recognized
-// here only to answer it exactly (see missionOracleRefusal) rather than as an
-// unknown flag. Beta-gated the way the CLI flag is: with the gate off the
-// name is unknown here too, so a stable build offers no oracle lever at all.
-const missionOracleFlag = "oracle"
-
 // missionFlags are the leading options /mission accepts. Flags must lead:
 // parsing stops at the first non-flag token, so a "--" inside an intent stays
 // literal text rather than becoming a lever.
@@ -175,9 +169,8 @@ type missionFlags struct {
 }
 
 // parseMissionFlags peels the leading flags off /mission's arguments and
-// returns the untouched remainder (the agent and intent). beta mirrors the
-// CLI's opt-in-beta gate for --oracle.
-func parseMissionFlags(args string, beta bool) (missionFlags, string, error) {
+// returns the untouched remainder (the agent and intent).
+func parseMissionFlags(args string) (missionFlags, string, error) {
 	var f missionFlags
 	rest := strings.TrimSpace(args)
 	for {
@@ -197,26 +190,11 @@ func parseMissionFlags(args string, beta bool) (missionFlags, string, error) {
 			}
 			f.policy = value
 			rest = after
-		case missionOracleFlag:
-			if beta {
-				return f, "", errors.New(missionOracleRefusal)
-			}
-			return f, "", fmt.Errorf("unknown /mission flag %q: the only flag is --policy <envelope>, and flags must come before the agent and intent (%s)", token, missionUsageLine)
 		default:
 			return f, "", fmt.Errorf("unknown /mission flag %q: the only flag is --policy <envelope>, and flags must come before the agent and intent (%s)", token, missionUsageLine)
 		}
 	}
 }
-
-// missionOracleRefusal states why the oracle attention driver cannot be
-// mounted from a session. It is not a gap in this command: the driver takes
-// OPERATOR-fired asks only (it declines any ask carrying a parent session),
-// and every mission fired here is parented to this session by construction.
-// The in-session equivalent is the firing agent's own answer offer, which the
-// chosen envelope's attention bounds allow or forbid.
-const missionOracleRefusal = "--oracle is not available from a session: the oracle attention driver only reviews OPERATOR-fired missions (it declines any question that has a parent session), and a mission fired here is parented to this session, so its questions come to you. " +
-	"For an oracle-reviewed mission run `contenox mission fire <agent> \"<intent>\" --oracle --wait`. " +
-	"To let this session's own agent answer a unit's routine questions instead, fire under an envelope whose attention bounds permit agent answers — /mission with no arguments lists them."
 
 // resolveMissionEnvelope picks the envelope one fire runs under: the --policy
 // flag, else the default-mission-policy config. The name is checked against
@@ -298,11 +276,6 @@ func (t *Transport) missionStatus(ctx context.Context, store runtimetypes.Store)
 				b.WriteString("\n")
 			}
 		}
-	}
-	if t.deps.OptInBeta {
-		// Stated only under the same gate that shows --oracle on the CLI, so a
-		// stable build never mentions a lever it does not have.
-		b.WriteString("\nThe oracle attention driver is `contenox mission fire --oracle` only (it reviews operator-fired missions). Here, the envelope's attention bounds decide whether this session's agent may answer a unit's routine question.\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -419,16 +392,27 @@ func (t *Transport) readSessionFiredMission(ctx context.Context, store runtimety
 // it a dispatched unit's session is indistinguishable from an ordinary chat.
 const acpSessionMissionKVPrefix = "acp:session_mission:"
 
-// sessionMissionRecord is the durable KV shape for a unit session's mission id.
+// sessionMissionRecord is the durable KV shape for a unit session's mission
+// identity: the id its mission tools are scoped to, and the compute allowlists
+// its envelope resolved. The allowlists are stored alongside the id because a
+// session restored without them would resolve models the envelope excluded.
 type sessionMissionRecord struct {
-	MissionID string `json:"missionId"`
+	MissionID        string   `json:"missionId"`
+	ModelAllowlist   []string `json:"modelAllowlist,omitempty"`
+	BackendAllowlist []string `json:"backendAllowlist,omitempty"`
+	HITLPolicyName   string   `json:"hitlPolicyName,omitempty"`
 }
 
-func (t *Transport) persistSessionMission(ctx context.Context, store runtimetypes.Store, sid libacp.SessionID, missionID string) {
-	if strings.TrimSpace(missionID) == "" {
+func (t *Transport) persistSessionMission(ctx context.Context, store runtimetypes.Store, sid libacp.SessionID, meta missionservice.MissionMeta) {
+	if strings.TrimSpace(meta.MissionID) == "" {
 		return
 	}
-	raw, err := json.Marshal(sessionMissionRecord{MissionID: missionID})
+	raw, err := json.Marshal(sessionMissionRecord{
+		MissionID:        meta.MissionID,
+		ModelAllowlist:   meta.ModelAllowlist,
+		BackendAllowlist: meta.BackendAllowlist,
+		HITLPolicyName:   meta.HITLPolicyName,
+	})
 	if err != nil {
 		return
 	}
@@ -440,11 +424,42 @@ func (t *Transport) persistSessionMission(ctx context.Context, store runtimetype
 }
 
 func (t *Transport) readSessionMission(ctx context.Context, store runtimetypes.Store, sid libacp.SessionID) string {
+	return t.readSessionMissionRecord(ctx, store, sid).MissionID
+}
+
+func (t *Transport) readSessionMissionRecord(ctx context.Context, store runtimetypes.Store, sid libacp.SessionID) sessionMissionRecord {
 	var rec sessionMissionRecord
 	if err := store.GetKV(ctx, acpSessionMissionKVPrefix+string(sid), &rec); err != nil {
-		return ""
+		return sessionMissionRecord{}
 	}
-	return rec.MissionID
+	return rec
+}
+
+// restoreSessionMission re-attaches a unit session's mission identity after a
+// load or resume. Without it a reloaded unit is indistinguishable from an
+// ordinary chat: GetToolsForToolsByName lists no mission tools, so the unit
+// cannot report, plan or finish, and the run only ends when the drive loop gives
+// up on it. The mirror of readSessionFiredMission, which restores the other half
+// of the relationship — that this session HAS units rather than IS one.
+func (t *Transport) restoreSessionMission(ctx context.Context, store runtimetypes.Store, sid libacp.SessionID, entry *sessionEntry) {
+	rec := t.readSessionMissionRecord(ctx, store, sid)
+	if rec.MissionID == "" {
+		return
+	}
+	entry.MissionID = rec.MissionID
+	entry.ModelAllowlist = rec.ModelAllowlist
+	entry.BackendAllowlist = rec.BackendAllowlist
+	entry.HITLPolicy = missionHITLPolicy(rec.HITLPolicyName)
+}
+
+// missionHITLPolicy resolves the envelope a unit's own tool calls are gated by.
+// A mission that named none falls back to the host's policy, which is the
+// pre-mission behaviour; a mission that named one must be bound by it.
+func missionHITLPolicy(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return hitlPolicyDefaultValue
+	}
+	return strings.TrimSpace(name)
 }
 
 // sessionListMeta builds a session/list entry's `_meta` carrying whichever

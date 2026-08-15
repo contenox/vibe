@@ -10,7 +10,6 @@ import (
 
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/services/gojatool"
-	"github.com/contenox/contenox/internal/services/oracletools"
 	"github.com/contenox/contenox/internal/services/shellsession"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/libtracker"
@@ -83,9 +82,5 @@ func betaGatedToolsets(enabled bool) map[string]bool {
 	return map[string]bool{
 		gojatool.ToolsProviderName:     true,
 		shellsession.ToolsProviderName: true,
-		// The oracle attention driver (mission fire --oracle) exists only
-		// under the opt-in; a policy file predating its toolset is not stale
-		// on a stable invocation.
-		oracletools.ToolsProviderName: true,
 	}
 }

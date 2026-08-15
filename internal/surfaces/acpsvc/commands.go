@@ -41,7 +41,8 @@ func allACPCommands() []libacp.AvailableCommand {
 		{Name: "capability", Description: "Show or set persistent provider/model capability overrides.", Input: &libacp.AvailableCommandInput{Hint: "set|show|unset <provider> <model> [--think true|false]"}},
 		{Name: "policy", Description: "Show the active HITL policy, or switch it: /policy <name>.", Input: &libacp.AvailableCommandInput{Hint: "[policy-name]"}},
 		{Name: "mission", Description: "Fire a mission from this session; alone, lists the envelopes it can run under.", Input: &libacp.AvailableCommandInput{Hint: "[--policy <envelope>] [agent-name] <intent>"}},
-		{Name: "answer", Description: "Answer a question one of this session's mission units is waiting on; alone, lists them.", Input: &libacp.AvailableCommandInput{Hint: "[ask-id <answer>]"}},
+		{Name: planCommandName, Description: "Plan a piece of work, then run each step as a subagent.", Input: &libacp.AvailableCommandInput{Hint: "<what you want done>"}},
+		{Name: "answer", Description: "Answer a question one of this session's subagents is waiting on; alone, lists them.", Input: &libacp.AvailableCommandInput{Hint: "[ask-id <answer>]"}},
 		{Name: "new", Description: "Start a new session in this workspace and report its id."},
 		{Name: "sessions", Description: "List the sessions in this workspace, newest first."},
 		{Name: "pair", Description: "Attach this machine to a relay with a key from the app; alone, shows what it is attached to.", Input: &libacp.AvailableCommandInput{Hint: "[key] [relay-endpoint]"}},
@@ -72,7 +73,8 @@ func (t *Transport) acpCommands() []libacp.AvailableCommand {
 // "unknown command".
 func (t *Transport) commandAvailable(name string) bool {
 	switch name {
-	case "mission":
+	case "mission", planCommandName:
+		// /plan runs its steps as subagents, so it needs exactly what /mission needs.
 		return t.hasMissionCapability()
 	case "answer":
 		return t.hasAnswerCapability()
