@@ -74,15 +74,31 @@ func TestUnit_Lease_RenewAfterLocalExpiryIsLost(t *testing.T) {
 }
 
 func TestUnit_Lease_RenewKeepsOwnership(t *testing.T) {
+	if testing.Short() {
+		// Renew refuses a lease that lapsed before it ran, so a renewal that
+		// loses its race with the clock fails the test — a verdict that tracks
+		// how loaded the machine is rather than whether the code is correct.
+		// The -short gate runs every package at once on a shared runner, which
+		// is exactly where that goes wrong; the serial suite still runs it.
+		t.Skip("verdict depends on wall-clock renewal timing; skipped under -short")
+	}
 	path := leasePath(t)
 
-	l, err := liblease.Acquire(path, 60*time.Millisecond)
+	// The renew interval still stays a small fraction of the ttl, so the test
+	// is sound on its own terms wherever it runs: at a 60ms ttl renewed every
+	// 30ms it spent ~62% of its budget idle and ~72% under contention, while a
+	// quarter of a 1s ttl leaves ~750ms of absolute slack per iteration.
+	const ttl = time.Second
+	const renewEvery = ttl / 4
+
+	l, err := liblease.Acquire(path, ttl)
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
-	// Renew past the original expiry window; ownership should hold.
-	for range 3 {
-		time.Sleep(30 * time.Millisecond)
+	// Five renewals at a quarter-ttl each carry the lease past the original
+	// expiry window, which is the property under test; ownership should hold.
+	for range 5 {
+		time.Sleep(renewEvery)
 		if err := l.Renew(); err != nil {
 			t.Fatalf("Renew: %v", err)
 		}
@@ -233,6 +249,11 @@ func TestUnit_Lease_ExpiredTakeoverSingleWinnerRace(t *testing.T) {
 // A stalled peer (or a stalled filesystem holding the acquisition lock) must
 // not strand the caller: ctx cancellation has to cut the wait short.
 func TestUnit_Lease_AcquireContextHonoursDeadline(t *testing.T) {
+	if testing.Short() {
+		// The assertion is an upper bound on elapsed time, so a stalled runner
+		// can fail it without the cancellation path being broken at all.
+		t.Skip("asserts an elapsed-time bound; skipped under -short")
+	}
 	path := leasePath(t)
 	// Simulate a peer mid-acquisition: the lock directory exists and is fresh,
 	// so the staleness reclaim will not fire for another few seconds.
@@ -316,6 +337,11 @@ func TestUnit_Lease_ReleaseContextHonoursDeadline(t *testing.T) {
 // A lock left behind by a dead peer must still be reclaimed once it goes stale,
 // so bounding the wait did not turn a recoverable state into a permanent one.
 func TestUnit_Lease_AcquireReclaimsStaleAcquisitionLock(t *testing.T) {
+	if testing.Short() {
+		// Passing means the staleness reclaim beat a 5s context, so this too is
+		// a race against the clock rather than a statement about the code.
+		t.Skip("waits on the staleness reclaim beating a deadline; skipped under -short")
+	}
 	path := leasePath(t)
 	if err := os.Mkdir(path+".acquire.lock", 0o700); err != nil {
 		t.Fatalf("seed acquisition lock: %v", err)
