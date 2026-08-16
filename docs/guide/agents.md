@@ -154,7 +154,7 @@ that needs something of its own can carry it in its declaration instead.
 ### Naming servers you already registered
 
 A list under `mcpServers` is a **grant**: this agent may reach these
-[MCP servers](/docs/guide/mcp/), and nothing else new.
+[MCP servers](/docs/integrations/tools/mcp/), and nothing else new.
 
 ```yaml
 mcpServers: [github, linear]
@@ -233,7 +233,7 @@ you do not control.
 
 contenox hosts `local_fs` and `local_shell`, both forwarded to your ACP
 client's `fs/*` and `terminal/*` capabilities. Everything else you connect as
-an [MCP server](/docs/guide/mcp/), an OpenAPI spec, or a shell command
+an [MCP server](/docs/integrations/tools/mcp/), an OpenAPI spec, or a shell command
 (`local_shell` reaches `git`, search tools, and anything else your shell can
 run).
 

@@ -34,7 +34,7 @@ When Ollama is running, the wizard reads the models you have actually pulled and
 
 See the [Ollama guide](/docs/integrations/providers/ollama/) for details, including Ollama Cloud.
 
-Then confirm you can chat:
+Then confirm the model is ready:
 
 ```bash
 contenox doctor

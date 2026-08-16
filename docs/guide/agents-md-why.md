@@ -89,4 +89,3 @@ Write it the day after something goes wrong, from the specific thing that went w
 - [AGENTS.md](/docs/guide/agents-md/) — the mechanics: loading, closest-wins precedence, the size cap, and staleness.
 - [HITL policies](/docs/guide/hitl/) — turning "never run this unattended" from a written intent into an enforced gate.
 - [Why contenox confines agents](/docs/guide/agent-threat-model/) — the case for controls that hold without the agent's cooperation.
-- [Codebase documentation](/docs/use-cases/codebase-docs/) — generating and refreshing the longer docs that `AGENTS.md` should link to rather than contain.

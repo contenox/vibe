@@ -9,7 +9,7 @@ The codebase is primarily developed on Linux. Windows support exists for the pur
 | Path | Best for | Limitations |
 |------|----------|-------------|
 | **WSL2 (Ubuntu/Debian recommended)** | Day-to-day Go development, CLI work, running tests | Windows-specific runtime behavior (shells, paths) is not exercised. |
-| **Native Windows (PowerShell/cmd + Git Bash)** | Verifying Windows-specific behavior: paths, `local_shell`, PowerShell/cmd.exe execution, terminal behavior of the terminal UI | `task` may be unavailable; invoke `go build`/`go test` directly. |
+| **Native Windows (PowerShell/cmd + Git Bash)** | Verifying Windows-specific behavior: paths, `local_shell`, PowerShell/cmd.exe execution, terminal behavior of the CLI | `task` may be unavailable; invoke `go build`/`go test` directly. |
 | **Remote SSH** | Offloading heavy work (gopls, builds) to a Linux box while editing on Windows | — |
 
 For most contributors: install WSL2 and do the normal Linux flow inside it (see [CONTRIBUTING.md](../../CONTRIBUTING.md)). Drop to a native Windows checkout when you need Windows-specific verification.
@@ -59,7 +59,7 @@ task build-windows
 ## Windows product surface
 
 On Windows, Contenox is the same terminal-first product as everywhere else:
-the `contenox` CLI, the terminal UI, and ACP editor integrations. There is no GUI
+the `contenox` CLI and ACP editor integrations. There is no GUI
 app and no Store package — the terminal is the product.
 
 The CLI is pure Go (`CGO_ENABLED=0`) and cross-compiles cleanly

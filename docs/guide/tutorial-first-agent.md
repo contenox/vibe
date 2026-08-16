@@ -109,7 +109,7 @@ not carried  tools: WebSearch    resolves to nothing connected here; the agent
                                  runs without it
 ```
 
-Connect it as an [MCP server](/docs/guide/mcp/), an OpenAPI spec or a shell
+Connect it as an [MCP server](/docs/integrations/tools/mcp/), an OpenAPI spec or a shell
 command, then give it the name your declaration already uses:
 
 ```toml

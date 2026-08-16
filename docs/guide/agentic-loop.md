@@ -98,7 +98,7 @@ The result is the minimal agentic loop — derived from the real template, compl
 ```json
 {
   "id": "chain-agent-diffreview",
-  "description": "Bounded single-tool review loop derived from chain-agent-run.json: read the piped diff, run read-only git commands, answer once.",
+  "description": "Bounded single-tool review loop derived from chain-planner-default.json: run read-only git commands via local_shell, answer once.",
   "tasks": [
     {
       "id": "review",

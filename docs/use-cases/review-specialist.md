@@ -78,7 +78,7 @@ paired with an `approve` rule on `local_shell` in this loop's HITL policy. Git n
 
 ## The result
 
-The same sentence, unchanged, now takes a different path. From `~/.contenox/beam.log`:
+The same sentence, unchanged, now takes a different path. From `~/.contenox/telemetry.log`:
 
 ```
 classify_request → review_chat → review_tools → review_chat → review_tools → review_chat

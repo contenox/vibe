@@ -278,7 +278,7 @@ cover every agent.
 Two kinds of name are absent from the shipped table for different reasons:
 
 - **Tools nobody has connected** — `WebSearch`, `NotebookEdit`. contenox ships
-  no tool catalog. Connect the tool as an [MCP server](/docs/guide/mcp/), an
+  no tool catalog. Connect the tool as an [MCP server](/docs/integrations/tools/mcp/), an
   OpenAPI spec or a shell command, then add a line here.
 - **Host capabilities that do not exist** — `Skill`, `TodoWrite`, `Task`,
   `manage_task`. No mapping can supply these; they are not tools.
