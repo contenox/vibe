@@ -52,7 +52,7 @@ type terminalRunResult struct {
 }
 
 // handleExtRequest dispatches inbound ACP extension requests. Only the
-// contenox namespace (terminal + autocomplete) is claimed; everything else is
+// contenox namespace (terminal + autocomplete + fs listing) is claimed; everything else is
 // MethodNotFound.
 func (t *Transport) handleExtRequest(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *libacp.Error) {
 	switch method {
@@ -60,6 +60,8 @@ func (t *Transport) handleExtRequest(ctx context.Context, method string, params 
 		return t.handleTerminalRun(ctx, params)
 	case extMethodAutocomplete:
 		return t.handleAutocomplete(ctx, params)
+	case extMethodFSList:
+		return t.handleFSList(ctx, params)
 	default:
 		return nil, libacp.MethodNotFound(method)
 	}

@@ -270,7 +270,16 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	defer closeLogs()
 	reportChange("phase", "setup_telemetry")
 
+	// transport is this process's own connection, when it has one: the stdio
+	// client an editor drives. A host has none, and every session it serves
+	// arrives over the relay instead.
 	var transport *acpsvc.Transport
+
+	// One registry for every connection: without it, an approval raised by
+	// remote work would be answered on the local desk instead, and a tool call
+	// in a relay-attached session would look for a connection this process may
+	// not have. Built here because the toolset below resolves through it.
+	sessionRouter := acpsvc.NewSessionRouter()
 
 	if acpsvc.ReadConfigValue(ctx, db, "default-model") == "" &&
 		(os.Getenv(envDefaultProvider) != "" || os.Getenv(envDefaultModel) != "") {
@@ -345,7 +354,9 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	// subagent-start tool resolves it per call, so the ordering holds.
 	var inProcessFleet fleetservice.Service
 
-	tools := acpToolset(db, tracker, gt, workspaceID, func() *acpsvc.Transport { return transport }, shellScrub, missions, acpHITL, missionPub, optInBeta,
+	tools := acpToolset(db, tracker, gt, workspaceID,
+		routedTransport(sessionRouter, func() *acpsvc.Transport { return transport }),
+		shellScrub, missions, acpHITL, missionPub, optInBeta,
 		func() fleetservice.Service { return inProcessFleet })
 
 	oracleStore := runtimetypes.New(db.WithoutTransaction())
@@ -362,9 +373,6 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			hitl: acpHITL, missions: missions, store: oracleStore, out: os.Stderr,
 		})
 	}
-
-	// One registry for every connection: without it, an approval raised by remote work would be answered on the local desk instead.
-	sessionRouter := acpsvc.NewSessionRouter()
 
 	var askApproval localtools.AskApproval
 	if enableHITL {

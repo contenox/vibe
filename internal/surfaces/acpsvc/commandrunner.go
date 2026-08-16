@@ -2,7 +2,6 @@ package acpsvc
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -14,7 +13,7 @@ import (
 var acpTerminalOutputByteLimit int64 = 1 * 1024 * 1024
 
 type acpCommandRunner struct {
-	transport func() *Transport
+	transport TransportResolver
 	shell     localtools.PlatformShell
 	// scrub, when set, replaces the inherited environment on the local OS-spawn
 	// fallback below (no client terminal capability) — the client-terminal path
@@ -22,27 +21,29 @@ type acpCommandRunner struct {
 	scrub func([]string) []string
 }
 
-func NewACPCommandRunner(transport func() *Transport) localtools.CommandRunner {
+func NewACPCommandRunner(transport TransportResolver) localtools.CommandRunner {
 	return NewACPCommandRunnerWithShell(transport, localtools.DetectPlatformShell())
 }
 
-func NewACPCommandRunnerWithShell(transport func() *Transport, shell localtools.PlatformShell) localtools.CommandRunner {
+func NewACPCommandRunnerWithShell(transport TransportResolver, shell localtools.PlatformShell) localtools.CommandRunner {
 	return &acpCommandRunner{transport: transport, shell: shell.WithDefaults()}
 }
 
 // NewACPCommandRunnerWithScrub is NewACPCommandRunnerWithShell plus an
 // environment scrub (see libsandbox.EnvScrub) applied to the local OS-spawn
 // fallback. Nil scrub keeps that fallback's full inherit.
-func NewACPCommandRunnerWithScrub(transport func() *Transport, shell localtools.PlatformShell, scrub func([]string) []string) localtools.CommandRunner {
+func NewACPCommandRunnerWithScrub(transport TransportResolver, shell localtools.PlatformShell, scrub func([]string) []string) localtools.CommandRunner {
 	return &acpCommandRunner{transport: transport, shell: shell.WithDefaults(), scrub: scrub}
 }
 
 func (a *acpCommandRunner) Run(ctx context.Context, spec localtools.CommandSpec, stdout, stderr io.Writer) (int, error) {
-	t := a.transport()
-	if t == nil {
-		return -1, errors.New("acpsvc: no active ACP transport")
+	var t *Transport
+	if a.transport != nil {
+		t = a.transport(ctx)
 	}
-	if !t.getClientCaps().Terminal {
+	// No client attached to this session, or one with no terminal of its own:
+	// spawn locally under the scrubbed environment.
+	if t == nil || !t.getClientCaps().Terminal {
 		return localtools.NewOSCommandRunnerWithShellAndScrub(a.shell, a.scrub).Run(ctx, spec, stdout, stderr)
 	}
 

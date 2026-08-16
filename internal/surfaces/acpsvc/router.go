@@ -148,6 +148,41 @@ func (r *SessionRouter) transportFor(contenoxSessionID string) (*Transport, bool
 	return held[0], true
 }
 
+// TransportResolver picks the connection a proxied tool call should act
+// through for the session in ctx, or nil when no client is attached to it.
+//
+// Nil is an ordinary answer, not a failure: a host running a chain that no
+// client is watching has no editor to read a file through, and the tools fall
+// back to the operating system exactly as they do for a client that advertises
+// no filesystem capability.
+type TransportResolver func(context.Context) *Transport
+
+// TransportForContext resolves the connection a tool call should act through:
+// the most recent transport holding the contenox session in ctx, or nil when
+// nothing holds it.
+//
+// Tools that proxy work to the client — reading a file through the editor so
+// unsaved buffers are seen, running a command in the client's terminal — need
+// *a* connection, not every connection, which is why this resolves to one
+// holder rather than fanning out the way [AskApproval] does.
+//
+// It takes ctx rather than being a plain accessor because which connection is
+// correct depends on which session is running: a host serving several relay
+// attachments has no single "current" transport, and a process-wide one would
+// send a phone session's file reads through whatever connection happened to
+// start first.
+func (r *SessionRouter) TransportForContext(ctx context.Context) *Transport {
+	if r == nil || ctx == nil {
+		return nil
+	}
+	contenoxSessionID, _ := ctx.Value(runtimetypes.SessionIDContextKey).(string)
+	t, ok := r.transportFor(contenoxSessionID)
+	if !ok {
+		return nil
+	}
+	return t
+}
+
 // askTargets selects which of a session's holders are asked to approve. It is
 // the one place a destination policy belongs: today every holder is asked, and
 // a deployment that forwards approvals to one surface narrows the list here

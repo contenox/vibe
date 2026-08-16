@@ -29,7 +29,7 @@ func acpToolset(
 	tracker libtracker.ActivityTracker,
 	gt *gojatool.Toolset,
 	workspaceID string,
-	transportFn func() *acpsvc.Transport,
+	transportFn acpsvc.TransportResolver,
 	shellScrub func([]string) []string,
 	missions missionservice.Service,
 	acpHITL hitlservice.Service,

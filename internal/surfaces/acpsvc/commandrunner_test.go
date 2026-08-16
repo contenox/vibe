@@ -14,7 +14,7 @@ import (
 func TestUnit_ACPCommandRunner_FallsBackToOSWhenClientLacksTerminalCapability(t *testing.T) {
 	t.Parallel()
 	tr := mockTransportForFS(libacp.FileSystemCapabilities{})
-	runner := NewACPCommandRunner(func() *Transport { return tr })
+	runner := NewACPCommandRunner(func(context.Context) *Transport { return tr })
 
 	var stdout, stderr bytes.Buffer
 	exitCode, err := runner.Run(context.Background(),
@@ -42,7 +42,7 @@ func TestUnit_ACPCommandRunner_ScrubEnvAppliesOnOSFallback(t *testing.T) {
 
 	tr := mockTransportForFS(libacp.FileSystemCapabilities{})
 	scrub := libsandbox.EnvScrub(libsandbox.ScrubDenySecrets, nil, nil)
-	runner := NewACPCommandRunnerWithScrub(func() *Transport { return tr }, localtools.DetectPlatformShell(), scrub)
+	runner := NewACPCommandRunnerWithScrub(func(context.Context) *Transport { return tr }, localtools.DetectPlatformShell(), scrub)
 
 	var stdout, stderr bytes.Buffer
 	exitCode, err := runner.Run(context.Background(),
