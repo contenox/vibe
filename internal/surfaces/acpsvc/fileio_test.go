@@ -48,10 +48,48 @@ func TestUnit_MapACPNotExist_WrapsResourceNotFoundAsErrNotExist(t *testing.T) {
 	}
 }
 
+// A host serves sessions no client is attached to — work driven over the relay
+// before a transport binds, or a chain fired by a trigger with nobody watching.
+// Such a call has no editor to proxy through, and must read the disk rather
+// than fail: refusing here made file tools unusable outside an editor.
+func TestUnit_ACPFileIO_FallsBackToOSWhenNoClientIsAttached(t *testing.T) {
+	t.Parallel()
+	io := NewACPFileIO(func(context.Context) *Transport { return nil })
+	ctx := context.Background()
+
+	p := filepath.Join(t.TempDir(), "unattached.txt")
+	if err := io.WriteFile(ctx, p, []byte("written with no client")); err != nil {
+		t.Fatalf("WriteFile with no attached transport must fall back to os, got %v", err)
+	}
+	got, err := io.ReadFile(ctx, p)
+	if err != nil {
+		t.Fatalf("ReadFile with no attached transport must fall back to os, got %v", err)
+	}
+	if string(got) != "written with no client" {
+		t.Fatalf("os fallback round-trip mismatch: %q", got)
+	}
+}
+
+// An unset resolver is the same situation as an unattached one, and must not
+// panic on the way to the same answer.
+func TestUnit_ACPFileIO_NilResolverFallsBackToOS(t *testing.T) {
+	t.Parallel()
+	io := NewACPFileIO(nil)
+	ctx := context.Background()
+
+	p := filepath.Join(t.TempDir(), "nil-resolver.txt")
+	if err := io.WriteFile(ctx, p, []byte("still works")); err != nil {
+		t.Fatalf("WriteFile with a nil resolver must fall back to os, got %v", err)
+	}
+	if got, err := io.ReadFile(ctx, p); err != nil || string(got) != "still works" {
+		t.Fatalf("ReadFile with a nil resolver = %q, %v", got, err)
+	}
+}
+
 func TestUnit_ACPFileIO_FallsBackToOSWhenClientLacksFSCapability(t *testing.T) {
 	t.Parallel()
 	tr := mockTransportForFS(libacp.FileSystemCapabilities{})
-	io := NewACPFileIO(func() *Transport { return tr })
+	io := NewACPFileIO(func(context.Context) *Transport { return tr })
 	ctx := context.Background()
 
 	p := filepath.Join(t.TempDir(), "note.txt")

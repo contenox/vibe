@@ -683,7 +683,7 @@ func TestLoopback_Prompt_FSReadWriteThroughRealClient(t *testing.T) {
 	h.lc.files["/tmp/loopback-fs/note.txt"] = "hello from the client"
 	h.lc.mu.Unlock()
 
-	fio := NewACPFileIO(func() *Transport { return h.tr })
+	fio := NewACPFileIO(func(context.Context) *Transport { return h.tr })
 	var readBack []byte
 	fake := &loopbackAgent{promptFunc: func(ctx context.Context, req agentservice.PromptRequest) (*agentservice.PromptResponse, error) {
 		approveCtx := context.WithValue(ctx, runtimetypes.SessionIDContextKey, req.SessionID)

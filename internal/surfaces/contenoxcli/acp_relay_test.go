@@ -279,3 +279,45 @@ func TestUnit_ApprovalsWithoutARouterAreExactlyTheOldStdioPath(t *testing.T) {
 		})
 	}
 }
+
+// A host has no connection of its own: every session it serves arrives over
+// the relay, so a tool call must resolve the transport holding *that* session
+// rather than a process-wide one. Getting this wrong is what made file and
+// shell tools fail in a host with "no active ACP transport".
+func TestUnit_RoutedTransport_PrefersTheSessionsOwnConnection(t *testing.T) {
+	router := acpsvc.NewSessionRouter()
+
+	localCalls := 0
+	resolve := routedTransport(router, func() *acpsvc.Transport {
+		localCalls++
+		return nil
+	})
+
+	// Nothing holds this session and there is no local connection: nil is the
+	// correct answer, and the file/shell tools fall back to the OS from there.
+	if got := resolve(t.Context()); got != nil {
+		t.Fatalf("an unheld session with no local connection = %v, want nil", got)
+	}
+	if localCalls != 1 {
+		t.Fatalf("the local connection was consulted %d times, want exactly 1", localCalls)
+	}
+}
+
+// With no router at all — a surface serving exactly one connection — the local
+// connection is still the answer, so the nil-safe path stays usable.
+func TestUnit_RoutedTransport_FallsBackToTheLocalConnection(t *testing.T) {
+	var local acpsvc.Transport
+	resolve := routedTransport(acpsvc.NewSessionRouter(), func() *acpsvc.Transport { return &local })
+
+	if got := resolve(t.Context()); got != &local {
+		t.Fatalf("resolve = %v, want the local connection", got)
+	}
+}
+
+// A resolver with neither router nor local connection must answer nil rather
+// than panicking: that is the shape a headless host runs in.
+func TestUnit_RoutedTransport_IsNilSafe(t *testing.T) {
+	if got := routedTransport(nil, nil)(t.Context()); got != nil {
+		t.Fatalf("resolve = %v, want nil", got)
+	}
+}

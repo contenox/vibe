@@ -24,7 +24,7 @@ func TestUnit_ACPToolset_CarriesTheSharedToolsets(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(gt.Shutdown)
 
-	noTransport := func() *acpsvc.Transport { return nil }
+	noTransport := func(context.Context) *acpsvc.Transport { return nil }
 	noFleet := func() fleetservice.Service { return nil }
 	tools := acpToolset(nil, libtracker.NoopTracker{}, gt, "test-workspace",
 		noTransport, nil, missionservice.New(nil), nil, nil, true, noFleet)
