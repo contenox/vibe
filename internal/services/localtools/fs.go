@@ -82,7 +82,6 @@ type LocalFSTools struct {
 	cwdResolver   func(context.Context) string
 	dialect       SQLDialect
 	onFileMutated func(absPath string)
-
 }
 
 // FSOption customises a LocalFSTools instance.

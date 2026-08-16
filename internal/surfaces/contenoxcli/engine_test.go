@@ -2,7 +2,6 @@ package contenoxcli
 
 import (
 	"testing"
-
 )
 
 func TestReadinessDefaults(t *testing.T) {

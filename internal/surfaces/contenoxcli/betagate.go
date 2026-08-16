@@ -68,6 +68,5 @@ func betaGatedToolsets(enabled bool) map[string]bool {
 	if enabled {
 		return nil
 	}
-	return map[string]bool{
-	}
+	return map[string]bool{}
 }

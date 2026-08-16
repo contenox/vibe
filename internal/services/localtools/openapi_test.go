@@ -316,4 +316,3 @@ var gitComponents = map[string]string{
 	"git_checkout_branch": "GitCheckoutBranch",
 	"git_restore":         "GitRestore",
 }
-

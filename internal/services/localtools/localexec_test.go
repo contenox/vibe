@@ -64,7 +64,7 @@ func TestUnit_LocalExecTools_BackendSignaledBudgetExceededCircuitBreaks(t *testi
 
 func TestUnit_LocalExecTools_Supports(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner()).(*localtools.LocalExecTools)
 	names, err := h.Supports(ctx)
 	require.NoError(t, err)
 	require.Len(t, names, 1)
@@ -73,7 +73,7 @@ func TestUnit_LocalExecTools_Supports(t *testing.T) {
 
 func TestUnit_LocalExecTools_GetSchemasForSupportedTools(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner()).(*localtools.LocalExecTools)
 	schemas, err := h.GetSchemasForSupportedTools(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, schemas)
@@ -83,7 +83,7 @@ func TestUnit_LocalExecTools_GetSchemasForSupportedTools(t *testing.T) {
 
 func TestUnit_LocalExecTools_GetToolsForToolsByName_OK(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner()).(*localtools.LocalExecTools)
 	tools, err := h.GetToolsForToolsByName(ctx, "local_shell")
 	require.NoError(t, err)
 	require.Len(t, tools, 1)
@@ -94,7 +94,7 @@ func TestUnit_LocalExecTools_GetToolsForToolsByName_OK(t *testing.T) {
 
 func TestUnit_LocalExecTools_GetToolsForToolsByName_IncludesDetectedShell(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), 
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(),
 		localtools.WithLocalExecShell(localtools.NewPowerShellShell("pwsh.exe")),
 	).(*localtools.LocalExecTools)
 
@@ -118,7 +118,7 @@ func TestUnit_LocalExecTools_GetToolsForToolsByName_IncludesDetectedShell(t *tes
 
 func TestUnit_LocalExecTools_GetSchemasForSupportedTools_IncludesDetectedShell(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), 
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(),
 		localtools.WithLocalExecShell(localtools.NewCmdShell("cmd.exe")),
 	).(*localtools.LocalExecTools)
 
@@ -135,14 +135,14 @@ func TestUnit_LocalExecTools_GetSchemasForSupportedTools_IncludesDetectedShell(t
 
 func TestUnit_LocalExecTools_GetToolsForToolsByName_Unknown(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner()).(*localtools.LocalExecTools)
 	tools, err := h.GetToolsForToolsByName(ctx, "other")
 	assert.Error(t, err)
 	assert.Nil(t, tools)
 }
 
 func TestUnit_LocalExecTools_GetToolsForToolsByName_ContextPolicy_Description(t *testing.T) {
-	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner()).(*localtools.LocalExecTools)
 	ctx := taskengine.WithToolsArgs(context.Background(), "local_shell", map[string]string{
 		"_allowed_commands": "git, ls",
 		"_denied_commands":  "rm",
@@ -167,7 +167,7 @@ func TestUnit_LocalExecTools_GetToolsForToolsByName_ContextPolicy_Description(t 
 }
 
 func TestUnit_LocalExecTools_Exec_ContextPolicy_Enforced(t *testing.T) {
-	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner()).(*localtools.LocalExecTools)
 	ctx := taskengine.WithToolsArgs(context.Background(), "local_shell", map[string]string{
 		"_allowed_commands": "ls",
 	})
@@ -181,7 +181,7 @@ func TestUnit_LocalExecTools_Exec_ContextPolicy_Enforced(t *testing.T) {
 }
 
 func TestUnit_LocalExecTools_Exec_ContextPolicy_Allows(t *testing.T) {
-	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner()).(*localtools.LocalExecTools)
 	ctx := taskengine.WithToolsArgs(context.Background(), "local_shell", map[string]string{
 		"_allowed_commands": "echo",
 	})
@@ -282,7 +282,7 @@ func TestUnit_LocalExecTools_Exec_Success_InputAsStdin(t *testing.T) {
 func TestUnit_LocalExecTools_Exec_NoPolicy_Allowed(t *testing.T) {
 	// Authorization is the responsibility of upstream layers (e.g. HITLWrapper); LocalExecTools without policy must not fail-close.
 	ctx := context.Background()
-	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner()).(*localtools.LocalExecTools)
 	start := time.Now().UTC()
 	toolsCall := &taskengine.ToolsCall{
 		Name: "local_shell",
@@ -305,7 +305,7 @@ func TestUnit_LocalExecTools_Exec_ShellMode_NoPolicy_Allowed(t *testing.T) {
 		t.Skip("shell:true dispatches to cmd.exe/PowerShell on Windows (see shell.go), not /bin/sh — the exact stdout framing this pins is POSIX-sh-specific")
 	}
 	ctx := context.Background()
-	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner()).(*localtools.LocalExecTools)
 	start := time.Now().UTC()
 	toolsCall := &taskengine.ToolsCall{
 		Name: "local_shell",
@@ -416,7 +416,7 @@ func TestUnit_LocalExecTools_Exec_Timeout(t *testing.T) {
 
 func TestUnit_LocalExecTools_Exec_NoTrimWhitespace(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner()).(*localtools.LocalExecTools)
 	start := time.Now().UTC()
 	out, _, err := h.Exec(ctx, start, map[string]any{
 		"command": "echo",
@@ -444,7 +444,7 @@ func TestUnit_LocalExecTools_Exec_MissingCommand(t *testing.T) {
 
 func TestUnit_LocalExecTools_Exec_NilTools(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner()).(*localtools.LocalExecTools)
 	_, _, err := h.Exec(ctx, time.Now().UTC(), nil, false, nil)
 	require.Error(t, err)
 }
