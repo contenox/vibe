@@ -1,37 +1,8 @@
-// Package liblog provides a date-organised, size-bounded log directory: the
-// writer a long-lived host points its structured logs at when nobody is
-// watching a terminal.
-//
-// It exists because an append-only log file is a slow leak. `contenox serve`
-// is meant to run for days, and a process whose only log destination grows
-// without bound eventually fills the disk it shares with the database — a
-// failure that arrives long after the change that caused it, on the machine
-// least likely to be watched.
-//
-// Files are named `<name>-<YYYY-MM-DD>.log`, and a day that outgrows its size
-// bound continues in `<name>-<YYYY-MM-DD>.2.log`, `.3.log`, and so on. Asking
-// "what did this host do on Tuesday?" is then a question about filenames
-// rather than about how many times the file happened to roll.
-//
-// # Why there is no background goroutine
-//
-// Every decision this package makes happens on the write path, under the lock
-// the writer needs anyway:
-//
-//   - the day check and the size check are an integer compare and a cached
-//     date-string compare, far cheaper than the file write they precede;
-//   - the expensive part — scanning the directory to retire old files — runs
-//     only when a new file is actually created, which is at most once per day
-//     plus once per size part.
-//
-// So retention is event-driven rather than swept on a timer: no goroutine to
-// supervise, no second mutex, and nothing to leak if the host is killed. A
-// counter ("organise every N appends") would be cheaper still, but it cannot
-// be right at a day boundary — an idle host that logs once after midnight
-// would file that line under yesterday until the counter happened to trip.
-//
-// A Writer is safe for concurrent use, because slog handlers write from
-// whichever goroutine logged.
+// Package liblog provides a date-organised, size-bounded log directory. Files
+// are named <name>-<YYYY-MM-DD>.log, and a day that outgrows its size bound
+// continues in <name>-<YYYY-MM-DD>.2.log, .3.log, and so on. A Writer is safe
+// for concurrent use, and retention is applied on the write path rather than by
+// a background goroutine.
 package liblog
 
 import (
@@ -45,26 +16,20 @@ import (
 	"time"
 )
 
-// DefaultMaxBytes is a single day-part's size ceiling when a caller expresses
-// no preference: large enough that a normal day of INFO-level operation fits
-// in one part, small enough to open in an editor.
+// DefaultMaxBytes is a single day-part's default size ceiling.
 const DefaultMaxBytes int64 = 10 << 20 // 10 MiB
 
 // DefaultMaxFiles is how many log files survive by default, counted across
-// every date and part. At the default size that is a bounded ~140 MiB.
+// every date and part.
 const DefaultMaxFiles = 14
 
-// DefaultMaxAge retires a log by date regardless of how few files exist, so a
-// quiet host does not keep last quarter's logs simply because it never wrote
-// enough to hit the file count.
+// DefaultMaxAge retires a log by date regardless of how few files exist.
 const DefaultMaxAge = 14 * 24 * time.Hour
 
-// dateLayout is the date stamp in a log's name. It sorts lexicographically in
-// chronological order, which is what lets retention sort by filename.
+// Sorts lexicographically in chronological order, which retention relies on.
 const dateLayout = "2006-01-02"
 
-// Config describes a log directory. The zero value is not usable; every field
-// except Now has a documented fallback applied by [Open].
+// Config describes a log directory. The zero value is not usable.
 type Config struct {
 	// Dir is the directory log files live in. Created if absent.
 	Dir string
@@ -78,8 +43,7 @@ type Config struct {
 	// MaxAge retires files older than this by their date stamp. Zero means
 	// [DefaultMaxAge]; negative means no age bound.
 	MaxAge time.Duration
-	// Now is the clock, injectable so tests can cross a midnight boundary
-	// without waiting for one. Nil means [time.Now].
+	// Now is the clock. Nil means [time.Now].
 	Now func() time.Time
 }
 
@@ -90,16 +54,14 @@ const Unlimited = -1
 type Writer struct {
 	mu   sync.Mutex
 	cfg  Config
-	day  string // date stamp of the open file
-	part int    // 1 for the day's first file
+	day  string
+	part int
 	f    *os.File
 	size int64
 }
 
-// Open prepares the log directory and opens today's current part for
-// appending. A restart continues the latest existing part rather than starting
-// a new one, so a host that is restarted repeatedly does not shard its day
-// into a file per launch.
+// Open prepares the log directory and opens today's current part for appending.
+// A restart continues the latest existing part rather than starting a new one.
 func Open(cfg Config) (*Writer, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -129,11 +91,8 @@ func Open(cfg Config) (*Writer, error) {
 }
 
 // Write appends p, starting a new file first when the date has changed or when
-// p would carry the current part past its ceiling.
-//
-// A single write larger than the ceiling is still written whole: a log line is
-// the unit of meaning here, and splitting one across two files to honour a
-// size bound would corrupt the record to protect a number.
+// p would carry the current part past its ceiling. A single write larger than
+// the ceiling is still written whole.
 func (w *Writer) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -141,7 +100,6 @@ func (w *Writer) Write(p []byte) (int, error) {
 		return 0, os.ErrClosed
 	}
 
-	// Date first: a new day starts at part 1 however full yesterday's part is.
 	if today := w.cfg.Now().Format(dateLayout); today != w.day {
 		if err := w.roll(today, 1); err != nil {
 			return 0, err
@@ -169,13 +127,8 @@ func (w *Writer) Close() error {
 	return err
 }
 
-// Reconfigure updates the retention settings of a live log.
-//
-// It exists because a host must be able to log before it can read its own
-// configuration: the log opens on defaults during boot, and the stored
-// settings are applied once the database is readable. Only bounds change —
-// the directory and name are fixed at [Open], so no in-flight write can be
-// redirected out from under a reader.
+// Reconfigure updates the retention bounds of a live log. The directory and
+// name are fixed at [Open].
 func (w *Writer) Reconfigure(maxBytes int64, maxFiles int, maxAge time.Duration) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -190,16 +143,14 @@ func (w *Writer) Reconfigure(maxBytes int64, maxFiles int, maxAge time.Duration)
 	}
 }
 
-// Path reports the file currently being written, so a status screen can name
-// the exact file rather than a pattern.
+// Path reports the file currently being written.
 func (w *Writer) Path() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.filename(w.day, w.part)
 }
 
-// Dir, MaxBytes, MaxFiles and MaxAge report the settings in force, so a status
-// screen can state them rather than restating defaults and risking a lie.
+// Dir, MaxBytes, MaxFiles and MaxAge report the settings in force.
 func (w *Writer) Dir() string { return w.cfg.Dir }
 
 func (w *Writer) MaxBytes() int64 {
@@ -239,14 +190,12 @@ func (w *Writer) roll(day string, part int) error {
 	if err := w.openDay(day, part); err != nil {
 		return err
 	}
-	// Only here, never per write: this is the one path that adds a file, so it
-	// is the only one that can push the directory past its bounds.
 	w.retire()
 	return nil
 }
 
-// openDay opens (day, part) for appending and adopts its existing size, so a
-// restart continues a part rather than overwriting it. Callers hold w.mu.
+// openDay opens (day, part) for appending and adopts its existing size. Callers
+// hold w.mu.
 func (w *Writer) openDay(day string, part int) error {
 	path := w.filename(day, part)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
@@ -262,8 +211,7 @@ func (w *Writer) openDay(day string, part int) error {
 	return nil
 }
 
-// filename renders a log's path. The day's first part carries no part suffix,
-// so the common case reads as a plain dated log.
+// filename renders a log's path. The day's first part carries no part suffix.
 func (w *Writer) filename(day string, part int) string {
 	if part <= 1 {
 		return filepath.Join(w.cfg.Dir, fmt.Sprintf("%s-%s.log", w.cfg.Name, day))
@@ -283,9 +231,7 @@ func (w *Writer) latestPart(day string) int {
 	return highest
 }
 
-// logFile is one discovered log, parsed from its name rather than its mtime:
-// the name is what the operator sorts by, and a copied or restored file keeps
-// its meaning while its mtime does not.
+// logFile is one discovered log, parsed from its name rather than its mtime.
 type logFile struct {
 	path string
 	day  string
@@ -313,9 +259,8 @@ func (w *Writer) existing() []logFile {
 	return out
 }
 
-// parse reads the date and part back out of a filename, rejecting anything
-// that is not this log's own naming — a stray file in the directory must never
-// become a deletion candidate.
+// parse reads the date and part back out of a filename, rejecting anything that
+// is not this log's own naming.
 func (w *Writer) parse(path string) (logFile, bool) {
 	base := filepath.Base(path)
 	rest, ok := strings.CutPrefix(base, w.cfg.Name+"-")
@@ -342,8 +287,7 @@ func (w *Writer) parse(path string) (logFile, bool) {
 }
 
 // retire deletes whatever the bounds no longer cover, oldest first. The file
-// currently open is never a candidate, so a bound smaller than one file cannot
-// delete the log being written. Callers hold w.mu.
+// currently open is never a candidate. Callers hold w.mu.
 func (w *Writer) retire() {
 	files := w.existing()
 	live := w.filename(w.day, w.part)

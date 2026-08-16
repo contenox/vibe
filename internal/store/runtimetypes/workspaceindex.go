@@ -129,7 +129,6 @@ func (s *store) GetWorkspaceIndexConfig(ctx context.Context, id string) (*Worksp
 	return &cfg, nil
 }
 
-// GetActiveWorkspaceIndexConfig returns the workspace's newest config, the one searches run against.
 func (s *store) GetActiveWorkspaceIndexConfig(ctx context.Context, workspaceID string) (*WorkspaceIndexConfig, error) {
 	var cfg WorkspaceIndexConfig
 	err := s.Exec.QueryRowContext(ctx, `
@@ -189,8 +188,6 @@ func (s *store) ListWorkspaceIndexConfigs(ctx context.Context, workspaceID strin
 	return out, nil
 }
 
-// DeleteWorkspaceIndexConfig reaps a superseded index generation and its
-// chunks, refusing the workspace's live config with ErrWorkspaceIndexConfigLive.
 func (s *store) DeleteWorkspaceIndexConfig(ctx context.Context, id string) error {
 	cfg, err := s.GetWorkspaceIndexConfig(ctx, id)
 	if err != nil {
@@ -213,7 +210,6 @@ func (s *store) DeleteWorkspaceIndexConfig(ctx context.Context, id string) error
 	return checkRowsAffected(result)
 }
 
-// AppendWorkspaceChunks inserts a batch of chunks and mirrors their text into the FTS5 table in the same call, checking every vector against the owning config's dimension.
 func (s *store) AppendWorkspaceChunks(ctx context.Context, chunks ...*WorkspaceChunk) error {
 	if len(chunks) == 0 {
 		return nil
@@ -273,7 +269,6 @@ func (s *store) AppendWorkspaceChunks(ctx context.Context, chunks ...*WorkspaceC
 	return nil
 }
 
-// ListWorkspaceIndexedFiles returns one row per indexed file with its recorded content sha, ordered by path.
 func (s *store) ListWorkspaceIndexedFiles(ctx context.Context, configID string) ([]WorkspaceIndexedFile, error) {
 	rows, err := s.Exec.QueryContext(ctx, `
 		SELECT path, MIN(content_sha), COUNT(*)
@@ -300,7 +295,6 @@ func (s *store) ListWorkspaceIndexedFiles(ctx context.Context, configID string) 
 	return out, nil
 }
 
-// DeleteWorkspaceChunksForPaths drops every chunk of the named files, FTS mirror included.
 func (s *store) DeleteWorkspaceChunksForPaths(ctx context.Context, configID string, paths ...string) error {
 	if len(paths) == 0 {
 		return nil
@@ -329,8 +323,6 @@ func (s *store) DeleteWorkspaceChunksForPaths(ctx context.Context, configID stri
 	return nil
 }
 
-// DeleteWorkspaceChunksForConfig empties one index generation — the --force
-// rebuild path, and the reap half of DeleteWorkspaceIndexConfig.
 func (s *store) DeleteWorkspaceChunksForConfig(ctx context.Context, configID string) error {
 	if _, err := s.Exec.ExecContext(ctx, `
 		DELETE FROM workspace_chunks_fts WHERE config_id = $1`, configID); err != nil {
@@ -343,7 +335,6 @@ func (s *store) DeleteWorkspaceChunksForConfig(ctx context.Context, configID str
 	return nil
 }
 
-// SearchWorkspaceChunks is the lexical prefilter: FTS5 MATCH capped at limit, ordered ascending by bm25 since SQLite's bm25 is more-negative-is-better.
 func (s *store) SearchWorkspaceChunks(ctx context.Context, configID string, match string, limit int) ([]*WorkspaceChunk, error) {
 	if strings.TrimSpace(match) == "" {
 		return []*WorkspaceChunk{}, nil
@@ -372,7 +363,6 @@ func (s *store) SearchWorkspaceChunks(ctx context.Context, configID string, matc
 	return scanWorkspaceChunks(rows, cfg.Dimension, true)
 }
 
-// ScanWorkspaceChunks reads chunks in insertion order, capped at limit.
 func (s *store) ScanWorkspaceChunks(ctx context.Context, configID string, limit int) ([]*WorkspaceChunk, error) {
 	if limit > MAXLIMIT {
 		return nil, ErrLimitParamExceeded

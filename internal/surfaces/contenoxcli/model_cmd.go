@@ -74,7 +74,6 @@ func printLiveModels(ctx context.Context, db libdb.DBManager, out, errW io.Write
 	bus := libbus.NewSQLite(db.WithoutTransaction())
 	defer bus.Close()
 
-	// Read the preferred model from config so we can mark it.
 	store := runtimetypes.New(db.WithoutTransaction())
 	preferredModel, err := getConfigKV(ctx, store, "default-model")
 	if err != nil {
@@ -98,7 +97,6 @@ func printLiveModels(ctx context.Context, db libdb.DBManager, out, errW io.Write
 		return nil
 	}
 
-	// Stable sort by backend name.
 	type entry struct {
 		backendName string
 		backendErr  string
@@ -131,8 +129,7 @@ func printLiveModels(ctx context.Context, db libdb.DBManager, out, errW io.Write
 			e.canVision[pm.Model] = pm.CanVision
 			e.ctx[pm.Model] = pm.ContextLength
 		}
-		// Some providers only report model names; when the backend is healthy,
-		// keep those visible even if no detailed PulledModels entries were built.
+		// Some providers only report model names.
 		if len(e.pulled) == 0 && bs.Error == "" && len(bs.Models) > 0 {
 			e.pulled = append(e.pulled, bs.Models...)
 		}
@@ -197,15 +194,8 @@ func displayModelName(model string) string {
 	return strings.TrimPrefix(strings.TrimSpace(model), "models/")
 }
 
-// parseContextSize converts a human-friendly token-count string to an int.
-// Accepted suffixes (case-insensitive): k (×1 000), m (×1 000 000).
-// A bare integer is returned as-is.  Examples:
-//
-//	"12k" → 12000
-//	"128K" → 128000
-//	"1m"  → 1000000
-//	"8192" → 8192
-//	"0"   → 0  (API-authoritative)
+// parseContextSize converts a human-friendly token-count string to an int,
+// accepting a case-insensitive k or m suffix.
 func parseContextSize(s string) (int, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {

@@ -14,14 +14,10 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-// shellEnvCacheTTL bounds how stale a shellenvservice read can be; a Beam/CLI
-// edit lands within this window with no restart.
 const shellEnvCacheTTL = 3 * time.Second
 
-// resolvedSandboxEnv is the one composition every agent-shell spawn root and
-// the `sandbox env` preview share, so the preview never drifts from what a
-// spawned shell actually receives. db may be a nil interface in tests that
-// never invoke the returned hooks.
+// resolvedSandboxEnv is the composition every agent-shell spawn root and the
+// `sandbox env` preview share.
 func resolvedSandboxEnv(db libdb.DBManager, tracker libtracker.ActivityTracker, warnW io.Writer) (shell, terminal func([]string) []string, err error) {
 	config := &sandboxEnvConfig{}
 	if err := loadEnvConfig(config); err != nil {
@@ -34,8 +30,7 @@ func resolvedSandboxEnv(db libdb.DBManager, tracker libtracker.ActivityTracker, 
 
 // resolveSandboxScrubs turns SANDBOX_* config into the env-scrub hooks for
 // agent-reachable shells and the interactive terminal panel; a nil hook means
-// inherit everything. Agent shells default to deny-secrets, the terminal to
-// off. warnW receives one line per misspelled SANDBOX_*_SCRUB value; nil silences it.
+// inherit everything. warnW receives one line per misspelled value.
 func resolveSandboxScrubs(config *sandboxEnvConfig, injectGlobal func() map[string]string, warnW io.Writer) (shell, terminal func([]string) []string) {
 	extraAllow := libsandbox.ParseEnvList(config.SandboxEnvAllow)
 	extraDeny := libsandbox.ParseEnvList(config.SandboxEnvDeny)
@@ -45,8 +40,7 @@ func resolveSandboxScrubs(config *sandboxEnvConfig, injectGlobal func() map[stri
 }
 
 // composeShellEnv runs the scrub filter, if any, then overlays the operator's
-// global shell-env variables so they win even when the scrub is off. Returns
-// nil when both are absent, preserving full inherit when nothing is configured.
+// global shell-env variables. It returns nil when both are absent.
 func composeShellEnv(filter func([]string) []string, injectGlobal func() map[string]string) func([]string) []string {
 	if filter == nil && injectGlobal == nil {
 		return nil
@@ -64,9 +58,8 @@ func composeShellEnv(filter func([]string) []string, injectGlobal func() map[str
 }
 
 // newLiveGlobalShellEnv returns a getter for the operator's global shell-env
-// variables, cached for ttl so a frequent local_shell does not hit the
-// database per command. A read error keeps the last known value and reports
-// it via tracker (telemetry only); nil tracker degrades to Noop.
+// variables, cached for ttl. A read error keeps the last known value; a nil
+// tracker degrades to Noop.
 func newLiveGlobalShellEnv(svc shellenvservice.Service, ttl time.Duration, tracker libtracker.ActivityTracker) func() map[string]string {
 	if tracker == nil {
 		tracker = libtracker.NoopTracker{}
@@ -96,10 +89,8 @@ func newLiveGlobalShellEnv(svc shellenvservice.Service, ttl time.Duration, track
 	}
 }
 
-// resolveScrubMode returns raw when it names a recognized posture, else def.
-// An empty value takes the default silently; a non-empty but unrecognized
-// value is a typo, so it is warned on warnW and falls back to def rather than
-// silently disabling the scrub. nil warnW silences the warning.
+// resolveScrubMode returns raw when it names a recognized posture, else def. An
+// unrecognized non-empty value is warned on warnW; nil silences it.
 func resolveScrubMode(raw, def string, warnW io.Writer) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

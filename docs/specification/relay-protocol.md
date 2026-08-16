@@ -1,6 +1,7 @@
 ---
 title: The relay protocol
 description: The wire contract between a contenox runtime and a relay — framing, the envelope, the handshake and its signature, resumption, and what a relay must never do. Enough to run your own.
+order: 4
 ---
 
 # The relay protocol

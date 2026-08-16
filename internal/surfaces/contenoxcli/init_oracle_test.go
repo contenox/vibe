@@ -99,10 +99,9 @@ func oracleChainByID(t *testing.T, raw string) (taskengine.TaskChainDefinition, 
 }
 
 // TestUnit_EmbeddedOracleChain_AgenticLoopShape pins the chain to the shipped
-// agent-chain loop stripped to one tool: chat → tool_call →
-// execute_tool_calls → back, a deterministic verdict_state gate on the text
-// branch, a recovery loop, edge budgets, and machine-contract prompts. The
-// oracle path carries NO shell tool of any kind.
+// agent-chain loop stripped to one tool: chat → tool_call → execute_tool_calls
+// → back, a deterministic verdict_state gate on the text branch, a recovery
+// loop, edge budgets, and machine-contract prompts.
 func TestUnit_EmbeddedOracleChain_AgenticLoopShape(t *testing.T) {
 	name, content := chainOracleDefaultFilename, initOracleDefaultChain
 	chain, tasks := oracleChainByID(t, content)
@@ -184,8 +183,6 @@ func TestUnit_EmbeddedOracleChain_AgenticLoopShape(t *testing.T) {
 // TestUnit_EmbeddedOracleChain_TeachesBothVerdictSets pins the prompt to the
 // contract the tool actually enforces: a permission ask takes approve/deny/wait
 // and a question takes answer/wait, with guidance named as a denial's field.
-// A prompt teaching only half the contract is how the loop burns its budget on
-// corrective results.
 func TestUnit_EmbeddedOracleChain_TeachesBothVerdictSets(t *testing.T) {
 	_, tasks := oracleChainByID(t, initOracleDefaultChain)
 	for _, id := range []string{"oracle_loop", "oracle_recovery"} {
@@ -355,10 +352,7 @@ func TestUnit_OracleChainCandidates_TakesAnAgentNameOrAFilename(t *testing.T) {
 }
 
 // TestUnit_ACPPolicySource_SeesGeneratedEnvelopes pins the search path the ACP
-// host evaluates subagents on. A declared agent's envelope is emitted into
-// .generated/, and the ACP host is the prime path for subagents — a source that
-// could not read it would evaluate every declared subagent under the built-in
-// default while reporting nothing but a tracker line.
+// host evaluates subagents on.
 func TestUnit_ACPPolicySource_SeesGeneratedEnvelopes(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

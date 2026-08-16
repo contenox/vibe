@@ -8,19 +8,14 @@ import (
 	"sync/atomic"
 )
 
-// Factory holds the serve-level allowlist of workspace roots a browser
-// client may choose as a session's workspace. A directory that is a root, or
-// lies under one, is permitted (see Resolve for the containment rule); the
-// first root is the default, used for the sentinel "/" or an empty request.
-// The root set is swapped atomically (see current): every reader sees either
-// the old set or the new one, never a torn one, without locking.
+// Factory holds the serve-level allowlist of workspace roots a client may choose
+// as a session's workspace. The first root is the default. The root set is
+// swapped atomically, so every reader sees either the old set or the new one.
 type Factory struct {
 	// current is the live root snapshot, swapped wholesale by SetRoots.
 	current atomic.Pointer[rootSet]
 }
 
-// rootSet is an immutable snapshot of the allowlist: built once, never
-// mutated, only replaced.
 type rootSet struct {
 	// roots is the ordered, de-duplicated, symlink-resolved allowlist; roots[0] is the default.
 	roots []string
@@ -28,17 +23,7 @@ type rootSet struct {
 	display map[string]string
 }
 
-// buildRootSet cleans, absolutizes, symlink-resolves, and de-duplicates
-// roots into an immutable snapshot. At least one root is required.
-//
-// A root at or under the control plane is refused here, which is what makes
-// the deny structural: every way an allowlist comes into being (NewFactory,
-// SetRoots) funnels through this one function, so no caller can assemble a
-// Factory that advertises the runtime's own config, database, or policies as
-// a place a session may run. Refusing at construction is also what closes the
-// default-root hole — Resolve answers the "/" sentinel from roots[0], so a
-// control-plane path that reached position zero would be handed out as a cwd
-// without any further check.
+// Every allowlist funnels through here, which is what makes the control-plane deny structural.
 func buildRootSet(roots ...string) (*rootSet, error) {
 	rs := &rootSet{display: map[string]string{}}
 	seen := map[string]struct{}{}
@@ -68,7 +53,6 @@ func buildRootSet(roots ...string) (*rootSet, error) {
 	return rs, nil
 }
 
-// defaultRoot returns the snapshot's default root (roots[0]).
 func (rs *rootSet) defaultRoot() string {
 	if len(rs.roots) == 0 {
 		return ""
@@ -76,7 +60,6 @@ func (rs *rootSet) defaultRoot() string {
 	return rs.roots[0]
 }
 
-// describe joins the resolved roots for a teaching refusal message.
 func (rs *rootSet) describe() string {
 	return strings.Join(rs.roots, ", ")
 }
@@ -93,12 +76,9 @@ func NewFactory(roots ...string) (*Factory, error) {
 	return f, nil
 }
 
-// SetRoots atomically replaces the allowlist with a freshly-normalized
-// snapshot (same rules as NewFactory). An in-flight reader continues on the
-// old snapshot until the swap lands. At least one root is required; an
-// invalid list is refused and the previous allowlist is left untouched.
-// Default is always the new roots[0] — a caller that must keep a fixed
-// default (serve) is responsible for keeping it first in the list it passes.
+// SetRoots atomically replaces the allowlist with a freshly-normalized snapshot.
+// An invalid list is refused and the previous allowlist left untouched. The
+// default is always the new roots[0].
 func (f *Factory) SetRoots(roots []string) error {
 	rs, err := buildRootSet(roots...)
 	if err != nil {
@@ -108,8 +88,6 @@ func (f *Factory) SetRoots(roots []string) error {
 	return nil
 }
 
-// load returns the live snapshot, falling back to an empty one for a
-// zero-value Factory.
 func (f *Factory) load() *rootSet {
 	if rs := f.current.Load(); rs != nil {
 		return rs
@@ -138,17 +116,10 @@ func (f *Factory) DescribeRoots() string {
 	return f.load().describe()
 }
 
-// Resolve maps a requested root to a permitted, resolved directory. "/" and
-// "" resolve to the default root; any other value must be an allowlisted
-// root or a segment-aware subpath of one, and is returned as the requested
-// subpath, not its containing root. A path under the runtime's control plane
-// is refused first with ErrControlPlane; anything else outside every root is
-// refused with ErrNotAllowed.
-//
-// The default root is re-checked against the denylist rather than trusted
-// from buildRootSet: the denylist is process-global and may be registered
-// after a Factory exists, so construction order alone cannot carry the
-// guarantee for the one path that returns a root without matching it.
+// Resolve maps a requested root to a permitted, resolved directory. "/" and ""
+// resolve to the default root; any other value must be an allowlisted root or a
+// segment-aware subpath of one. A control-plane path is refused with
+// ErrControlPlane, anything else outside every root with ErrNotAllowed.
 func (f *Factory) Resolve(root string) (string, error) {
 	rs := f.load()
 	if root == "" || root == "/" {
@@ -188,8 +159,6 @@ func (f *Factory) Allows(root string) (string, bool) {
 // transport error.
 var ErrCwdNotPermitted = errors.New("session cwd is not permitted")
 
-// cwdError carries a refusal message verbatim while matching
-// ErrCwdNotPermitted under errors.Is.
 type cwdError struct{ msg string }
 
 func (e *cwdError) Error() string { return e.msg }
@@ -201,11 +170,10 @@ func cwdRefusal(format string, args ...any) error {
 	return &cwdError{msg: fmt.Sprintf(format, args...)}
 }
 
-// ResolveSessionCwd is the one decision procedure for which directory a
-// session runs in. Rules, in order: non-empty cwd must be absolute; "/" or
-// empty means "unspecified" and resolves to f's default root (or fallback
-// when f is nil); otherwise cwd must resolve under an allowlisted root, or
-// (with f nil, the stdio path with no allowlist) is returned unchanged.
+// ResolveSessionCwd is the one decision procedure for which directory a session
+// runs in: a non-empty cwd must be absolute; "/" or empty resolves to f's default
+// root, or fallback when f is nil; otherwise cwd must resolve under an
+// allowlisted root.
 func ResolveSessionCwd(f *Factory, cwd, fallback string) (string, error) {
 	if cwd != "" && cwd != "/" && !filepath.IsAbs(cwd) {
 		return "", cwdRefusal("cwd must be an absolute path, got %q", cwd)
@@ -263,12 +231,9 @@ func OpenView(root string) (*View, error) {
 	return newView(resolved)
 }
 
-// OpenPrivilegedView returns a View whose resolutions skip the
-// control-plane deny; escape containment is still enforced exactly as for
-// any other view. Reserved for the runtime's own internal consumers reading
-// its own governing state (chain-agent discovery, the chain-editor API) —
-// never for an agent-facing surface (session cwd, /files browse, local_fs,
-// search).
+// OpenPrivilegedView returns a View whose resolutions skip the control-plane
+// deny; escape containment is still enforced. Reserved for the runtime's own
+// reads of its governing state, never for an agent-facing surface.
 func OpenPrivilegedView(root string) (*View, error) {
 	v, err := OpenView(root)
 	if err != nil {
@@ -278,7 +243,6 @@ func OpenPrivilegedView(root string) (*View, error) {
 	return v, nil
 }
 
-// newView builds a View for an already-resolved root.
 func newView(resolved string) (*View, error) {
 	realRoot, err := ResolveRoot(resolved)
 	if err != nil {

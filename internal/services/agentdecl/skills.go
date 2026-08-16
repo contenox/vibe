@@ -15,16 +15,12 @@ import (
 // agents that use them.
 const SkillDirName = "skills"
 
-// SkillsMacro is what a declaration writes to pull the inventory in. It is
-// expanded when the chain is generated rather than per request: the inventory
-// changes when a file changes, not when a prompt runs, and SystemInstruction is
-// the provider cache's stable prefix.
+// SkillsMacro is what a declaration writes to pull the inventory in. It expands
+// when the chain is generated, not per request.
 const SkillsMacro = "{{skills}}"
 
 // Skill is one procedure: how to orchestrate several tools for a repeated job.
-// The runtime does not load or execute it — the inventory tells the agent where
-// it is, and the agent reads it with the file tool it already has, under the
-// rules that already govern reads.
+// The runtime does not load or execute it; the agent reads it with its file tool.
 type Skill struct {
 	Name        string
 	Description string
@@ -32,18 +28,9 @@ type Skill struct {
 }
 
 // DiscoverSkills reads every skill under the given contenox directories, nearest
-// root first. Two layouts are accepted: a flat `timesheet.md`, and the
-// `timesheet/SKILL.md` folder the published format uses — the folder form is
-// what lets a skill ship reference files beside its instructions.
-//
-// A skill nearer the workspace shadows one of the same name further out, which
-// is the precedence every other file in contenox follows.
-//
-// workspaceRoot is what the emitted path is made relative to. The agent reads a
-// skill with local_fs, which refuses absolute paths outright
-// (localfileservice.NormalizeRelPath) — so a skill it cannot address is a skill
-// it cannot use, and one outside the workspace is left out rather than listed
-// as an instruction that fails.
+// root first, in either the flat `timesheet.md` or the `timesheet/SKILL.md`
+// layout. A nearer skill shadows one of the same name further out, and one
+// outside workspaceRoot is left out because the agent could not address it.
 func DiscoverSkills(contenoxDirs []string, workspaceRoot string) []Skill {
 	seen := map[string]bool{}
 	var out []Skill
@@ -68,9 +55,6 @@ func DiscoverSkills(contenoxDirs []string, workspaceRoot string) []Skill {
 	return out
 }
 
-// readablePath is the skill's location as the agent must express it: relative
-// to the directory its file tool is rooted at. Reports false for anything the
-// tool could not open.
 func readablePath(path, workspaceRoot string) (string, bool) {
 	if strings.TrimSpace(workspaceRoot) == "" {
 		return "", false
@@ -116,8 +100,7 @@ func readSkill(path string, entry fs.DirEntry) (Skill, bool) {
 	}
 	skill := Skill{Name: name, Path: path}
 
-	// Frontmatter is optional: a bare Markdown procedure is still a skill, and
-	// requiring a header would make the cheapest possible one impossible.
+	// Frontmatter is optional: a bare Markdown procedure is still a skill.
 	if front, _, ok := splitFrontmatter(data); ok {
 		fields := map[string]any{}
 		if err := yaml.Unmarshal(front, &fields); err == nil {
@@ -133,9 +116,6 @@ func readSkill(path string, entry fs.DirEntry) (Skill, bool) {
 	return skill, true
 }
 
-// firstProseLine is the fallback description: the first line of the body that
-// is neither frontmatter nor a heading. A skill with no description at all is
-// invisible to the agent, so anything beats nothing.
 func firstProseLine(data []byte) string {
 	_, body, ok := splitFrontmatter(data)
 	if !ok {
@@ -155,9 +135,7 @@ func firstProseLine(data []byte) string {
 }
 
 // RenderSkillInventory is what {{skills}} becomes: one line per procedure, with
-// the path to read. Deliberately the index and not the bodies — ten preloaded
-// procedures would be most of a context window, and the agent can read the one
-// it needs.
+// the path to read. The index, not the bodies.
 func RenderSkillInventory(skills []Skill) string {
 	if len(skills) == 0 {
 		return "No skills are available."
@@ -174,9 +152,6 @@ func RenderSkillInventory(skills []Skill) string {
 	return b.String()
 }
 
-// expandSkills replaces the macro in a declaration body. Left alone when the
-// declaration does not ask for it, so a file that never heard of skills is
-// unchanged.
 func expandSkills(prompt string, skills []Skill) string {
 	if !strings.Contains(prompt, SkillsMacro) {
 		return prompt

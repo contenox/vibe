@@ -1,6 +1,7 @@
 ---
 title: Annotated Examples
 description: Full working task chains with commentary, from tool use to error handling.
+order: 3
 ---
 
 # Annotated Examples
@@ -9,7 +10,7 @@ These chains show the handlers and transition patterns from the [specification](
 
 ## 1. The Default Chain (Tool Use)
 
-This is the tool-use loop pattern behind every interactive agent chain: a model call that either loops to run pending tool calls or ends the turn. The chain compiled from the `acp` agent declaration follows the same shape, just fuller — a router, a coding loop, and a recovery loop. See [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) for how a compiled chain is named and resolved. The example below is simplified for clarity.
+This is the tool-use loop pattern behind every interactive agent chain: a model call that either loops to run pending tool calls or ends the turn. The chain compiled from the `acp` agent declaration follows the same shape, just fuller — a router, a coding loop, and a recovery loop. See [Chain files: naming, roles, and resolution](/docs/guide/chains/naming/) for how a compiled chain is named and resolved. The example below is simplified for clarity.
 
 ```jsonc
 {

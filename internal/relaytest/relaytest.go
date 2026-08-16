@@ -1,7 +1,6 @@
 // Package relaytest is an in-memory stand-in for a relay, for testing a
-// connector without a network. Links are net.Pipe pairs, so nothing here
-// binds a socket, and every [Relay] generates a real signing identity so a
-// connector's verification path is exercised against it.
+// connector without a network. Links are net.Pipe pairs, and every [Relay]
+// generates a real signing identity.
 package relaytest
 
 import (
@@ -22,7 +21,7 @@ const recvBuffer = 256
 const defaultDeadline = 10 * time.Second
 
 // Relay is a fake relay implementing hello, heartbeat, and cargo routing by
-// (instance, session); the zero value is not usable, call [New].
+// (instance, session). Use [New].
 type Relay struct {
 	autoControl bool
 	priv        libcipher.SigningPrivateKey
@@ -52,7 +51,6 @@ func NoSignature() Option { return func(r *Relay) { r.sign = false } }
 func New(opts ...Option) *Relay {
 	_, priv, err := libcipher.GenerateSigningKey()
 	if err != nil {
-		// No error to return, and every caller would ignore one anyway.
 		panic("relaytest: generate signing key: " + err.Error())
 	}
 	r := &Relay{autoControl: true, priv: priv, sign: true, byID: map[string]*Link{}}
@@ -62,16 +60,14 @@ func New(opts ...Option) *Relay {
 	return r
 }
 
-// PublicKey is the relay's identity in the encoding
-// [librelay.ParsePublicKey] reads, ready to be handed to a connector as its
-// pinned key.
+// PublicKey is the relay's identity in the encoding [librelay.ParsePublicKey]
+// reads.
 func (r *Relay) PublicKey() string {
 	return librelay.FormatPublicKey(r.priv.Public().(libcipher.SigningPublicKey))
 }
 
-// Link is one connector's connection; it owns the relay side of a pipe and
-// runs a read loop, and the connector under test gets the other side from
-// [Link.Conn].
+// Link is one connector's connection: it owns the relay side of a pipe and runs
+// a read loop. The connector under test gets the other side from [Link.Conn].
 type Link struct {
 	relay *Relay
 	conn  net.Conn
@@ -88,8 +84,7 @@ type Link struct {
 	errs     []error
 }
 
-// Dial returns a new Link; named for the connector's direction, not an
-// accept — nothing here listens.
+// Dial returns a new Link, named for the connector's direction.
 func (r *Relay) Dial() *Link {
 	relaySide, connectorSide := net.Pipe()
 	l := &Link{
@@ -109,8 +104,7 @@ func (r *Relay) Dial() *Link {
 	return l
 }
 
-// Conn returns the connector's end of the link; closing it looks like a
-// connector-side hangup to the relay.
+// Conn returns the connector's end of the link.
 func (l *Link) Conn() net.Conn { return l.conn }
 
 func (l *Link) read() {
@@ -123,8 +117,6 @@ func (l *Link) read() {
 			if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrClosedPipe) {
 				l.note(err)
 			}
-			// Only a framing error kills the stream; a malformed frame
-			// leaves the reader usable.
 			if errors.Is(err, librelay.ErrFrameTooLarge) || errors.Is(err, librelay.ErrReaderClosed) ||
 				errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, io.ErrUnexpectedEOF) {
 				return
@@ -152,8 +144,6 @@ func (l *Link) autoRespond(f librelay.Frame) {
 			return
 		}
 		if h.Instance == "" || (f.Instance != "" && h.Instance != f.Instance) {
-			// Frame's routing key and the payload's claim must agree, or
-			// routing and accounting would use different identities.
 			_ = l.Send(ctx, librelay.NewError(f, librelay.CodeUnknownInstance, "hello instance does not match frame instance"))
 			return
 		}
@@ -161,8 +151,6 @@ func (l *Link) autoRespond(f librelay.Frame) {
 		version := min(h.ProtocolVersion, librelay.ProtocolVersion)
 		welcome := librelay.Welcome{ProtocolVersion: version, Relay: "relaytest"}
 		if l.relay.sign && len(h.Nonce) > 0 {
-			// Signed over the version selected, not offered: the connector
-			// verifies against what it was told.
 			sig, err := librelay.SignWelcome(l.relay.priv, h.Nonce, version, h.Instance)
 			if err != nil {
 				_ = l.Send(ctx, librelay.NewError(f, librelay.CodeMalformedFrame, err.Error()))
@@ -179,7 +167,6 @@ func (l *Link) autoRespond(f librelay.Frame) {
 		}
 		_ = l.Send(ctx, librelay.Frame{Type: librelay.TypeAck, Instance: f.Instance, ReplyTo: f.ID})
 	case librelay.TypeAck, librelay.TypeWelcome, librelay.TypeError:
-		// Responses and relay-authored types: nothing is owed.
 	default:
 		if reply, owed := librelay.Unsupported(f); owed {
 			_ = l.Send(ctx, reply)
@@ -187,8 +174,8 @@ func (l *Link) autoRespond(f librelay.Frame) {
 	}
 }
 
-// Send queues a frame for delivery to the connector, preserving order, and
-// returns once queued rather than once written.
+// Send queues a frame for delivery to the connector, in order, returning once
+// queued rather than once written.
 func (l *Link) Send(ctx context.Context, f librelay.Frame) error {
 	if err := f.Validate(); err != nil {
 		return err
@@ -225,8 +212,6 @@ func (l *Link) Recv(ctx context.Context) (librelay.Frame, error) {
 	case f := <-l.recv:
 		return f, nil
 	case <-l.done:
-		// Drains anything queued before the hangup, so a test can still
-		// see the last frame sent.
 		select {
 		case f := <-l.recv:
 			return f, nil
@@ -238,11 +223,10 @@ func (l *Link) Recv(ctx context.Context) (librelay.Frame, error) {
 	}
 }
 
-// Drop slams the connection shut without a close frame, the way a relay
-// restart looks from the connector's side; idempotent.
+// Drop slams the connection shut without a close frame, the way a relay restart
+// looks from the connector's side. It is idempotent.
 func (l *Link) Drop() {
-	// srv, not conn: closing the connector's end would simulate a
-	// connector hangup, not a relay outage.
+	// srv, not conn: closing conn would simulate a connector hangup.
 	l.closeOnce.Do(func() { _ = l.srv.Close() })
 }
 

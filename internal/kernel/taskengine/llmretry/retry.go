@@ -1,9 +1,6 @@
 // Package llmretry wraps a single LLM call with classified retry, exponential
-// backoff, and an optional model fallback. It has no contenox-internal
-// dependencies and is safe to use from any task handler. The classifier
-// matches substrings in the formatted error (provider clients return
-// fmt.Errorf-wrapped strings, not typed errors), keeping it decoupled from
-// any specific provider.
+// backoff, and an optional model fallback. The classifier matches substrings in
+// the formatted error, since provider clients return no typed errors.
 package llmretry
 
 import (
@@ -51,9 +48,7 @@ func (c ErrorClass) IsRetryable() bool {
 	}
 }
 
-// ClassifyError inspects err for known transient classes. Returns ClassNone
-// for nil errors. Detection is intentionally permissive (substring match
-// against the formatted error) because providers do not expose typed errors.
+// ClassifyError inspects err for known transient classes.
 func ClassifyError(err error) ErrorClass {
 	if err == nil {
 		return ClassNone
@@ -90,9 +85,8 @@ func containsAny(s string, needles ...string) bool {
 	return false
 }
 
-// Duration is a time.Duration that JSON-decodes from either a numeric
-// nanosecond value or a duration string ("1s", "500ms", "2m"). This lets
-// chain JSON files express timeouts in human form.
+// Duration is a time.Duration that JSON-decodes from either a numeric nanosecond
+// value or a duration string ("1s", "500ms", "2m").
 type Duration time.Duration
 
 // D returns the underlying time.Duration.
@@ -165,13 +159,6 @@ type Outcome struct {
 }
 
 // Do invokes call with primaryModel, retrying on transient errors per p.
-// After p.FallbackAfter consecutive failures, it switches to p.FallbackModelID
-// (when set) for remaining attempts. Auth, capacity, canceled, and permanent
-// errors never retry.
-//
-// call receives the model id to use; on fallback, that id is p.FallbackModelID.
-// The caller's closure is responsible for plumbing the id into the underlying
-// provider call (e.g. by overriding the Request.ModelNames slice).
 func Do(ctx context.Context, p RetryPolicy, primaryModel string, call func(modelID string) (any, error)) (any, Outcome, error) {
 	start := time.Now()
 	out := Outcome{}

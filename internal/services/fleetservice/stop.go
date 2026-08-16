@@ -1,7 +1,5 @@
-// stop.go is the operator's mission kill switch. StopMission is the durable
-// half (status, asks, checkpoints, over the shared store); the live half is
-// the StatusChanged subscriber BuildInProcess wires, which reaps the unit
-// subprocess in whichever process hosts it.
+// StopMission is the durable half of the mission kill switch; the live half is
+// the StatusChanged subscriber BuildInProcess wires.
 package fleetservice
 
 import (
@@ -50,8 +48,7 @@ func runStatusTeardown(ctx context.Context, bus libbus.Messenger, missions missi
 			if err := json.Unmarshal(data, &ev); err != nil || ev.MissionID == "" {
 				continue
 			}
-			// The event is self-contained but names no instance; the mission
-			// row holds which unit to reap.
+			// The event names no instance; the mission row holds which unit to reap.
 			m, err := missions.Get(ctx, ev.MissionID)
 			if err != nil || m.InstanceID == "" {
 				continue

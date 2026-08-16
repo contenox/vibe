@@ -1,8 +1,7 @@
 // Package missionchanges answers two oversight questions from a mission's
-// already-journaled work: what did the unit change, and did its attention
-// wander outside its workspace. It is a pure consumer of the kernel's replay
-// journal — it never records anything and no method mutates a mission
-// (advice-not-gate: scores rank and anomalies flag, they never gate).
+// already-journaled work: what the unit changed, and whether its attention
+// wandered outside its workspace. It is a pure consumer of the replay journal
+// and never gates.
 package missionchanges
 
 import (

@@ -18,11 +18,9 @@ type ReporterStore interface {
 	Deregister(ctx context.Context, kind Kind, instanceID string) error
 }
 
-// Reporter owns one process's presence record and keeps it alive: it writes
-// the record on start, renews it on a modest interval and whenever a caller
-// signals a change, and best-effort deregisters on shutdown. Every store
-// error is a shrug reported to the tracker; StartReporter never blocks or
-// fails the process it observes.
+// Reporter owns one process's presence record and keeps it alive: writes it on
+// start, renews it periodically and on a signalled change, and best-effort
+// deregisters on shutdown. It never blocks or fails the process it observes.
 type Reporter struct {
 	store    ReporterStore
 	tracker  libtracker.ActivityTracker
@@ -64,11 +62,9 @@ func WithTracker(tracker libtracker.ActivityTracker) ReporterOption {
 	}
 }
 
-// StartReporter registers rec and starts renewing it in the background
-// until ctx is cancelled (or Stop is called), then best-effort
-// deregisters. It fills in blank identity fields (InstanceID, PID, Host,
-// StartedAt); the caller supplies only Kind and what it knows. Never
-// blocks — even the first write happens on the background goroutine.
+// StartReporter registers rec and renews it in the background until ctx is
+// cancelled or Stop is called, then best-effort deregisters. It fills in blank
+// identity fields and never blocks.
 func StartReporter(ctx context.Context, store ReporterStore, rec Record, opts ...ReporterOption) *Reporter {
 	rctx, cancel := context.WithCancel(ctx)
 	r := &Reporter{
@@ -141,11 +137,8 @@ func (r *Reporter) run(ctx context.Context) {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 
-	// The initial registration is deferred past the boot-critical window
-	// where schema/preset embedding writes the same SQLite file, so an eager
-	// write cannot starve that init into "database is locked". A
-	// session-event kick still writes immediately; ctx cancellation during
-	// the delay deregisters cleanly.
+	// Deferred past the boot-critical window where schema embedding writes the
+	// same SQLite file, so an eager write cannot starve init into "database is locked".
 	select {
 	case <-ctx.Done():
 		return
@@ -178,9 +171,6 @@ func (r *Reporter) write(ctx context.Context) {
 	}
 }
 
-// deregister runs on shutdown with a fresh bounded context (the reporter's own is
-// already cancelled) so a clean exit can still remove the row. Best-effort: a
-// failure just leaves the row to age out on its TTL.
 func (r *Reporter) deregister() {
 	r.mu.Lock()
 	kind, id := r.rec.Kind, r.rec.InstanceID

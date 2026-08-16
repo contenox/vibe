@@ -1,6 +1,7 @@
 ---
 title: What contenox is
 description: The rules an AI agent runs under are a file you wrote, in your repo, that you can read — and nothing runs that the file does not allow. What contenox is, why it exists, what it is typically used for, and what it is not.
+order: 2
 ---
 
 # What contenox is
@@ -72,7 +73,7 @@ preference.
 - Work that fires from something else: a webhook, a schedule, a form on your
   own site, each running a declared agent on a machine you already own.
 - Local inference where nothing may leave the network, or a hosted model on
-  your own key and your own region when that is the honest trade.
+  your own key and your own region when that is the trade you want.
 - The unglamorous case, and the most common one: a repeatable job you would
   otherwise have written a shell script for, except this one can ask you a
   question halfway through.

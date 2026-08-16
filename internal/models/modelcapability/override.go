@@ -53,8 +53,6 @@ func (s Service) SetVision(ctx context.Context, provider, model string, canVisio
 	return s.set(ctx, provider, model, func(v *storedOverride) { v.CanVision = &canVision })
 }
 
-// set merges one capability change into the stored override so setting think
-// and vision independently never clobbers the other.
 func (s Service) set(ctx context.Context, provider, model string, apply func(*storedOverride)) (*Override, error) {
 	if s.store == nil {
 		return nil, fmt.Errorf("store is required")

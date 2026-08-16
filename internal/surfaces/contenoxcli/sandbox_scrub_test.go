@@ -49,11 +49,9 @@ func TestUnit_ResolvedSandboxEnv_StripsSecretKeepsToolchain(t *testing.T) {
 }
 
 // TestUnit_SandboxEnvPreview_MatchesAppliedComposition is the truth-in-preview
-// regression: `contenox sandbox env` and every real spawn root call the exact
-// same resolvedSandboxEnv, so the preview's printed names must equal the
-// names the composition actually keeps — including the operator's
-// shellenvservice entries, which the preview used to render with a nil
-// injector (a silent divergence from what a shell actually received).
+// regression: `contenox sandbox env` and every real spawn root call the same
+// resolvedSandboxEnv, so the preview's printed names must equal what the
+// composition keeps.
 func TestUnit_SandboxEnvPreview_MatchesAppliedComposition(t *testing.T) {
 	t.Setenv("TESTSECRET_API_KEY", "leaked-value")
 	t.Setenv("SANDBOX_SHELL_SCRUB", "")

@@ -10,18 +10,14 @@ import (
 	"github.com/contenox/contenox/internal/services/agentdecl"
 )
 
-// SystemDirName is the subdirectory of a contenox directory holding the
-// shipped chain files. Defined here because this is the lowest package that
-// resolves one; contenoxcli's init writes them there.
+// SystemDirName is the subdirectory of a contenox directory holding the shipped
+// chain files.
 const SystemDirName = "system"
 
 const (
 	defaultChainFilename = "chain-agent-acp.json"
 	chainPathEnv         = "CONTENOX_ACP_CHAIN_PATH"
 
-	// defaultFIMChainFilename/fimChainPathEnv are the autocomplete analog of
-	// defaultChainFilename/chainPathEnv, kept separate so the completion
-	// model/chain can differ from the chat one.
 	defaultFIMChainFilename = "chain-fim-default.json"
 	fimChainPathEnv         = "CONTENOX_ACP_FIM_CHAIN_PATH"
 )
@@ -36,9 +32,8 @@ func LoadChainRegistry() (*ChainRegistry, error) {
 }
 
 // LoadChainRegistryFrom loads the ACP chain for a specific profile: filename is
-// the ~/.contenox/ file the chain is read from, envVar overrides that path.
-// A missing file is a hard error (fail closed) — callers must not fall back to
-// a different chain.
+// the ~/.contenox/ file the chain is read from, envVar overrides that path. A
+// missing file is a hard error.
 func LoadChainRegistryFrom(filename, envVar string) (*ChainRegistry, error) {
 	path := os.Getenv(envVar)
 	if path == "" {
@@ -77,9 +72,8 @@ func (r *ChainRegistry) Default() *taskengine.TaskChainDefinition { return r.def
 func (r *ChainRegistry) Source() string { return r.source }
 
 // LoadFIMChainRegistry loads the fill-in-the-middle chain for
-// _contenox/autocomplete, mirroring LoadChainRegistry's file+env-var
-// convention (fail-closed: a missing/invalid file is a hard error, never a
-// silent fallback to the chat chain).
+// _contenox/autocomplete, mirroring LoadChainRegistry's file and env-var
+// convention. A missing or invalid file is a hard error.
 func LoadFIMChainRegistry() (*ChainRegistry, error) {
 	return LoadChainRegistryFrom(defaultFIMChainFilename, fimChainPathEnv)
 }

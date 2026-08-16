@@ -18,11 +18,9 @@ type GeminiStreamClient struct {
 	geminiClient
 }
 
-// Stream emits raw deltas per the modelrepo.StreamParcel contract: text and
-// thinking deltas as they arrive, each functionCall part as one whole-call
-// ToolCallDelta (Gemini delivers calls complete, so each gets the next
-// sequential index), then one terminal parcel with finishReason and usage.
-// Assembly belongs to the engine-side modelrepo.StreamAssembler.
+// Stream emits raw deltas: text and thinking as they arrive, each functionCall
+// part as one whole-call ToolCallDelta, then one terminal parcel. Assembly
+// belongs to modelrepo.StreamAssembler.
 func (c *GeminiStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
 	parcels := make(chan *modelrepo.StreamParcel)
 	request, err := buildGeminiRequest(c.modelName, messages, args, c.canThink)

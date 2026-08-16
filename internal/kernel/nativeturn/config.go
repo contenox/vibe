@@ -1,9 +1,7 @@
 // Package nativeturn is the serve-level survival layer for native ACP chain
-// turns: it runs an in-flight turn on a serve-rooted Registry, off any single
-// connection, so a dropped connection detaches a viewer without cancelling
-// the turn. Anti-zombie guarantees are enforced by four belts: a last-viewer
-// grace timer, a hard per-turn deadline, a bounded replay journal, and a
-// periodic reaper backstop. Every exported type is safe for concurrent use.
+// turns: an in-flight turn runs on a serve-rooted Registry, so a dropped
+// connection detaches a viewer without cancelling the turn. Every exported type
+// is safe for concurrent use.
 package nativeturn
 
 import (
@@ -39,9 +37,8 @@ const (
 )
 
 // ParseEnv builds a Config from the raw CONTENOX_TURN_MAX (hard deadline) and
-// CONTENOX_TURN_GRACE (last-viewer grace) env strings; an empty field takes the
-// default, a set value must be a positive Go duration, and JournalSize is not
-// env-configurable.
+// CONTENOX_TURN_GRACE (last-viewer grace) env strings. An empty field takes the
+// default; a set value must be a positive Go duration.
 func ParseEnv(turnMax, turnGrace string) (Config, error) {
 	cfg := Config{TurnDeadline: DefaultTurnDeadline, GraceWindow: DefaultGraceWindow}
 

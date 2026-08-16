@@ -12,15 +12,14 @@ import (
 	"time"
 )
 
-// DialFunc opens one connection to a relay; it is the connector's only
-// contact with the network and never accepts.
+// DialFunc opens one connection to a relay. It never accepts.
 type DialFunc func(ctx context.Context, endpoint string, creds Credentials) (net.Conn, error)
 
 // dialTimeout bounds one connection attempt, from TCP through the upgrade.
 const dialTimeout = 15 * time.Second
 
-// UpgradeProtocol is the token this build names in its Upgrade header, and
-// the only token it will accept back.
+// UpgradeProtocol is the token this build names in its Upgrade header, and the
+// only one it accepts back.
 const UpgradeProtocol = "contenox-relay/1"
 
 // defaultConnectPath is where a relay serves the connection endpoint when the
@@ -58,8 +57,8 @@ func parseEndpoint(endpoint string) (*url.URL, error) {
 		return nil, fmt.Errorf("relaylink: endpoint is empty")
 	}
 	raw := endpoint
-	// A bare host or host:port is read as https: a silent cleartext
-	// fallback would put the bearer credential on the wire in plain text.
+	// A bare host or host:port is read as https; a cleartext fallback would put
+	// the bearer credential on the wire in plain text.
 	if !strings.Contains(raw, "://") {
 		raw = "https://" + raw
 	}
@@ -88,8 +87,6 @@ func addrOf(u *url.URL) string {
 }
 
 func upgrade(ctx context.Context, conn net.Conn, u *url.URL, creds Credentials) (net.Conn, error) {
-	// Cleared on success: a live connection must not inherit the upgrade
-	// deadline.
 	if deadline, ok := ctx.Deadline(); ok {
 		if err := conn.SetDeadline(deadline); err != nil {
 			return nil, fmt.Errorf("relaylink: set upgrade deadline: %w", err)
@@ -113,7 +110,6 @@ func upgrade(ctx context.Context, conn net.Conn, u *url.URL, creds Credentials) 
 	if err != nil {
 		return nil, fmt.Errorf("relaylink: read upgrade response: %w", err)
 	}
-	// A 1xx carries no body; closing is form, not a read.
 	_ = resp.Body.Close()
 
 	switch resp.StatusCode {
@@ -124,7 +120,6 @@ func upgrade(ctx context.Context, conn net.Conn, u *url.URL, creds Credentials) 
 		return nil, fmt.Errorf("relaylink: relay refused the upgrade: %s", resp.Status)
 	}
 	if !strings.EqualFold(strings.TrimSpace(resp.Header.Get("Upgrade")), UpgradeProtocol) {
-		// Exact match required, fail-closed.
 		return nil, fmt.Errorf("relaylink: relay upgraded to %q, this build speaks %q",
 			resp.Header.Get("Upgrade"), UpgradeProtocol)
 	}
@@ -132,8 +127,7 @@ func upgrade(ctx context.Context, conn net.Conn, u *url.URL, creds Credentials) 
 		return nil, fmt.Errorf("relaylink: clear upgrade deadline: %w", err)
 	}
 	// Always over the buffered reader: the response parse may have pulled in
-	// bytes the relay sent right after the 101; reading the socket directly
-	// would drop them.
+	// bytes the relay sent right after the 101.
 	return &bufferedConn{Conn: conn, r: br}, nil
 }
 

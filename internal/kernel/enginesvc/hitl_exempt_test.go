@@ -9,8 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// execRecorder is a minimal ToolsRepo that records which side of the exemption
-// router a call landed on.
 type execRecorder struct {
 	taskengine.ToolsRepo
 	hits *[]string
@@ -22,9 +20,8 @@ func (e execRecorder) Exec(_ context.Context, _ time.Time, _ any, _ bool, _ *tas
 	return "ok", taskengine.DataTypeString, nil
 }
 
-// TestUnit_HITLExempt_MissionProviderBypassesGate pins that the mission
-// provider bypasses the HITL gate structurally while every other provider
-// stays gated.
+// TestUnit_HITLExempt_MissionProviderBypassesGate pins that the mission provider
+// bypasses the HITL gate structurally while every other provider stays gated.
 func TestUnit_HITLExempt_MissionProviderBypassesGate(t *testing.T) {
 	var hits []string
 	gated := execRecorder{hits: &hits, tag: "gated"}

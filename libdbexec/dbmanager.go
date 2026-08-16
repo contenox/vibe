@@ -6,8 +6,7 @@ import (
 	"errors"
 )
 
-// Predefined errors, checkable with errors.Is without relying on
-// driver-specific error types or codes.
+// Predefined errors, checkable with errors.Is.
 var (
 	// ErrNotFound is returned by Scan when sql.ErrNoRows is encountered.
 	ErrNotFound = errors.New("libdb: not found")
@@ -60,10 +59,7 @@ var (
 )
 
 // DBManager is the main entry point for database interactions: obtaining
-// executors and managing the connection lifecycle. Typical usage starts a
-// transaction with WithTransaction, defers the returned ReleaseTx
-// immediately, does work through the returned Exec, then calls CommitTx on
-// the success path.
+// executors and managing the connection lifecycle.
 type DBManager interface {
 	// WithoutTransaction returns an executor operating directly on the connection
 	// group, outside any transaction; each operation may run on a different connection.

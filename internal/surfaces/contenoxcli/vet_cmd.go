@@ -59,7 +59,7 @@ func runVetCmd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to resolve .contenox dir: %w", err)
 	}
 	// Trigger files are a beta surface: without the opt-in they stay in the
-	// "skip" class exactly as before, so a stable vet run never changes.
+	// "skip" class.
 	vo := vetOpts{triggers: betaEnabledGlobal(), contenoxDir: contenoxDir}
 
 	var files []string
@@ -150,8 +150,7 @@ func classifyVetFile(path string, data []byte, vo vetOpts) vetFileKind {
 		}
 		return vetKindSkip
 	}
-	// Keys must hold arrays, not merely exist: a vocab.json can map "tasks" or
-	// "rules" to a token number, which presence-alone would misclassify.
+	// Keys must hold arrays, not merely exist.
 	if raw, ok := probe["tasks"]; ok && jsonIsArray(raw) {
 		return vetKindChain
 	}
@@ -185,7 +184,8 @@ func vetOneFile(path string, vo vetOpts) (bool, error, []hitlservice.PolicyDiagn
 		}
 		return true, taskengine.LintChain(&chain), nil
 	case vetKindEnvelope:
-		// A missing/mismatched trusted-binary entry is a warning, not a defect: the envelope is still valid; the runtime refuses the call instead of silently passing it.
+		// A missing or mismatched trusted-binary entry is a warning: the envelope is
+		// still valid, and the runtime refuses the call.
 		return true, hitlservice.VetPolicy(data), hitlservice.TrustedBinaryDiagnostics(data)
 	case vetKindTrigger:
 		return true, eventtrigger.Vet(data, resolveTriggerRef(vo.contenoxDir)), nil

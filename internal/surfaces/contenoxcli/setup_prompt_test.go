@@ -82,10 +82,10 @@ func TestUnit_PromptOllamaModelMenu(t *testing.T) {
 func TestUnit_PrintSetupNextCommand(t *testing.T) {
 	var tty bytes.Buffer
 	printSetupNextCommand(&tty, true)
-	require.Contains(t, tty.String(), `contenox "your first prompt"`)
+	require.Contains(t, tty.String(), `contenox acp`)
 	require.NotContains(t, tty.String(), "Close this tab")
 
 	var piped bytes.Buffer
 	printSetupNextCommand(&piped, false)
-	require.Contains(t, piped.String(), `contenox "your first prompt"`)
+	require.Contains(t, piped.String(), `contenox acp`)
 }

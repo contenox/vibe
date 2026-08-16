@@ -13,11 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_HitlPolicyPath pins how acpsvc resolves a policy name to its
-// on-disk path: "<ContenoxDir>/<name>", the same layout
-// writeEmbeddedHITLPolicies (contenoxcli/hitl_policies.go) writes to and
-// acpPolicySource (contenoxcli/acp_cmd.go) reads from. Empty inputs yield ""
-// rather than a bogus join, since a setup-only transport has no ContenoxDir.
+// TestUnit_HitlPolicyPath pins how acpsvc resolves a policy name to its on-disk
+// path: "<ContenoxDir>/<name>", the same layout writeEmbeddedHITLPolicies
+// (contenoxcli/hitl_policies.go) writes to and acpPolicySource
+// (contenoxcli/acp_cmd.go) reads from.
 func TestUnit_HitlPolicyPath(t *testing.T) {
 	tr := &Transport{}
 	tr.deps.ContenoxDir = filepath.Join(string(filepath.Separator), "home", "op", ".contenox")
@@ -31,11 +30,8 @@ func TestUnit_HitlPolicyPath(t *testing.T) {
 }
 
 // TestUnit_AskApproval_ForwardsPolicyNameAndPath drives AskApproval through a
-// real ACP wire (loopback harness) and asserts the outbound
-// session/request_permission Meta carries the policy name/path and matched
-// rule that hitlservice.EvaluationResult attached to the ApprovalRequest —
-// the defect this closes: the card previously said only "requires approval",
-// never why.
+// real ACP wire and asserts the outbound session/request_permission Meta carries
+// the policy name, path and matched rule.
 func TestUnit_AskApproval_ForwardsPolicyNameAndPath(t *testing.T) {
 	h := newLoopbackHarness(t)
 	h.tr.deps.ContenoxDir = "/home/op/.contenox"

@@ -205,12 +205,11 @@ func TestUnit_BuiltinInteractiveChains_ScopeToolExecutionNodes(t *testing.T) {
 				}
 				require.NotNil(t, task.ExecuteConfig, "task %s execute_config", task.ID)
 
-				// The executor must offer EXACTLY the scope its chat node
-				// offered. Asserting a literal ["*"] instead would forbid a
-				// scoped specialist (the review loop drops the network; the
-				// planner grants only mission tools) while still missing the
-				// drift that actually matters: a tool withheld from the model
-				// at the chat step but still runnable at the execute step.
+				// The executor must offer EXACTLY the scope its chat node offered.
+				// Asserting a literal ["*"] instead would forbid a scoped specialist (the
+				// review loop drops the network; the planner grants only mission tools)
+				// while still missing the drift that actually matters: a tool withheld from
+				// the model at the chat step but still runnable at the execute step.
 				source, found := byID[task.InputVar]
 				require.True(t, found, "task %s input_var %q names no task", task.ID, task.InputVar)
 				require.NotNil(t, source.ExecuteConfig, "task %s source execute_config", source.ID)
@@ -220,9 +219,8 @@ func TestUnit_BuiltinInteractiveChains_ScopeToolExecutionNodes(t *testing.T) {
 					"task %s hide_tools must match its %s scope, or a withheld tool still runs", task.ID, source.ID)
 
 				require.Contains(t, task.ExecuteConfig.ToolsPolicies, "local_fs", "task %s", task.ID)
-				// webtools carries the response/body byte caps, so it is
-				// required whenever the network is in scope — and meaningless
-				// when it has been excluded.
+				// webtools carries the response/body byte caps, so it is required whenever
+				// the network is in scope — and meaningless when it has been excluded.
 				if slices.Contains(task.ExecuteConfig.Tools, "!webtools") {
 					require.NotContains(t, task.ExecuteConfig.ToolsPolicies, "webtools",
 						"task %s excludes webtools but still carries its policy", task.ID)

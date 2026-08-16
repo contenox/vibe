@@ -107,7 +107,8 @@ type dnsDecision struct {
 	Allowed bool    // whether the name is an egress carve-out
 	IP      [4]byte // synthetic address handed out (valid when Allowed && A query)
 	HasIP   bool
-	// Err is non-nil when Host is allow-listed but no synthetic address could be minted (range exhausted) — answered SERVFAIL, distinct from plain NXDOMAIN.
+	// Err is non-nil when Host is allow-listed but no synthetic address could
+	// be minted; answered SERVFAIL, distinct from NXDOMAIN.
 	Err error
 }
 

@@ -221,10 +221,8 @@ func TestUnit_InteractivePolicies_ShellSafeVerbTiers(t *testing.T) {
 			}
 
 			ask := []map[string]any{
-				// Every shell git verb asks, read-looking ones included: a git
-				// subprocess can execute repo-local config, so no prefix is
-				// provably read-only. The no-nag reads are the typed go-git
-				// toolset, pinned above.
+				// Every shell git verb asks, read-looking ones included: a git subprocess
+				// can execute repo-local config, so no prefix is provably read-only.
 				{"command": "git", "args": []any{"status"}},
 				{"command": "git", "args": []any{"diff", "--stat"}},
 				{"command": "git", "args": []any{"log", "--oneline", "-10"}},
@@ -378,10 +376,7 @@ func TestUnit_NoFilePolicyFallback_FailsClosed(t *testing.T) {
 // TestUnit_InteractivePolicies_RuleForEveryReadOnlyLocalFSTool asserts every
 // read-only local_fs tool (the toolset's declared Supports() list minus the
 // three mutators) evaluates to allow on every interactive preset, plus
-// strict.json's read tier. find_files shipped without a rule beside
-// list_dir's, so a plain read triggered an approval card in production; this
-// pins the whole read-only set so the next read-only tool added without a
-// matching rule fails the build instead of surprising a human with a card.
+// strict.json's read tier.
 func TestUnit_InteractivePolicies_RuleForEveryReadOnlyLocalFSTool(t *testing.T) {
 	t.Parallel()
 	declared, err := localtools.NewLocalFSToolsWith(t.TempDir(), nil, hostFileIO{}, localtools.LocalFSToolsName, nil).Supports(context.Background())

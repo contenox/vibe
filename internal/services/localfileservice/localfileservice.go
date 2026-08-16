@@ -64,15 +64,8 @@ type FindResult struct {
 	Truncated bool
 }
 
-// Find recursively walks opts.Path and streams, via emit, every file whose
-// name (or root-relative path, for a '/'-containing pattern) matches any of
-// opts.Globs.
-//
-// Every visited node is re-resolved through s.view.Resolve, not just the walk
-// root: filepath.WalkDir descends into children an interior symlink could
-// point out of the root (or into the control plane), so a node that escapes
-// or is denied is skipped — pruning its subtree if it's a directory — never
-// emitted or descended.
+// Find walks opts.Path, re-resolving every visited node — not just the walk
+// root — so an interior symlink cannot point out of the root.
 func (s *localService) Find(ctx context.Context, opts FindOptions, emit func(Entry) error) (FindResult, error) {
 	var res FindResult
 	startAbs, _, err := s.resolveExisting(opts.Path, true)
@@ -140,8 +133,6 @@ func (s *localService) Find(ctx context.Context, opts FindOptions, emit func(Ent
 	return res, nil
 }
 
-// matchesAnyGlob reports whether rel/name matches any pattern: a pattern with a
-// '/' is matched against the root-relative path, otherwise against the basename.
 func matchesAnyGlob(globs []string, rel, name string) bool {
 	for _, g := range globs {
 		target := name
@@ -383,10 +374,6 @@ func (s *localService) Move(ctx context.Context, fromPath, toPath string) (*Entr
 	return &entry, nil
 }
 
-// resolveExisting normalizes a client path (rejecting absolute paths and
-// traversal via NormalizeRelPath), contains it within the root via vfs, then
-// confirms the target exists — vfs.Contain tolerates a missing leaf, but the
-// read/list/delete/move-source callers require existence and expect ErrNotFound.
 func (s *localService) resolveExisting(raw string, allowRoot bool) (string, string, error) {
 	rel, err := NormalizeRelPath(raw, allowRoot)
 	if err != nil {
@@ -405,9 +392,6 @@ func (s *localService) resolveExisting(raw string, allowRoot bool) (string, stri
 	return abs, rel, nil
 }
 
-// resolveForWrite normalizes and contains a write target (which need not exist
-// yet), rejecting any path whose deepest existing parent escapes the root
-// before creating intermediate directories.
 func (s *localService) resolveForWrite(raw string) (string, string, error) {
 	rel, err := NormalizeRelPath(raw, false)
 	if err != nil {

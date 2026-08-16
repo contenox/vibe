@@ -1,6 +1,7 @@
 ---
 title: Missions
 description: Fire a one-line intent at a declared agent under an authored envelope, and read the durable record it leaves behind — states, hosts, reports, questions, reclaim, and compute bounds.
+order: 11
 ---
 
 # Missions

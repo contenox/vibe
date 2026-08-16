@@ -42,10 +42,9 @@ func EnforceAgentAnswerBounds(ctx context.Context, missions MissionEnvelopeSourc
 	return err
 }
 
-// AnswerAsAgentWithinBounds delivers an agent-attributed answer to row under
-// its mission envelope, atomically: the cap rides the WHERE clause of the
-// write, so concurrent answers across goroutines or processes cannot
-// together exceed it; a blank agentName degrades to the generic agent marker.
+// AnswerAsAgentWithinBounds delivers an agent-attributed answer to row under its
+// mission envelope. The cap rides the WHERE clause of the write, so concurrent
+// answers cannot together exceed it.
 func AnswerAsAgentWithinBounds(ctx context.Context, missions MissionEnvelopeSource, svc Service, row *runtimetypes.HITLApproval, agentName, text string) error {
 	missionID, max, err := agentAnswerAllowance(ctx, missions, svc, row)
 	if err != nil {

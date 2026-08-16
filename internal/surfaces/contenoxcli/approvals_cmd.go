@@ -193,7 +193,7 @@ func respondToAsk(cmd *cobra.Command, askID string, approve bool, answer, asAgen
 		return fmt.Errorf("ask %s is a permission ask (%s.%s) — it takes --approve or --deny, not text", askID, row.ToolsName, row.ToolName)
 	}
 	if asAgentSet {
-		// Pre-check only: the mission's bound is enforced for real by the atomic write below.
+		// Pre-check only: the atomic write below enforces the bound.
 		if err := hitlservice.EnforceAgentAnswerBounds(ctx, missionservice.New(db), svc, row); err != nil {
 			return askRefusalError{err}
 		}
@@ -202,7 +202,7 @@ func respondToAsk(cmd *cobra.Command, askID string, approve bool, answer, asAgen
 	_, checkpointErr := store.GetChainCheckpoint(ctx, askID)
 	hasCheckpoint := checkpointErr == nil
 
-	// Capability to resume is proven before anything is recorded; a checkpointed verdict is one-shot.
+	// Capability to resume is proven before anything is recorded.
 	if hasCheckpoint {
 		deps, cleanup, buildErr := buildResumeDeps(cmd, ctx)
 		if buildErr != nil {
@@ -214,8 +214,7 @@ func respondToAsk(cmd *cobra.Command, askID string, approve bool, answer, asAgen
 
 	switch {
 	case isQuestion && asAgentSet:
-		// Not AnswerAsAgentNamed: the envelope's cap must ride the write, or a
-		// second process answering the same mission concurrently overruns it.
+		// Not AnswerAsAgentNamed: the envelope's cap must ride the write.
 		err = hitlservice.AnswerAsAgentWithinBounds(ctx, missionservice.New(db), svc, row, asAgent, answer)
 	case isQuestion:
 		err = svc.Answer(ctx, askID, answer)
@@ -242,8 +241,8 @@ func respondToAsk(cmd *cobra.Command, askID string, approve bool, answer, asAgen
 		fmt.Fprintf(out, "Answered as agent %q — the durable record attributes this answer to it, and it counts against the mission's agent-answer bound.\n", asAgent)
 	}
 	if hasCheckpoint {
-		// "Resumed", not "completed": the hook returns nil for a terminal run
-		// AND for a clean re-suspension on the run's next ask.
+		// "Resumed", not "completed": the hook returns nil for a terminal run and
+		// for a clean re-suspension.
 		fmt.Fprintf(out, "Verdict recorded for %s and the suspended run was resumed in this process. If it paused on a further ask, 'contenox approvals list' shows it.\n", askID)
 	} else {
 		fmt.Fprintf(out, "Verdict recorded for %s; nothing was suspended under it (the asker is parked in its own process or already past its deadline).\n", askID)
@@ -265,7 +264,8 @@ func buildResumeDeps(cmd *cobra.Command, ctx context.Context) (agentservice.Deps
 		db.Close()
 		return agentservice.Deps{}, nil, err
 	}
-	// HITL gate stays on unconditionally: without it, the resumed unit's next question has nowhere to go and self-answers as a blocker.
+	// HITL gate stays on: without it the resumed unit's next question self-answers
+	// as a blocker.
 	opts.EffectiveHITL = true
 	engine, err := BuildEngine(ctx, db, opts)
 	if err != nil {

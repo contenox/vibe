@@ -25,9 +25,7 @@ act:
 
 In Contenox, a Chain is not a prompt pipeline. It is the reviewed execution
 contract around an agent loop. The loop inside that contract is mapped, task by
-task, in [The agentic loop](https://contenox.com/docs/guide/agentic-loop/).
-
-![A sudo command is refused because the chain's command policy denies it; the policy is plain JSON](/chain-blocked.gif)
+task, in [The agentic loop](https://contenox.com/docs/guide/chains/agentic-loop/).
 
 ---
 
@@ -111,4 +109,4 @@ decides what must pause for approval before execution.
 Declare an agent:
 **[contenox.com/docs/guide/agents](https://contenox.com/docs/guide/agents/)**.
 Write a chain by hand:
-**[contenox.com/docs/guide/first-chain](https://contenox.com/docs/guide/first-chain/)**.
+**[contenox.com/docs/guide/first-chain](https://contenox.com/docs/guide/chains/writing-a-chain/)**.

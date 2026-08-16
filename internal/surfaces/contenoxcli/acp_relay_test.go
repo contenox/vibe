@@ -280,10 +280,9 @@ func TestUnit_ApprovalsWithoutARouterAreExactlyTheOldStdioPath(t *testing.T) {
 	}
 }
 
-// A host has no connection of its own: every session it serves arrives over
-// the relay, so a tool call must resolve the transport holding *that* session
-// rather than a process-wide one. Getting this wrong is what made file and
-// shell tools fail in a host with "no active ACP transport".
+// A host has no connection of its own: every session it serves arrives over the
+// relay, so a tool call must resolve the transport holding *that* session
+// rather than a process-wide one.
 func TestUnit_RoutedTransport_PrefersTheSessionsOwnConnection(t *testing.T) {
 	router := acpsvc.NewSessionRouter()
 

@@ -2,8 +2,8 @@ package libtracker
 
 import "context"
 
-// ChainedTracker wraps multiple ActivityTrackers into one.
-// All events are broadcasted to all trackers in the chain.
+// ChainedTracker wraps multiple ActivityTrackers into one, broadcasting every
+// event to all of them.
 type ChainedTracker []ActivityTracker
 
 // NewChainedTracker creates a new ActivityTracker that chains multiple trackers.
@@ -11,9 +11,7 @@ func NewChainedTracker(trackers ...ActivityTracker) ActivityTracker {
 	return ChainedTracker(trackers)
 }
 
-// Start implements ActivityTracker.Start by calling Start on all chained trackers.
-// It returns combined reportErr, reportChange, and end functions that call the
-// respective functions from all trackers.
+// Start implements [ActivityTracker.Start] across every chained tracker.
 func (ct ChainedTracker) Start(
 	ctx context.Context,
 	operation string,

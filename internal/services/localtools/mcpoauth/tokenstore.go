@@ -20,8 +20,6 @@ type TokenStore interface {
 	SetClientRegistration(ctx context.Context, serverName string, reg *ClientRegistration) error
 }
 
-// storedToken is the on-disk representation. We use RFC3339 for Expiry so
-// that it survives JSON round-trips without timezone loss.
 type storedToken struct {
 	AccessToken  string `json:"access_token"`
 	TokenType    string `json:"token_type,omitempty"`

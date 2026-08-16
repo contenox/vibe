@@ -12,8 +12,7 @@ import (
 	"github.com/contenox/contenox/libdbexec"
 )
 
-// Schema is the DDL needed to bootstrap the kv store table in SQLite.
-// Call this once after opening the database (NewSQLiteDBManager accepts a schema string).
+// SQLiteSchema is the DDL that bootstraps the kv store table in SQLite.
 const SQLiteSchema = `
 CREATE TABLE IF NOT EXISTS kv_store (
     key        TEXT    NOT NULL PRIMARY KEY,
@@ -27,15 +26,13 @@ type SQLiteManager struct {
 	db libdbexec.DBManager
 }
 
-// NewSQLiteManager wraps an existing libdbexec.DBManager.
-// The caller is responsible for opening the database and applying SQLiteSchema.
+// NewSQLiteManager wraps an existing libdbexec.DBManager. The caller opens the
+// database and applies SQLiteSchema.
 func NewSQLiteManager(db libdbexec.DBManager) *SQLiteManager {
 	return &SQLiteManager{db: db}
 }
 
-// Executor returns a KVExecutor bound to a non-transactional connection. The
-// manager is handed along too, so list/set read-modify-write ops can open a
-// real transaction; a bare libdbexec.Exec cannot start one.
+// Executor returns a KVExecutor bound to a non-transactional connection.
 func (m *SQLiteManager) Executor(_ context.Context) (KVExecutor, error) {
 	return &sqliteExecutor{exec: m.db.WithoutTransaction(), db: m.db}, nil
 }
@@ -45,9 +42,7 @@ func (m *SQLiteManager) Close() error {
 	return m.db.Close()
 }
 
-// sqliteExecutor implements KVExecutor using a libdbexec.Exec. db is nil for
-// executors created internally to run inside an already-open transaction (see
-// withWriteTx), which must never try to nest another one.
+// db is nil for executors already running inside a transaction.
 type sqliteExecutor struct {
 	exec libdbexec.Exec
 	db   libdbexec.DBManager
@@ -67,18 +62,14 @@ func translateSQLiteKVError(err error) error {
 }
 
 // withWriteTx runs fn inside a transaction that already holds SQLite's write
-// lock, so a read-modify-write cycle cannot interleave with another writer's.
-// libdbexec only exposes DEFERRED transactions; a deferred tx that reads then
-// writes fails to upgrade with SQLITE_BUSY_SNAPSHOT under WAL if another writer
-// intervened. Issuing a no-op write first promotes it immediately (BEGIN
-// IMMEDIATE semantics) without materialising a row for a missing key. The lock
-// is a real database-level lock: it holds across processes sharing the file,
-// not just goroutines.
+// lock, so a read-modify-write cycle cannot interleave with another writer's. A
+// no-op write promotes libdbexec's DEFERRED transaction to BEGIN IMMEDIATE
+// semantics.
 func (e *sqliteExecutor) withWriteTx(ctx context.Context, key Key, fn func(txe *sqliteExecutor) error) error {
 	if e.db == nil {
 		return fmt.Errorf("libkvstore/sqlite: executor has no transaction capability")
 	}
-	const maxAttempts = 8 // covers the window where busy_timeout expires under heavy fan-out
+	const maxAttempts = 8
 	var err error
 	for attempt := range maxAttempts {
 		err = e.writeTxOnce(ctx, key, fn)
@@ -101,7 +92,6 @@ func (e *sqliteExecutor) writeTxOnce(ctx context.Context, key Key, fn func(txe *
 	}
 	defer release()
 
-	// Acquire the write lock before reading anything (see withWriteTx).
 	if _, err := exec.ExecContext(ctx, `UPDATE kv_store SET value = value WHERE key = ?`, key); err != nil {
 		return translateSQLiteKVError(err)
 	}
@@ -112,7 +102,6 @@ func (e *sqliteExecutor) writeTxOnce(ctx context.Context, key Key, fn func(txe *
 }
 
 // isSQLiteBusy reports whether err is a lock-contention error worth retrying.
-// libdbexec has no sentinel for SQLITE_BUSY, so the driver text is all there is.
 func isSQLiteBusy(err error) bool {
 	if err == nil {
 		return false

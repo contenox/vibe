@@ -1,6 +1,7 @@
 ---
 title: Why a project needs an AGENTS.md
 description: An AGENTS.md carries what is true about a repository but not inferable from its code — read-only boundaries, silent tooling contracts, traps already paid for, and where prior art lives — because a wrong assumption in an agent brief executes at scale.
+order: 7
 ---
 
 # Why a project needs an AGENTS.md
@@ -74,7 +75,7 @@ Every line in the file should be one you would still want there in six months wi
 
 It loads once, at session start, and persists in the conversation for the rest of the run. That is efficient, and it means a stale file misleads with full authority for an entire session; an edit made mid-session changes nothing until a new one begins. It also competes for the same context as your actual task, which is the real reason for the size cap — the file's cost is paid on every session, so a paragraph that earns nothing is a paragraph taken from the work.
 
-More importantly, it is the weakest available enforcement mechanism. It is reference material the model consults, not a constraint the runtime imposes. A rule the compiler could enforce should be enforced by the compiler; a rule a test could catch should be a test; a rule about which operations are dangerous should be a [HITL policy](/docs/guide/hitl/); a boundary that must hold against an untrusted process should be [the sandbox](/docs/guide/agent-sandbox/), which does not depend on cooperation at all. Writing a rule in prose when the code could refuse the mistake outright is choosing the version that can be forgotten.
+More importantly, it is the weakest available enforcement mechanism. It is reference material the model consults, not a constraint the runtime imposes. A rule the compiler could enforce should be enforced by the compiler; a rule a test could catch should be a test; a rule about which operations are dangerous should be a [HITL policy](/docs/guide/hitl/); a boundary that must hold against an untrusted process should be [the sandbox](/docs/guide/confinement/sandbox/), which does not depend on cooperation at all. Writing a rule in prose when the code could refuse the mistake outright is choosing the version that can be forgotten.
 
 What is left after those subtractions is exactly what the file is for: the things that are true, that matter, and that no tool in the repository can tell you.
 
@@ -88,4 +89,4 @@ Write it the day after something goes wrong, from the specific thing that went w
 
 - [AGENTS.md](/docs/guide/agents-md/) — the mechanics: loading, closest-wins precedence, the size cap, and staleness.
 - [HITL policies](/docs/guide/hitl/) — turning "never run this unattended" from a written intent into an enforced gate.
-- [Why contenox confines agents](/docs/guide/agent-threat-model/) — the case for controls that hold without the agent's cooperation.
+- [Why contenox confines agents](/docs/guide/confinement/why/) — the case for controls that hold without the agent's cooperation.

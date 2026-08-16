@@ -142,7 +142,6 @@ func (m *Manager) RenameSession(ctx context.Context, tx libdb.Exec, sessionID st
 	return runtimetypes.NewMessageStore(tx, m.workspaceID).RenameMessageSession(ctx, sessionID, name)
 }
 
-// generateMessageID creates a deterministic ID from the message content.
 func generateMessageID(subjectID string, msg *taskengine.Message) string {
 	h := sha1.New()
 	h.Write([]byte(subjectID))

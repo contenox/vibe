@@ -23,7 +23,6 @@ const (
 	flagOracleApproves = "oracle-approves-tool-calls"
 )
 
-// registerOracleFlags puts the same three overrides on every command that can mount an oracle.
 func registerOracleFlags(c *cobra.Command) {
 	c.Flags().String(flagOracleChain, "", "Chain that adjudicates a subagent's asks, overriding `config set default-oracle-chain`. \"off\" disables it for this run.")
 	c.Flags().String(flagOraclePolicy, "", "Envelope the oracle chain runs under, overriding `config set default-oracle-policy`.")
@@ -53,7 +52,7 @@ func readOracleConfig(ctx context.Context, store runtimetypes.Store) oracleConfi
 	return c
 }
 
-// resolveOracleConfig reads the stored defaults and lets args override them, the way every other contenox default works.
+// resolveOracleConfig reads the stored defaults and lets args override them.
 func resolveOracleConfig(ctx context.Context, store runtimetypes.Store, cmd *cobra.Command) oracleConfig {
 	c := readOracleConfig(ctx, store)
 	flags := cmd.Flags()
@@ -76,9 +75,7 @@ func resolveOracleConfig(ctx context.Context, store runtimetypes.Store, cmd *cob
 }
 
 // oracleChainCandidates renders one configured value as the filenames it could
-// mean, so the key takes an agent name ("oracle-default") as readily as a
-// filename — the same vocabulary default-mission-agent uses. A declared agent
-// emits chain-<name>.json, so the third form reaches those too.
+// mean, so the key takes an agent name as readily as a filename.
 func oracleChainCandidates(name string) []string {
 	name = strings.TrimSpace(name)
 	if name == "" {

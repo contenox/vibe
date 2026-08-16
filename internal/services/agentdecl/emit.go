@@ -14,13 +14,9 @@ import (
 // validates them the way it does the shipped ones.
 const ChainSchemaURL = "https://contenox.com/schema/task-chain.schema.json"
 
-// EmitChain renders one agent as a task chain, parameterizing the shipped
-// topology so a declared agent rides the same tool loop, retry
-// behaviour and test coverage as a native one.
-//
-// A single declaration states one prompt and one tool list, so this emits one
-// loop and nothing else. BRANCHING IS COMPOSITION, not a field: see EmitTree,
-// where a directory of declarations becomes a router over several of these.
+// EmitChain renders one agent as a task chain, so a declared agent rides the
+// same tool loop and retry behaviour as a native one. It emits one loop; see
+// EmitTree for a directory of declarations that becomes a router over several.
 func EmitChain(ir *AgentIR, cfg Config) (*taskengine.TaskChainDefinition, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -42,14 +38,9 @@ func EmitChain(ir *AgentIR, cfg Config) (*taskengine.TaskChainDefinition, error)
 	}, nil
 }
 
-// Loop macros a declaration may use. They exist because the two things a
-// recovery prompt wants to say — how many rounds have gone, how many there are
-// — are both known only to the emitter: the first is an engine macro keyed by
-// TASK IDS the author never sees, and the second lives in agents.toml.
-//
-// Written literally into a prompt, both go wrong. The shipped chains hardcoded
-// "12 main rounds" while enforcing 60, and a converted declaration that spelled
-// out its own task ids would break the moment its directory was renamed.
+// Loop macros a declaration may use. Both the round count and the budget are
+// known only to the emitter, so a prompt cannot state either literally without
+// going stale.
 const (
 	MacroRoundsUsed         = "{{rounds_used}}"
 	MacroRecoveryRoundsUsed = "{{recovery_rounds_used}}"
@@ -57,11 +48,6 @@ const (
 	MacroRecoveryRounds     = "{{recovery_rounds}}"
 )
 
-// expandLoopMacros resolves the loop macros for the leaf emitted under id.
-//
-// The round COUNTERS become engine macros over this leaf's own edges, so the
-// author never names a task; the BUDGETS become the configured numbers, so a
-// prompt cannot claim a budget the chain does not enforce.
 func expandLoopMacros(prompt, id string, cfg Config) string {
 	if prompt == "" {
 		return prompt
@@ -75,7 +61,6 @@ func expandLoopMacros(prompt, id string, cfg Config) string {
 	return r.Replace(prompt)
 }
 
-// refuseUnsafe rejects a declaration that asks to skip every approval.
 func refuseUnsafe(ir *AgentIR) error {
 	if ir.Posture != PostureUnsafe {
 		return nil
@@ -85,14 +70,6 @@ func refuseUnsafe(ir *AgentIR) error {
 		"under [policy.postures] or [[policy.always_allow]] in agents.toml, where the grant is written down", ir.Name)
 }
 
-// leafLoop is one agent's tool loop: a turn, its tools, and — when recoveryIR
-// is non-nil — a bounded second attempt with its own prompt. Exhaustion and
-// failure both land on terminalID, which the caller owns so a tree of leaves
-// can share one.
-//
-// recoveryIR is separate from ir because a recovery prompt is a DIFFERENT
-// prompt: it is written for an agent that has already failed once. Passing the
-// same IR twice reproduces the single-agent behaviour.
 func leafLoop(ir, recoveryIR *AgentIR, cfg Config, id, terminalID string) []taskengine.TaskDefinition {
 	agent := id + "-agent"
 	tools := id + "-tools"
@@ -102,9 +79,8 @@ func leafLoop(ir, recoveryIR *AgentIR, cfg Config, id, terminalID string) []task
 	toolExec := execConfig(ir, cfg, id, false)
 	prompt := expandLoopMacros(systemInstruction(ir), id, cfg)
 
-	// With no recovery declaration there is no second attempt: an exhausted or
-	// failed turn goes straight to the terminal, which is what the shipped
-	// review branch does.
+	// With no recovery declaration an exhausted or failed turn goes straight to
+	// the terminal.
 	exhausted := recovery
 	if recoveryIR == nil {
 		exhausted = terminalID
@@ -151,7 +127,6 @@ func leafLoop(ir, recoveryIR *AgentIR, cfg Config, id, terminalID string) []task
 	return append(out, recoveryPair(recoveryIR, cfg, id, terminalID)...)
 }
 
-// recoveryPair is the bounded second attempt and its tools.
 func recoveryPair(ir *AgentIR, cfg Config, id, terminalID string) []taskengine.TaskDefinition {
 	agent := id + "-agent"
 	recovery := id + "-recovery"
@@ -193,8 +168,6 @@ func recoveryPair(ir *AgentIR, cfg Config, id, terminalID string) []taskengine.T
 	}
 }
 
-// terminalTask states what was attempted and why it stopped. One per chain,
-// however many loops feed it.
 func terminalTask(id string, cfg Config, inputVar string) taskengine.TaskDefinition {
 	return taskengine.TaskDefinition{
 		ID:                id,
@@ -234,15 +207,8 @@ func execConfig(ir *AgentIR, cfg Config, agentID string, withPrompt bool) *taske
 	return ec
 }
 
-// exposedToolSets is what execute_config.tools takes. A declaration that named
-// no tools inherits every toolset, which the engine spells "*".
-//
-// A subagent additionally always holds the mission toolset. No declaration
-// format has a word for it, and it is not a capability the operator is granting:
-// it is the only channel out of an unattended run. Without it the subagent works,
-// answers in prose nobody reads, and the drive loop files "ended two turns
-// without reporting". The toolset is inert off a mission, so this grants a
-// primary agent nothing even when the same file declares both roles.
+// A subagent additionally always holds the mission toolset: it is the only channel out of an
+// unattended run, and it is inert off a mission.
 func exposedToolSets(ir *AgentIR, agentID string) []string {
 	var sets []string
 	if ir.Tools.Inherit {
@@ -290,9 +256,6 @@ func summariseConfig(cfg Config) *taskengine.LLMExecutionConfig {
 	}
 }
 
-// toolsPoliciesFor narrows the shipped per-toolset knobs to the toolsets this
-// agent actually exposes, so an imported agent does not carry policy for tools
-// it cannot reach.
 func toolsPoliciesFor(ir *AgentIR, cfg Config) map[string]map[string]string {
 	sets := ToolSets(ir.Tools.Allow)
 	if ir.Tools.Inherit {
@@ -321,9 +284,6 @@ func toolsPoliciesFor(ir *AgentIR, cfg Config) map[string]map[string]string {
 	return out
 }
 
-// systemInstruction is the source prompt plus the macros a chain must declare
-// for itself: nothing is appended implicitly at execution time, so a generated
-// chain states its own tool listing and host facts.
 func systemInstruction(ir *AgentIR) string {
 	b := strings.Builder{}
 	b.WriteString(ir.SystemPrompt)

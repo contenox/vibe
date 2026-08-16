@@ -55,7 +55,6 @@ func setupEgress(ctx context.Context, cmd *exec.Cmd, spec Spec, tracker libtrack
 	}
 	parentFD, childFD := pair[0], pair[1]
 
-	// The bridge never touches the child fd, so its teardown can't race cmd.Start()'s read of the *os.File.
 	childFile := os.NewFile(uintptr(childFD), "contenox-egress-shim")
 	childFDNum := 3 + len(cmd.ExtraFiles)
 	cmd.ExtraFiles = append(cmd.ExtraFiles, childFile)
@@ -108,7 +107,7 @@ func (b *egressBridge) run() {
 		return
 	}
 
-	// Signals the shim the stack is attached, letting it proceed to exec; a failed write means the shim is gone, so tear down.
+	// Signals the shim the stack is attached; a failed write means it is gone.
 	if _, werr := b.conn.Write([]byte{'R'}); werr != nil {
 		b.teardown(s, tunFD)
 		return
@@ -247,7 +246,8 @@ func (b *egressBridge) handleTCP(r *tcp.ForwarderRequest) {
 		return
 	}
 
-	// SSRF guard: resolve once (cached, closing DNS rebinding) and refuse loopback/link-local/private/unspecified/multicast unless AllowPrivateEgress opted in.
+	// SSRF guard: resolve once (closing DNS rebinding) and refuse private ranges
+	// unless AllowPrivateEgress opted in.
 	vetted, rerr := b.resolveAndGuard(host)
 	if rerr != nil {
 		reportErr(rerr)
@@ -354,7 +354,6 @@ func buildEgressStack(tunFD int, tcpH func(*tcp.ForwarderRequest), udpH udp.Forw
 		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol, udp.NewProtocol},
 	})
 
-	// Registered before any NIC exists, so the handler slot is set before the dispatchers that read it can start.
 	tf := tcp.NewForwarder(s, 0, 512, tcpH)
 	s.SetTransportProtocolHandler(tcp.ProtocolNumber, tf.HandlePacket)
 	uf := udp.NewForwarder(s, udpH)
@@ -369,12 +368,12 @@ func buildEgressStack(tunFD int, tcpH func(*tcp.ForwarderRequest), udpH udp.Forw
 		s.Close()
 		return nil, fmt.Errorf("egress link endpoint: %v", err)
 	}
-	// Disabled here — no packet delivery until the NIC is fully configured and EnableNIC runs below.
 	if e := s.CreateNICWithOptions(egressNICID, link, stack.NICOptions{Disabled: true}); e != nil {
 		s.Close()
 		return nil, fmt.Errorf("egress nic: %s", e)
 	}
-	// Promiscuous+spoofing: the agent targets synthetic/arbitrary addresses, never the NIC's own, so packets not addressed to it must be accepted and endpoints must be allowed to speak for those addresses.
+	// Promiscuous+spoofing: the agent targets synthetic addresses, never the
+	// NIC's own.
 	if e := s.SetPromiscuousMode(egressNICID, true); e != nil {
 		s.Close()
 		return nil, fmt.Errorf("egress promiscuous: %s", e)
@@ -393,7 +392,6 @@ func buildEgressStack(tunFD int, tcpH func(*tcp.ForwarderRequest), udpH udp.Forw
 	}
 	s.AddRoute(tcpip.Route{Destination: header.IPv4EmptySubnet, NIC: egressNICID})
 
-	// Everything is in place; enabling attaches the link and starts the dispatchers.
 	if e := s.EnableNIC(egressNICID); e != nil {
 		s.Close()
 		return nil, fmt.Errorf("egress enable nic: %s", e)

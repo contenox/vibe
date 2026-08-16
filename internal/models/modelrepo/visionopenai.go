@@ -2,19 +2,11 @@ package modelrepo
 
 import "strings"
 
-// OpenAI's /v1/models is a bare list (id/created/owned_by) with no modality
-// field, so vision support is maintained here from
-// https://developers.openai.com/api/docs/guides/images-vision. Naming
-// landmines to respect: base gpt-4 is text-only while gpt-4-turbo/gpt-4o/
-// gpt-4.1 have vision; the gpt-4o prefix also spans audio/transcribe/realtime
-// variants with no chat image; the reasoning minis split (o1/o3/o4-mini have
-// vision, o1-mini/o1-preview/o3-mini don't).
-//
-// Precedence: non-vision markers → legacy vision-preview snapshots → text-only
-// prefixes → vision prefixes → default false. The capability override always
-// wins (runtimestate/catalogstate.go), so a miss here is correctable by
-// declaration. Add new family prefixes to openAIVisionPrefixes /
-// openAITextOnlyPrefixes as OpenAI ships them.
+// OpenAI's /v1/models carries no modality field, so vision support is maintained
+// here from https://developers.openai.com/api/docs/guides/images-vision. Add new
+// family prefixes to openAIVisionPrefixes / openAITextOnlyPrefixes as OpenAI
+// ships them. Precedence: non-vision markers, legacy vision-preview snapshots,
+// text-only prefixes, vision prefixes, then false.
 var (
 	openAINonVisionMarkers = []string{
 		"embedding", "tts", "whisper", "transcribe", "-audio", "realtime",

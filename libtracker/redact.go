@@ -5,18 +5,14 @@ import (
 	"strings"
 )
 
-// redactedPlaceholder replaces a sensitive value while keeping the field name,
-// so the log entry stays greppable without the secret ever appearing in it.
+// redactedPlaceholder replaces a sensitive value while keeping the field name.
 const redactedPlaceholder = "[REDACTED]"
 
-// maxRedactDepth bounds the walk over a decoded payload; anything deeper is
-// collapsed rather than passed through unchecked.
+// maxRedactDepth bounds the walk over a decoded payload.
 const maxRedactDepth = 64
 
 // defaultRedactedFields are matched as case-insensitive substrings of a
-// normalized field name, so "user_password", "X-Api-Key" and
-// "AuthorizationHeader" are all caught. Errs toward over-redaction — replace
-// via WithRedactedFields for a different trade-off.
+// normalized field name.
 var defaultRedactedFields = []string{
 	"password",
 	"passwd",
@@ -34,8 +30,7 @@ var defaultRedactedFields = []string{
 	"session_id",
 	"sessionid",
 	"jwt",
-	// Explicit token spellings, listed ahead of the bare "token" rule below so
-	// they are never silently exempted by the accounting-field carve-out.
+	// Explicit token spellings, exempt from the accounting-field carve-out.
 	"api_token",
 	"auth_token",
 	"access_token",
@@ -47,8 +42,7 @@ var defaultRedactedFields = []string{
 }
 
 // tokenAccountingFields exempts the bare "token" rule so LLM telemetry like
-// "max_tokens" isn't redacted. Only the bare "token" rule consults this list;
-// "auth_tokens" still matches the explicit "auth_token" entry above.
+// "max_tokens" isn't redacted.
 var tokenAccountingFields = []string{
 	"tokens",
 	"token_count",
@@ -57,9 +51,7 @@ var tokenAccountingFields = []string{
 }
 
 // DefaultRedactedFields returns a copy of the built-in sensitive field-name
-// list. It exists so a caller can extend rather than replace the defaults:
-//
-//	WithRedactedFields(append(DefaultRedactedFields(), "ssn")...)
+// list, so a caller can extend rather than replace the defaults.
 func DefaultRedactedFields() []string {
 	out := make([]string, len(defaultRedactedFields))
 	copy(out, defaultRedactedFields)
@@ -81,9 +73,8 @@ func newFieldRedactor(fields []string) *fieldRedactor {
 	return &fieldRedactor{fields: norm}
 }
 
-// normalizeFieldName folds the spellings a field name arrives in — JSON tags,
-// Go field names, HTTP headers — onto one form so a single substring rule
-// covers "apiKey", "api-key", "API Key" and "api_key".
+// normalizeFieldName folds JSON tags, Go field names and HTTP headers onto one
+// form so a single substring rule covers every spelling.
 func normalizeFieldName(name string) string {
 	name = strings.ToLower(name)
 	name = strings.ReplaceAll(name, "-", "_")
@@ -122,9 +113,7 @@ func isTokenAccountingField(normalized string) bool {
 }
 
 // redactValue returns v with sensitive fields scrubbed, plus whether anything
-// changed. It works on the JSON projection of v, not v itself, so a struct
-// graph with cycles fails at Marshal rather than hanging the scrubber. When
-// nothing matched it returns the original value unchanged.
+// changed. It works on the JSON projection of v, not v itself.
 func (r *fieldRedactor) redactValue(v any) (any, bool) {
 	if r == nil || v == nil {
 		return v, false
@@ -154,8 +143,7 @@ func (r *fieldRedactor) redactMarshaled(raw []byte, v any) (any, bool) {
 
 func (r *fieldRedactor) redactTree(v any, depth int) (any, bool) {
 	if depth > maxRedactDepth {
-		// Fail closed: below the depth limit we stop being able to vouch for
-		// the contents, so we drop them rather than emit them unchecked.
+		// Fail closed below the depth limit.
 		return redactedPlaceholder, true
 	}
 	switch node := v.(type) {
@@ -189,7 +177,6 @@ func (r *fieldRedactor) redactTree(v any, depth int) (any, bool) {
 		}
 		return out, true
 	default:
-		// Scalars carry no field name of their own; their key decided already.
 		return v, false
 	}
 }

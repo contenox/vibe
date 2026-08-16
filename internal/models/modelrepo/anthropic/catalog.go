@@ -1,7 +1,6 @@
-// Package anthropic is a direct (non-Vertex) provider for the Anthropic API
-// (api.anthropic.com), which speaks the Messages API. It reuses the shared
-// messages codec; only the transport (x-api-key + anthropic-version header,
-// model in body, vendor base URL) is Anthropic-specific.
+// Package anthropic is a direct (non-Vertex) provider for the Anthropic API,
+// which speaks the Messages API. It reuses the shared messages codec; only the
+// transport is Anthropic-specific.
 package anthropic
 
 import (
@@ -168,8 +167,6 @@ func anthropicCapabilitiesCanThink(caps *modelCapabilities) bool {
 	return effort.Supported || effort.Low.Supported || effort.Medium.Supported || effort.High.Supported || effort.XHigh.Supported || effort.Max.Supported
 }
 
-// anthropicCapabilitiesCanVision reports whether the model accepts image
-// input, read from capabilities.image_input.supported on GET /v1/models.
 func anthropicCapabilitiesCanVision(caps *modelCapabilities) bool {
 	if caps == nil {
 		return false

@@ -13,8 +13,6 @@ type vertexChatClient struct {
 	vertexClient
 }
 
-// Chat implements modelrepo.LLMChatClient against the Gemini generateContent
-// wire format (vertex-google).
 func (c *vertexChatClient) Chat(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (modelrepo.ChatResult, error) {
 	reportErr, reportChange, end := c.tracker.Start(ctx, "chat", "vertex", "model", c.modelName)
 	defer end()

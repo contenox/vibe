@@ -9,7 +9,6 @@ import (
 
 type bedrockPromptClient struct{ bedrockClient }
 
-// Prompt implements modelrepo.LLMPromptExecClient by wrapping Chat.
 func (c *bedrockPromptClient) Prompt(ctx context.Context, systemInstruction string, temperature float32, prompt string) (string, *modelrepo.TokenUsage, error) {
 	msgs := []modelrepo.Message{{Role: "user", Content: prompt}}
 	if s := strings.TrimSpace(systemInstruction); s != "" {

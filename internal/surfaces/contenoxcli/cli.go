@@ -50,7 +50,7 @@ const (
 )
 
 var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "vet": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "inbox": true, "new": true, "resume": true, "index": true, "search": true, "events": true, "hitl": true, "login": true, "logout": true, "autocomplete": true, "beam": true, "pair": true, "unpair": true,
-	// cobra's shell-completion protocol: every TAB press invokes these; treated as chat input they would run a live model call per keystroke.
+	// cobra's shell-completion protocol: every TAB press invokes these.
 	"__complete": true, "__completeNoDesc": true}
 
 // Main runs the contenox CLI: init subcommand or run (default) with optional positional input.
@@ -73,18 +73,19 @@ func Main() {
 	// Hidden gates visibility only, never execution.
 	betaHidden := !betaEnabledGlobal()
 	eventsCmd.Hidden = betaHidden
-	// Beta flags on stable commands are absent, not hidden: an unregistered flag neither shows in help nor parses.
+	// Beta flags on stable commands are absent, not hidden.
 	if !betaHidden {
 		registerApprovalsRespondFlags(true)
 		registerMissionFireFlags(true)
 	}
-	// Seeded with the inherited event hop so a CLI spawned by a fired chain can forward it to its own spawns.
+	// Seeded with the inherited event hop so a CLI spawned by a fired chain can
+	// forward it to its own spawns.
 	err := rootCmd.ExecuteContext(eventlog.InheritHop(context.Background()))
-	// Best-effort: flushes warm-session KV snapshots so the next start restores warm.
+	// Best-effort: flushes warm-session KV snapshots.
 	_ = modelrepo.Shutdown()
 	if err != nil {
 		recordStartupFailure(err)
-		// A command with its own exit status (*exitError) has already printed what it wanted shown; skip the generic "Error:" prefix.
+		// A command with its own exit status has already printed what it wanted.
 		var ee *exitError
 		if errors.As(err, &ee) {
 			os.Exit(ee.code)
@@ -131,7 +132,7 @@ func recordStartupFailure(execErr error) {
 }
 
 func firstNonFlagIsReserved(args []string) bool {
-	// Flags here do NOT consume the next token; without this, `contenox --trace chat` would treat "chat" as --trace's value.
+	// Flags here do NOT consume the next token.
 	boolFlags := map[string]bool{
 		"--shell": true, "--trace": true, "--steps": true, "--raw": true,
 		"--no-delete-models": true, "--editor": true,
@@ -296,7 +297,7 @@ This is the subcommand form of 'contenox --version' and exists so that typing
 func init() {
 	v := cliVersion()
 	rootCmd.Version = v
-	rootCmd.Short = fmt.Sprintf("Local AI workflow runtime v%s: run versioned chains with your tools and models.", v)
+	rootCmd.Short = fmt.Sprintf("Agent server v%s: declare agents, run them under an envelope, supervise from anywhere.", v)
 	rootCmd.Long = fmt.Sprintf("Version: %s\n\n%s", v, rootCmd.Long)
 
 	f := rootCmd.PersistentFlags()
@@ -311,7 +312,7 @@ func init() {
 	f.Int("context", defaultContext, "Context length")
 	f.Bool("no-delete-models", true, "Legacy compatibility flag; OSS runtime model deletion is disabled.")
 	_ = f.MarkHidden("no-delete-models")
-	f.String("chain", "", "Path to a task chain JSON file. Chains define the LLM workflow: which model, which tools, how to branch. Falls back to default-chain in config, then .contenox/chain-agent-contenox.json")
+	f.String("chain", "", "Path to a task chain JSON file. Chains define the LLM workflow: which model, which tools, how to branch. Falls back to default-chain in config, then the agent chain compiled into .generated/")
 	f.String("input", "", "Input for the chain (default: positional args or stdin if piped)")
 	f.Bool("shell", false, "Enable the local_shell tools (use only in trusted environments)")
 	f.String("local-exec-allowed-dir", "", "If set, local_shell may only run scripts/binaries under this directory")
@@ -417,7 +418,7 @@ func controlPlaneDirs(contenoxDir string) []string {
 }
 
 func ResolveWorkspaceID(contenoxDir string) string {
-	// project owns the marker format so serve, the CLI, and the API agree.
+
 	if m, ok := project.ReadFromContenoxDir(contenoxDir); ok && m.ID != "" {
 		return m.ID
 	}
@@ -425,7 +426,7 @@ func ResolveWorkspaceID(contenoxDir string) string {
 }
 
 func runInitCmd(cmd *cobra.Command, args []string) error {
-	// Narrower than --force: presets only. The policy loader is workspace-first, so this needs the resolved workspace dir.
+	// Narrower than --force: presets only, against the resolved workspace dir.
 	if refresh, _ := cmd.Flags().GetBool("refresh-policies"); refresh {
 		contenoxDir, err := ResolveContenoxDir(cmd)
 		if err != nil {
@@ -461,7 +462,7 @@ func runInitCmd(cmd *cobra.Command, args []string) error {
 		} else if err := RunInit(cmd.OutOrStdout(), cmd.ErrOrStderr(), force, update, provider, contenoxDir, projectName); err != nil {
 			return err
 		}
-		// Marking a project doesn't grant it as a workspace root; that's a separate decision (contenox workspace add).
+		// Marking a project doesn't grant it as a workspace root.
 		fmt.Fprintf(cmd.OutOrStdout(),
 			"To let sessions open it (the beam picker): contenox workspace add %s\n", cwd)
 		return nil

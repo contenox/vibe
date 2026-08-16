@@ -115,8 +115,7 @@ func vetSubObjectShape(name string, raw json.RawMessage, known []string) []error
 func vetRuleSemantics(p *Policy) []error {
 	var errs []error
 	for i, r := range p.Rules {
-		// ruleMatches compares tools/tool names exactly, with "*" as the only
-		// wildcard, so a pattern like "local_*" would silently never fire.
+		// ruleMatches compares names exactly, with "*" as the only wildcard.
 		for _, pat := range []struct{ field, value string }{{"tools", r.Tools}, {"tool", r.Tool}} {
 			if pat.value == "*" || pat.value == "" {
 				continue

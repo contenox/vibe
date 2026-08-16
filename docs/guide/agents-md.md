@@ -1,6 +1,7 @@
 ---
 title: AGENTS.md
 description: Project-level instructions and context that load automatically into every session.
+order: 6
 ---
 
 # AGENTS.md

@@ -16,11 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The session/list, session-workspace-resolve and serve-cwd paths used to hold
-// their own SQL against message_indices/messages; they now go through
-// runtimetypes' message store. These pin the observable output of each, so the
-// reroute is provably behaviour-preserving rather than merely compiling.
-
 const routingWorkspace = "ws-routing"
 
 // seedRoutingSession creates a named acp-client index in workspaceID and

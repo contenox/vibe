@@ -28,9 +28,7 @@ func TestUnit_Brand_HeaderShape(t *testing.T) {
 }
 
 // The art is padded into a rectangle so the identity line hangs off it at a
-// fixed column even though the mark's rows are ragged. The two modes have
-// different natural widths — the block art is one cell wider than the ASCII
-// swirl — so this is checked per mode, not across them.
+// fixed column even though the mark's rows are ragged.
 func TestUnit_Brand_ArtIsPaddedToARectangle(t *testing.T) {
 	for _, ascii := range []bool{false, true} {
 		lines := strings.Split(strings.TrimRight(Header(Options{ASCII: ascii}), "\n"), "\n")
@@ -88,9 +86,8 @@ func TestUnit_Brand_ASCIIIsASCIIOnly(t *testing.T) {
 	}
 }
 
-// Colour must wrap runs without disturbing the glyphs, so stripping the
-// escapes has to reproduce the plain rendering exactly. Otherwise a coloured
-// terminal and a piped file would disagree about the layout.
+// Colour must wrap runs without disturbing the glyphs, so stripping the escapes
+// has to reproduce the plain rendering exactly.
 func TestUnit_Brand_ColourOnlyAddsEscapes(t *testing.T) {
 	for _, ascii := range []bool{false, true} {
 		plain := Header(Options{ASCII: ascii})

@@ -58,14 +58,13 @@ func runSandboxEnv(cmd *cobra.Command, _ []string) error {
 	}
 	defer db.Close()
 
-	// Same composition every spawn root applies (resolvedSandboxEnv): this
-	// preview can never drift from what a spawned shell actually receives.
+	// Same composition every spawn root applies, so the preview cannot drift.
 	shellScrub, terminalScrub, err := resolvedSandboxEnv(db, libtracker.NoopTracker{}, cmd.ErrOrStderr())
 	if err != nil {
 		return fmt.Errorf("resolve sandbox env: %w", err)
 	}
 
-	// nil warnW below: purely relabeling values the call above already resolved.
+	// nil warnW below: relabeling values the call above already resolved.
 	terminal, _ := cmd.Flags().GetBool("terminal")
 	surface := "agent shells (local_shell, shell_session)"
 	mode := resolveScrubMode(config.SandboxShellScrub, libsandbox.ScrubDenySecrets, nil)

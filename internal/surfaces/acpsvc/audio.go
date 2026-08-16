@@ -13,20 +13,9 @@ import (
 	"github.com/contenox/contenox/libacp"
 )
 
-// extractAudioParts is extractImageParts' audio sibling: it splits content
-// blocks into audio attachments (as taskengine.AudioPart, for CanAudio
-// providers) and the rest, which still go through libacp.FlattenContent —
-// otherwise its lossy text projection would drop audio silently.
-//
-// On top of the image path's undecodable-base64 rule, the two provider-side
-// inline-audio bounds are enforced per block here, at the surface: a block
-// whose media type is outside modelrepo.SupportedAudioMimeTypes, or whose
-// decoded bytes would push the prompt's raw audio total past
-// modelrepo.MaxInlineAudioBytes, is returned in rest exactly like a broken
-// one. Refusing it here keeps the loss per block and visible — it surfaces as
-// a dropped kind whose report names the bounds (see explainDroppedContent) —
-// where forwarding it would fail the whole turn at provider request building,
-// taking the blocks that were acceptable down with it.
+// extractAudioParts splits content blocks into audio attachments and the rest.
+// A block outside modelrepo's media-type or inline-size bounds is returned in
+// rest, so the loss stays per block instead of failing the whole turn.
 func extractAudioParts(blocks []libacp.ContentBlock) (audio []taskengine.AudioPart, rest []libacp.ContentBlock) {
 	total := 0
 	for _, block := range blocks {
@@ -49,12 +38,8 @@ func extractAudioParts(blocks []libacp.ContentBlock) (audio []taskengine.AudioPa
 	return audio, rest
 }
 
-// audioAcceptanceSentence names what inline audio needs to survive this
-// surface — the two per-block bounds extractAudioParts enforces plus the
-// audio-capable-model requirement the pre-flight gate enforces (see
-// sessionAudioRefusal) — for the dropped-content explanation. Rendered from
-// the modelrepo constants — accepted types sorted for stable wording — so the
-// copy a client shows can never drift from what is actually refused.
+// audioAcceptanceSentence names what inline audio needs to survive this surface,
+// rendered from the modelrepo constants so the copy cannot drift.
 func audioAcceptanceSentence() string {
 	types := make([]string, 0, len(modelrepo.SupportedAudioMimeTypes))
 	for t := range modelrepo.SupportedAudioMimeTypes {
@@ -66,27 +51,14 @@ func audioAcceptanceSentence() string {
 }
 
 // sessionAudioRefusal is the pre-flight capability gate for a prompt carrying
-// audio: it answers, before dispatch, whether this session's audio is doomed —
-// from the same observed runtime capability state the model dropdown and the
-// context-window lookup already read, never a resolution roundtrip. Refusing
-// here instead of letting resolution refuse mid-chain matters twice over: the
-// turn proceeds on the rest of the prompt instead of dying as an RPC error,
-// and the audio never reaches the user message — an audio-bearing message
-// persisted to history re-imposes the audio requirement on every later turn
-// of the session, text-only ones included. Returns the operator-facing reason,
-// or "" to forward the audio.
+// audio. It returns the operator-facing reason, or "" to forward the audio.
 func (t *Transport) sessionAudioRefusal(ctx context.Context, sess *sessionEntry) string {
 	return audioCapabilityRefusal(t.runtimeStates(ctx), sess.modelOrDefault(t.model()))
 }
 
-// audioCapabilityRefusal is the decision under sessionAudioRefusal, pure over
-// the observed fleet state and the session's effective (pinned) model. It
-// refuses only on positive knowledge, mirroring the resolver's own two
-// refusals (llmresolver.ErrPinnedModelLacksAudio / ErrNoAudioCapableModel):
-// a pinned model the fleet reports as non-audio, or a fleet with models and
-// none audio-capable. No state, no models, or a pin the state has not seen is
-// UNKNOWN, not incapable — the audio forwards and the resolver keeps the
-// final word, so a missing state service can never eat an attachment.
+// audioCapabilityRefusal refuses only on positive knowledge: a pinned model the
+// fleet reports as non-audio, or a fleet with models and none audio-capable.
+// Anything unknown forwards, leaving the resolver the final word.
 func audioCapabilityRefusal(states []runtimestate.BackendRuntimeState, pinnedModel string) string {
 	modelSeen := false
 	pinnedSeen := false

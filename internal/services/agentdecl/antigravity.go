@@ -136,8 +136,6 @@ func unmappedReasonAntigravity(field string) string {
 	}
 }
 
-// enclosingDirName is the agent name Antigravity takes from the directory,
-// since every definition is called agent.md.
 func enclosingDirName(path string) string {
 	dir := filepath.Dir(filepath.Clean(path))
 	if dir == "." || dir == string(filepath.Separator) {

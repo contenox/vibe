@@ -11,13 +11,8 @@ import (
 	"github.com/contenox/contenox/internal/relaypair"
 )
 
-// handlePair attaches this machine to a relay with a key minted in the app.
-// No argument reports the stored pairing; the instance token is never printed.
-//
-// This is the in-session entry point to the same work `contenox pair` does
-// from the CLI: a pairing describes the *machine* and is stored in the
-// contenox directory, so whichever one wrote it, the next process to start
-// finds it and dials with it.
+// handlePair attaches this machine to a relay with a key minted in the app. No
+// argument reports the stored pairing; the instance token is never printed.
 func (t *Transport) handlePair(ctx context.Context, args string) (string, error) {
 	dir := t.deps.ContenoxDir
 	if dir == "" {
@@ -41,7 +36,6 @@ func (t *Transport) handlePair(ctx context.Context, args string) (string, error)
 	endpoint := relaypair.Endpoint(explicit)
 
 	// The hostname, never a typed name: a pairing identifies this machine.
-	// Collisions are uniquified by the relay.
 	name, err := os.Hostname()
 	if err != nil || name == "" {
 		return "", fmt.Errorf("cannot determine this machine's hostname, so it has no name to pair under")
@@ -51,8 +45,6 @@ func (t *Transport) handlePair(ctx context.Context, args string) (string, error)
 	if err != nil {
 		switch {
 		case errors.Is(err, relaypair.ErrKeyRejected):
-			// The relay's message as given; it does not resolve unknown
-			// from expired from spent, so neither does this.
 			return "", fmt.Errorf("%v — mint a new key in the app and try again", err)
 		case errors.Is(err, relaypair.ErrRelayUnusable):
 			return "", err
@@ -75,7 +67,7 @@ func (t *Transport) handlePair(ctx context.Context, args string) (string, error)
 }
 
 // handleUnpair deletes this machine's stored pairing. Local only: it does not
-// revoke, and a revoked instance is refused at its next dial regardless.
+// revoke.
 func (t *Transport) handleUnpair(_ context.Context) (string, error) {
 	dir := t.deps.ContenoxDir
 	if dir == "" {
@@ -94,7 +86,6 @@ func (t *Transport) handleUnpair(_ context.Context) (string, error) {
 		"Revoking the instance is done in the app.", relaycreds.Path(dir)), nil
 }
 
-// pairingStatus renders the stored pairing, omitting the credential.
 func pairingStatus(dir string) string {
 	creds, err := relaycreds.Load(dir)
 	if err != nil {

@@ -17,26 +17,29 @@ export interface LandingStrings {
   installTabWindows: string;
   installNote: string;
   trustChips: string[];
-  missionEyebrow: string;
-  missionH2: string;
-  missionLede: string;
-  /** [kind, text] — kind is 'cmd' (operator input), 'out' (runtime output), or 'note' (narrative comment). */
-  missionLines: [string, string][];
-  missionOutro: string;
-  missionCta: [string, string];
-  panelEyebrow: string;
-  panelH2: string;
-  panelP1: string;
-  panelP2: string;
-  routeEyebrow: string;
-  routeH2: string;
-  routeLede: string;
-  routeCode: string;
-  routeOutro: string;
-  /** One line per domain the same router shape serves. */
-  routeDomains: string[];
-  /** [label, href] — reading paths out of the routing section. */
-  routeCtas: [string, string][];
+
+  apacheEyebrow: string;
+  apacheH2: string;
+  apacheP1: string;
+  apacheP2: string;
+  /** Column headers over the analogy table. */
+  apacheThenLabel: string;
+  apacheNowLabel: string;
+  /** [then, now] — one row per line of the analogy. */
+  apacheRows: [string, string][];
+  apacheOutro: string;
+
+  treeEyebrow: string;
+  treeH2: string;
+  treeLede: string;
+  /** [path, comment] — the workflow directory. Same shape as declareTree. */
+  treeListing: [string, string][];
+  treeOutro: string;
+  /** One line per domain the same directory shape serves. */
+  treePoints: string[];
+  /** [label, href] — reading paths out of the declaration section. */
+  treeCtas: [string, string][];
+
   rulesEyebrow: string;
   rulesH2: string;
   rulesLede: string;
@@ -44,32 +47,49 @@ export interface LandingStrings {
   rulesOutro: string;
   rulesCta: [string, string];
   hitlDemoAlt: string;
-  craftEyebrow: string;
-  craftH2: string;
-  craftP1: string;
-  craftP2: string;
-  everyEyebrow: string;
-  everyH2: string;
-  everyLede: string;
-  surfaces: [string, string][];
-  /** [line text, link label, href] — one supporting line per protocol. */
-  protocols: [string, string, string][];
+
+  missionEyebrow: string;
+  missionH2: string;
+  missionLede: string;
+  /** [kind, text] — kind is 'cmd' (operator input), 'out' (runtime output), or 'note' (narrative comment). */
+  missionLines: [string, string][];
+  missionOutro: string;
+  missionCta: [string, string];
+
+  toolsEyebrow: string;
+  toolsH2: string;
+  toolsLede: string;
+  /** [title, body] — the two ways a tool reaches an agent. */
+  toolsWays: [string, string][];
+  toolsNote: string;
+  /** [label, href] — protocol and tool references. */
+  toolsCtas: [string, string][];
+
+  shapesEyebrow: string;
+  shapesH2: string;
+  shapesLede: string;
+  /** [title, body] — the two deployment shapes. */
+  shapes: [string, string][];
   guides: [string, string][];
-  tuiShotAlt: string;
-  seatEyebrow: string;
-  seatH2: string;
-  seatP1: string;
-  seatP2: string;
+
   yoursEyebrow: string;
   yoursH2: string;
   yoursPoints: string[];
   yoursCta: [string, string];
+
   relayEyebrow: string;
   relayH2: string;
   relayP: string;
   relayCta: [string, string];
-  /** [line text, link label, href] — one muted line under the relay CTA: the managed option, ending in the contact link. */
-  relayNote: [string, string, string];
+  /** The invitation under the relay: the managed option, the contact link, and the app. */
+  invite: {
+    lead: string;
+    contactLabel: string;
+    contactHref: string;
+    appLabel: string;
+    appHref: string;
+  };
+
   bottomEyebrow: string;
   bottomH2: string;
   bottomCta: string;
@@ -88,13 +108,14 @@ const media = 'https://contenox-website-assets-573643652148.s3.amazonaws.com/med
 const card = 'rounded-xl border border-neutral-200/60 bg-white/80 p-5 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-1 hover:border-primary-500/30 hover:shadow-lg hover:shadow-primary-500/10 dark:border-neutral-800/60 dark:bg-neutral-950/80 dark:hover:border-primary-400/30';
 const btnGhost = 'rounded-lg border border-neutral-200 px-4 py-2 text-sm font-semibold transition-all hover:bg-neutral-50 hover:shadow-sm dark:border-neutral-800 dark:hover:bg-neutral-900';
 const ctaLink = 'font-semibold text-primary-700 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300';
+const listing = 'mx-auto mt-8 max-w-2xl overflow-x-auto rounded-xl border border-neutral-200/60 bg-white/60 p-5 text-left font-mono text-xs leading-6 shadow-sm backdrop-blur-md sm:text-sm dark:border-neutral-800/60 dark:bg-neutral-950/60';
 ---
 <section class="hero-grid border-b border-neutral-200 px-5 py-20 text-center dark:border-neutral-800">
   <h1 class="mx-auto max-w-3xl bg-gradient-to-br from-neutral-900 to-neutral-500 bg-clip-text text-4xl font-bold tracking-tight text-transparent sm:text-5xl dark:from-white dark:to-neutral-500">
     {t.h1a}
     <span class="text-neutral-500 dark:text-neutral-400">{t.h1b}</span>
   </h1>
-  <p class="mx-auto mt-6 max-w-xl text-neutral-600 dark:text-neutral-400">{t.lede}</p>
+  <p class="mx-auto mt-6 max-w-2xl text-neutral-600 dark:text-neutral-400">{t.lede}</p>
   <p class="mx-auto mt-10 max-w-2xl text-xl font-bold tracking-tight sm:text-2xl">{t.declareH2}</p>
   <div class="mx-auto mt-6 max-w-xl overflow-x-auto rounded-xl border border-neutral-200/60 bg-white/60 p-5 text-left font-mono text-xs leading-6 shadow-sm backdrop-blur-md sm:text-sm dark:border-neutral-800/60 dark:bg-neutral-950/60">
     {t.declareTree.map(([path, comment]) => (
@@ -129,50 +150,47 @@ const ctaLink = 'font-semibold text-primary-700 hover:text-primary-600 dark:text
 </section>
 
 <section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
-  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.missionEyebrow}</p>
-  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.missionH2}</h2>
-  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.missionLede}</p>
-  <div class="mx-auto mt-8 max-w-3xl overflow-x-auto rounded-xl border border-neutral-200/60 bg-white/60 p-5 text-left font-mono text-sm leading-7 shadow-lg backdrop-blur-md dark:border-neutral-800/60 dark:bg-neutral-950/70">
-    {t.missionLines.map(([kind, text]) => (
-      kind === 'cmd' ? (
-        <div class="whitespace-nowrap text-neutral-800 dark:text-neutral-100"><span class="mr-2 select-none text-neutral-400 dark:text-neutral-500">$</span>{text}</div>
-      ) : kind === 'note' ? (
-        <div class="whitespace-nowrap text-neutral-400 italic dark:text-neutral-500">{text}</div>
-      ) : (
-        <div class="whitespace-nowrap pl-5 text-neutral-500 dark:text-neutral-400">{text}</div>
-      )
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.apacheEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.apacheH2}</h2>
+  <div class="mx-auto mt-6 max-w-2xl space-y-4 text-neutral-600 dark:text-neutral-400">
+    <p>{t.apacheP1}</p>
+    <p>{t.apacheP2}</p>
+  </div>
+  <div class="mx-auto mt-8 max-w-3xl overflow-hidden rounded-xl border border-neutral-200/60 bg-white/60 backdrop-blur-md dark:border-neutral-800/60 dark:bg-neutral-950/60">
+    <div class="grid sm:grid-cols-2">
+      <p class="px-5 pt-4 pb-1 text-xs font-semibold tracking-widest text-neutral-500 uppercase sm:border-r sm:border-neutral-200/60 sm:pb-4 dark:sm:border-neutral-800/60">{t.apacheThenLabel}</p>
+      <p class="px-5 pb-4 text-xs font-semibold tracking-widest text-neutral-500 uppercase sm:pt-4">{t.apacheNowLabel}</p>
+    </div>
+    {t.apacheRows.map(([then, now]) => (
+      <div class="grid border-t border-neutral-200/60 sm:grid-cols-2 dark:border-neutral-800/60">
+        <p class="px-5 pt-4 pb-1 text-sm text-neutral-500 sm:border-r sm:border-neutral-200/60 sm:pb-4 dark:sm:border-neutral-800/60">{then}</p>
+        <p class="px-5 pb-4 text-sm text-neutral-700 sm:pt-4 dark:text-neutral-300">{now}</p>
+      </div>
     ))}
   </div>
-  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.missionOutro}</p>
-  <div class="mt-6 text-center text-sm">
-    <a href={t.missionCta[1]} class={ctaLink}>{t.missionCta[0]} →</a>
-  </div>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.apacheOutro}</p>
 </section>
 
 <section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
-  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.panelEyebrow}</p>
-  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.panelH2}</h2>
-  <div class="mx-auto mt-6 max-w-2xl space-y-4 text-neutral-600 dark:text-neutral-400">
-    <p>{t.panelP1}</p>
-    <p>{t.panelP2}</p>
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.treeEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.treeH2}</h2>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.treeLede}</p>
+  <div class={listing}>
+    {t.treeListing.map(([path, comment]) => (
+      <div class="whitespace-pre">
+        <span class="text-neutral-700 dark:text-neutral-300">{path}</span>
+        {comment && <span class="text-neutral-400 dark:text-neutral-500">{comment}</span>}
+      </div>
+    ))}
   </div>
-</section>
-
-<section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
-  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.routeEyebrow}</p>
-  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.routeH2}</h2>
-  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.routeLede}</p>
-  <div class="mx-auto mt-8 max-w-3xl overflow-x-auto rounded-xl border border-neutral-200/60 bg-white/60 p-5 text-left font-mono text-xs leading-6 text-neutral-700 shadow-sm backdrop-blur-md sm:text-sm dark:border-neutral-800/60 dark:bg-neutral-950/60 dark:text-neutral-300">
-    <pre class="m-0">{t.routeCode}</pre>
-  </div>
-  <p class="mx-auto mt-4 max-w-2xl text-center text-sm text-neutral-500">{t.routeOutro}</p>
+  <p class="mx-auto mt-4 max-w-2xl text-center text-sm text-neutral-500">{t.treeOutro}</p>
   <ul class="mx-auto mt-8 max-w-2xl space-y-2 text-sm text-neutral-600 dark:text-neutral-400">
-    {t.routeDomains.map((line) => (
+    {t.treePoints.map((line) => (
       <li class="flex gap-3"><span class="text-neutral-400 dark:text-neutral-600">→</span><span>{line}</span></li>
     ))}
   </ul>
   <div class="mt-6 flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm">
-    {t.routeCtas.map(([label, href]) => (
+    {t.treeCtas.map(([label, href]) => (
       <a href={href} class={ctaLink}>{label} →</a>
     ))}
   </div>
@@ -198,53 +216,62 @@ const ctaLink = 'font-semibold text-primary-700 hover:text-primary-600 dark:text
 </section>
 
 <section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
-  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.craftEyebrow}</p>
-  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.craftH2}</h2>
-  <div class="mx-auto mt-6 max-w-2xl space-y-4 text-neutral-600 dark:text-neutral-400">
-    <p>{t.craftP1}</p>
-    <p>{t.craftP2}</p>
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.missionEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.missionH2}</h2>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.missionLede}</p>
+  <div class="mx-auto mt-8 max-w-3xl overflow-x-auto rounded-xl border border-neutral-200/60 bg-white/60 p-5 text-left font-mono text-sm leading-7 shadow-lg backdrop-blur-md dark:border-neutral-800/60 dark:bg-neutral-950/70">
+    {t.missionLines.map(([kind, text]) => (
+      kind === 'cmd' ? (
+        <div class="whitespace-nowrap text-neutral-800 dark:text-neutral-100"><span class="mr-2 select-none text-neutral-400 dark:text-neutral-500">$</span>{text}</div>
+      ) : kind === 'note' ? (
+        <div class="whitespace-nowrap text-neutral-400 italic dark:text-neutral-500">{text}</div>
+      ) : (
+        <div class="whitespace-nowrap pl-5 text-neutral-500 dark:text-neutral-400">{text}</div>
+      )
+    ))}
+  </div>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.missionOutro}</p>
+  <div class="mt-6 text-center text-sm">
+    <a href={t.missionCta[1]} class={ctaLink}>{t.missionCta[0]} →</a>
   </div>
 </section>
 
 <section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
-  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.everyEyebrow}</p>
-  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.everyH2}</h2>
-  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.everyLede}</p>
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.toolsEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.toolsH2}</h2>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.toolsLede}</p>
   <div class="mx-auto mt-8 grid max-w-4xl gap-4 sm:grid-cols-2">
-    {t.surfaces.map(([title, body]) => (
+    {t.toolsWays.map(([title, body]) => (
       <div class={card}>
         <h3 class="font-semibold">{title}</h3>
         <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{body}</p>
       </div>
     ))}
   </div>
-  <img
-    src={`${media}hero.gif`}
-    alt={t.tuiShotAlt}
-    loading="lazy"
-    class="mx-auto mt-8 w-full max-w-3xl rounded-xl border border-neutral-200/60 shadow-lg dark:border-neutral-800/60"
-  />
-  <ul class="mx-auto mt-8 max-w-2xl space-y-2 text-sm text-neutral-600 dark:text-neutral-400">
-    {t.protocols.map(([line, label, href]) => (
-      <li class="flex gap-3">
-        <span class="text-neutral-400 dark:text-neutral-600">→</span>
-        <span>{line} <a href={href} class="text-neutral-700 underline decoration-neutral-300 underline-offset-2 hover:text-black dark:text-neutral-300 dark:decoration-neutral-700 dark:hover:text-white">{label}</a></span>
-      </li>
-    ))}
-  </ul>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-sm text-neutral-500">{t.toolsNote}</p>
   <div class="mt-6 flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm">
-    {t.guides.map(([label, href]) => (
-      <a href={href} class="text-neutral-600 hover:text-black dark:text-neutral-400 dark:hover:text-white">{label} →</a>
+    {t.toolsCtas.map(([label, href]) => (
+      <a href={href} class={ctaLink}>{label} →</a>
     ))}
   </div>
 </section>
 
 <section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
-  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.seatEyebrow}</p>
-  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.seatH2}</h2>
-  <div class="mx-auto mt-6 max-w-2xl space-y-4 text-neutral-600 dark:text-neutral-400">
-    <p>{t.seatP1}</p>
-    <p>{t.seatP2}</p>
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.shapesEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.shapesH2}</h2>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.shapesLede}</p>
+  <div class="mx-auto mt-8 grid max-w-4xl gap-4 sm:grid-cols-2">
+    {t.shapes.map(([title, body]) => (
+      <div class={card}>
+        <h3 class="font-semibold">{title}</h3>
+        <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{body}</p>
+      </div>
+    ))}
+  </div>
+  <div class="mt-8 flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm">
+    {t.guides.map(([label, href]) => (
+      <a href={href} class="text-neutral-600 hover:text-black dark:text-neutral-400 dark:hover:text-white">{label} →</a>
+    ))}
   </div>
 </section>
 
@@ -269,7 +296,10 @@ const ctaLink = 'font-semibold text-primary-700 hover:text-primary-600 dark:text
     <a href={t.relayCta[1]} class={ctaLink}>{t.relayCta[0]} →</a>
   </div>
   <p class="mx-auto mt-6 max-w-2xl text-center text-sm text-neutral-500">
-    {t.relayNote[0]} <a href={t.relayNote[2]} class="underline hover:text-black dark:hover:text-white">{t.relayNote[1]}</a>.
+    {t.invite.lead}
+    <a href={t.invite.contactHref} class="underline hover:text-black dark:hover:text-white">{t.invite.contactLabel}</a>
+    <span class="mx-1.5 text-neutral-300 dark:text-neutral-700" aria-hidden="true">&middot;</span>
+    <a href={t.invite.appHref} class="underline hover:text-black dark:hover:text-white">{t.invite.appLabel}</a>
   </p>
 </section>
 

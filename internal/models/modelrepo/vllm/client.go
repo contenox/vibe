@@ -185,13 +185,8 @@ func (c *vLLMClient) sendRequest(ctx context.Context, endpoint string, request i
 	return nil
 }
 
-// vllmWireMessage is the explicit wire form of a text/tool message sent to
-// vLLM's chat/completions endpoint. The neutral modelrepo.Message is never
-// serialized raw: it carries provenance fields (history `thinking`, tool-call
-// `provider_meta` such as a Gemini thought_signature) that must not reach the
-// wire — leaking them perturbs vLLM's token-prefix cache (identical
-// conversations would produce different bytes) and exposes content the model
-// must never see.
+// Explicit wire form: modelrepo.Message carries provenance fields (thinking, provider_meta) that
+// must not reach the wire — they perturb the token-prefix cache and expose content to the model.
 type vllmWireMessage struct {
 	Role       string             `json:"role"`
 	Content    string             `json:"content"`
@@ -210,8 +205,6 @@ type vllmWireToolFunction struct {
 	Arguments string `json:"arguments"`
 }
 
-// vllmImageMessage is the OpenAI content-parts form of a message sent to
-// vLLM's chat/completions endpoint when it carries image attachments.
 type vllmImageMessage struct {
 	Role    string            `json:"role"`
 	Content []vllmContentPart `json:"content"`
@@ -227,9 +220,6 @@ type vllmImageURL struct {
 	URL string `json:"url"`
 }
 
-// toVLLMRequestMessages maps neutral messages to the request wire form: an
-// image-bearing message becomes the OpenAI content-parts shape, every other
-// message becomes the explicit vllmWireMessage.
 func toVLLMRequestMessages(messages []modelrepo.Message, origToSanitized map[string]string) []any {
 	out := make([]any, 0, len(messages))
 	for _, m := range messages {
@@ -282,9 +272,6 @@ func vllmImageDataURI(mimeType string, data []byte) string {
 	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
-// buildChatRequest builds the wire request and returns a sanitized->original
-// tool-name map: engine-qualified names ("toolsName.toolName") break vLLM
-// chat templates, so names are sanitized and translated back on decode.
 func buildChatRequest(modelName string, messages []modelrepo.Message, args []modelrepo.ChatArgument, canThink ...bool) (chatRequest, map[string]string) {
 	config := &modelrepo.ChatConfig{}
 	for _, arg := range args {
@@ -296,10 +283,7 @@ func buildChatRequest(modelName string, messages []modelrepo.Message, args []mod
 
 func buildChatRequestFromConfig(modelName string, messages []modelrepo.Message, config *modelrepo.ChatConfig, canThink ...bool) (chatRequest, map[string]string) {
 	// config.CacheHints is deliberately not mapped to any wire field: vLLM's
-	// Automatic Prefix Caching keys on the exact token prefix server-side, so
-	// byte-stable serialization plus session-backend affinity is the whole
-	// client-side contract. OpenAI's prompt_cache_key is not sent; vLLM does
-	// not use it.
+	// Automatic Prefix Caching keys on the exact token prefix server-side.
 	tools, nameMap, origToSanitized := sanitizeVLLMTools(config.Tools)
 	req := chatRequest{
 		Model:       modelName,
@@ -322,9 +306,6 @@ func buildChatRequestFromConfig(modelName string, messages []modelrepo.Message, 
 	return req, nameMap
 }
 
-// sanitizeVLLMTools sanitizes tool names to the OpenAI-compatible pattern
-// (letters, digits, underscore, hyphen) and returns the tools plus both name
-// maps (sanitized->original for decoding, original->sanitized for history).
 func sanitizeVLLMTools(in []modelrepo.Tool) ([]modelrepo.Tool, map[string]string, map[string]string) {
 	if len(in) == 0 {
 		return nil, nil, nil
@@ -353,8 +334,6 @@ func sanitizeVLLMTools(in []modelrepo.Tool) ([]modelrepo.Tool, map[string]string
 	return out, nameMap, origToSanitized
 }
 
-// sanitizeToolName replaces invalid characters with '_' and trims
-// leading/trailing separators; same rule as the OpenAI provider.
 func sanitizeToolName(in string) string {
 	if in == "" {
 		return ""

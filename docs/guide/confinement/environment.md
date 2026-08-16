@@ -1,6 +1,7 @@
 ---
-title: Least-privilege shell environment
+title: "Least-privilege shell environment"
 description: The scrub-and-inject design for the shells contenox runs in its own process — give an agent exactly the environment its task needs, not your whole .env.
+order: 5
 ---
 
 # Least-privilege shell environment
@@ -12,7 +13,7 @@ This surface gives every spawned shell — the `local_shell` tool, forwarded to 
 - **scrub** — strip the runtime's own credentials out of the shell
 - **inject** — add back only the variables you choose, with the values you set
 
-> **What the scrub is, and is not.** It removes the credentials from the shell's *own* environment, so a task that reads `env`, echoes `$STRIPE_SECRET_KEY`, or hands its environment to a subprocess finds nothing. It is not a kernel boundary. These shells are ordinary child processes of the runtime, running as you, and on Linux a shell that can read files can read `/proc/<contenox-pid>/environ` — the runtime's own pre-scrub environment, which it still needs in order to reach your providers. Closing that would take the [sandbox](/docs/guide/agent-sandbox/), which confines foreign agents, not contenox's own chains. The scrub is the environment slice of least privilege against accident and casual reach; a shell you have allowed to run arbitrary read commands is trusted with what it can read.
+> **What the scrub is, and is not.** It removes the credentials from the shell's *own* environment, so a task that reads `env`, echoes `$STRIPE_SECRET_KEY`, or hands its environment to a subprocess finds nothing. It is not a kernel boundary. These shells are ordinary child processes of the runtime, running as you, and on Linux a shell that can read files can read `/proc/<contenox-pid>/environ` — the runtime's own pre-scrub environment, which it still needs in order to reach your providers. Closing that would take the [sandbox](/docs/guide/confinement/sandbox/), which confines foreign agents, not contenox's own chains. The scrub is the environment slice of least privilege against accident and casual reach; a shell you have allowed to run arbitrary read commands is trusted with what it can read.
 
 This is the environment slice of least privilege: deny by default, grant what the job needs. It is live today across every agent-reachable shell this CLI spawns — `contenox acp` / `contenox acpx` (the ACP session's shell and its terminal passthrough), and a `contenox serve` session's `local_shell`.
 
@@ -72,7 +73,7 @@ SANDBOX_SHELL_SCRUB=strict SANDBOX_ENV_ALLOW="GOCACHE,CARGO_HOME,HTTP_PROXY" con
 ```
 
 > **Note:**
-> Whenever a scrub is active, `CONTENOX_*` — the control plane's own variables — is always dropped. In `off` mode nothing is scrubbed. `HOME` and `PATH` are not forced to anything special here: an agent shell runs in the operator's own home and inherited toolchain, scrubbed of credentials rather than reshaped into a different filesystem identity — that reshaping is what the separate [agent sandbox](/docs/guide/agent-sandbox/) does for a foreign agent process.
+> Whenever a scrub is active, `CONTENOX_*` — the control plane's own variables — is always dropped. In `off` mode nothing is scrubbed. `HOME` and `PATH` are not forced to anything special here: an agent shell runs in the operator's own home and inherited toolchain, scrubbed of credentials rather than reshaped into a different filesystem identity — that reshaping is what the separate [agent sandbox](/docs/guide/confinement/sandbox/) does for a foreign agent process.
 
 ## Inject: grant what the task needs
 
@@ -108,4 +109,4 @@ contenox shell-env list
 
 ## How it relates to the agent sandbox
 
-This is the environment slice of a larger least-privilege architecture: an agent should reach only what its task needs, and nothing else. The [agent sandbox](/docs/guide/agent-sandbox/) is the rest of the wall — the filesystem and exec surface of a spawned foreign agent, made absent by construction, so it cannot read your `.env` off disk any more than from the environment. This page's scrub is the same idea applied to the shell contenox runs in its own process (`local_shell`, forwarded to an ACP session's own shell) — a different surface from the agent sandbox's foreign-process wall, and one that is wired and applying today.
+This is the environment slice of a larger least-privilege architecture: an agent should reach only what its task needs, and nothing else. The [agent sandbox](/docs/guide/confinement/sandbox/) is the rest of the wall — the filesystem and exec surface of a spawned foreign agent, made absent by construction, so it cannot read your `.env` off disk any more than from the environment. This page's scrub is the same idea applied to the shell contenox runs in its own process (`local_shell`, forwarded to an ACP session's own shell) — a different surface from the agent sandbox's foreign-process wall, and one that is wired and applying today.

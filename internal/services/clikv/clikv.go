@@ -1,9 +1,7 @@
-// Package clikv reads and writes the CLI's persisted settings (the cli.*
-// KV namespace) and owns the scope of every one of them. scopeFor is the
-// single place a key's row location is decided and both ReadConfig and
-// WriteConfig route through it, so a reader and a writer of the same key
-// cannot target different rows — the split that made
-// `contenox config set hitl-policy-name` invisible to the HITL evaluator.
+// Package clikv reads and writes the CLI's persisted settings (the cli.* KV
+// namespace) and owns the scope of every one of them. scopeFor is the single
+// place a key's row location is decided, so a reader and a writer of the same
+// key cannot target different rows.
 package clikv
 
 import (
@@ -26,8 +24,6 @@ const (
 	KeyHITLPolicyName = "hitl-policy-name"
 )
 
-// workspaceScopedKeys is the scope registry. Consulted only by scopeFor:
-// adding a key here moves its reader and its writer at once.
 var workspaceScopedKeys = map[string]bool{
 	KeyDefaultChain:   true,
 	KeyHITLPolicyName: true,
@@ -47,10 +43,6 @@ func WorkspaceScopedKeys() []string {
 	return keys
 }
 
-// scopeFor returns the workspace_id of the row holding key for a caller in
-// workspaceID: the caller's workspace for a workspace-scoped key, the global
-// row ("") otherwise. The one scope decision — ReadConfig and WriteConfig
-// both call it, so the row written is the row read.
 func scopeFor(key, workspaceID string) string {
 	if workspaceScopedKeys[key] {
 		return strings.TrimSpace(workspaceID)
@@ -90,9 +82,8 @@ func Read(ctx context.Context, store KVReader, key string) string {
 }
 
 // ReadConfig returns key's value for a caller in workspaceID and the scope it
-// came from ("workspace" or "global"). It reads the row scopeFor names and
-// falls back to the global row when that row is unset, so a workspace that
-// never overrode the setting still inherits it.
+// came from ("workspace" or "global"), falling back to the global row when the
+// workspace row is unset.
 func ReadConfig(ctx context.Context, store Reader, workspaceID, key string) (string, string) {
 	if ws := scopeFor(key, workspaceID); ws != "" {
 		var val string

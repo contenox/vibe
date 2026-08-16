@@ -198,8 +198,7 @@ func refreshTrustedEntries(out io.Writer, tb *hitlservice.TrustedBinaries) error
 			continue
 		}
 		if real != path {
-			// The declared path now resolves elsewhere (a symlink was
-			// repointed): record the real one and drop the stale alias.
+			// The declared path now resolves elsewhere: record the real one.
 			fmt.Fprintf(out, "moved %s -> %s\n", path, real)
 			delete(tb.Hashes, path)
 		}
@@ -320,7 +319,7 @@ func writeTrustedBinaries(path string, data []byte, tb *hitlservice.TrustedBinar
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	// Never write a policy this build would refuse to load: a broken envelope
-	// falls back to approve-everything, which is the opposite of the intent.
+	// falls back to approve-everything.
 	if err := hitlservice.VetPolicy(updated); err != nil {
 		return fmt.Errorf("refusing to write %s: the result would not validate: %w", path, err)
 	}

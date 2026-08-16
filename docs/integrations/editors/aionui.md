@@ -99,7 +99,7 @@ Models are global config, shared across every surface that reads `default-model`
 ## Where to next
 
 - [Declaring agents](/docs/guide/agents/) — one Markdown file is the agent, regardless of which client drives it.
-- [Writing a chain by hand](/docs/guide/first-chain/) — for the agent that has outgrown a declaration.
+- [Writing a chain by hand](/docs/guide/chains/writing-a-chain/) — for the agent that has outgrown a declaration.
 - [HITL policies](/docs/guide/hitl/) — choose what requires approval.
 - [MCP](/docs/integrations/tools/mcp/) — register servers once globally; ACP sessions pick them up.
 - [Use from Zed](/docs/integrations/editors/zed/) · [Use from JetBrains](/docs/integrations/editors/jetbrains/) — the same agent, other clients.

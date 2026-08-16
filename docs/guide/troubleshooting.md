@@ -1,6 +1,7 @@
 ---
 title: Troubleshooting & recovery
 description: Symptom, cause, and fix for the failures operators actually hit — plus what survives a crash, what resumes it, and how to file a diagnostics bundle.
+order: 17
 ---
 
 # Troubleshooting & recovery
@@ -114,7 +115,7 @@ contenox hitl trust --list      # every declaration and its state on this host
 contenox hitl trust --refresh   # re-read every declaration and rewrite its hash
 ```
 
-`--refresh` is the upgrade path: it re-resolves and re-hashes what is already declared, and adds nothing new. See [Trusted binaries](/docs/guide/trusted-binaries/).
+`--refresh` is the upgrade path: it re-resolves and re-hashes what is already declared, and adds nothing new. See [Trusted binaries](/docs/guide/confinement/trusted-binaries/).
 
 ## A chain or policy file fails to load
 
@@ -238,6 +239,6 @@ The issue URL is pre-filled with the environment facts a maintainer asks for fir
 
 - [Missions](/docs/guide/missions/) — the mission lifecycle, states, and reclaim in full
 - [HITL policies](/docs/guide/hitl/) — the policy format and the shipped presets
-- [Trusted binaries](/docs/guide/trusted-binaries/) — what a pin protects and what it does not
+- [Trusted binaries](/docs/guide/confinement/trusted-binaries/) — what a pin protects and what it does not
 - [Quickstart](/docs/guide/quickstart/) — first-run setup, if `doctor` says nothing is configured
 - [`contenox doctor` reference](/docs/reference/contenox-cli/#contenox-doctor) · [`contenox approvals` reference](/docs/reference/contenox-cli/#contenox-approvals)

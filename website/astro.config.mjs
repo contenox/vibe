@@ -31,10 +31,10 @@ export default defineConfig({
     "/docs/guide/providers/anthropic": "/docs/integrations/providers/anthropic/",
     "/docs/guide/providers/bedrock": "/docs/integrations/providers/bedrock/",
     "/docs/guide/providers/gemini": "/docs/integrations/providers/gemini/",
-    "/docs/guide/providers/mistral": "/docs/integrations/providers/mistral/",
+    "/docs/guide/providers/mistral": "/docs/guide/quickstart/",
     "/docs/guide/providers/ollama": "/docs/integrations/providers/ollama/",
     "/docs/guide/providers/openai": "/docs/integrations/providers/openai/",
-    "/docs/guide/providers/openrouter": "/docs/integrations/providers/openrouter/",
+    "/docs/guide/providers/openrouter": "/docs/guide/quickstart/",
     "/docs/guide/providers/vertex": "/docs/integrations/providers/vertex/",
     "/docs/guide/local-models": "/docs/rnd/modeld/",
     // The VS Code extension is retired again; both old URLs now land on its
@@ -47,6 +47,26 @@ export default defineConfig({
     "/docs/guide/aionui": "/docs/integrations/editors/aionui/",
     "/docs/guide/openclaw": "/docs/integrations/editors/openclaw/",
     "/docs/guide/mcp": "/docs/integrations/tools/mcp/",
+    // Routing is chain-level detail; you author it as a directory.
+    "/docs/guide/request-routing": "/docs/guide/chains/routing/",
+    // The hard parts is contributor material, not a guide.
+    "/docs/guide/hard-parts": "/docs/development/hard-parts/",
+    // Confinement and chains became folders; the prefixes were categories.
+    "/docs/guide/agent-threat-model": "/docs/guide/confinement/why/",
+    "/docs/guide/guardrails": "/docs/guide/confinement/guardrails/",
+    "/docs/guide/agent-sandbox": "/docs/guide/confinement/sandbox/",
+    "/docs/guide/trusted-binaries": "/docs/guide/confinement/trusted-binaries/",
+    "/docs/guide/environment-scrubbing": "/docs/guide/confinement/environment/",
+    "/docs/guide/first-chain": "/docs/guide/chains/writing-a-chain/",
+    "/docs/guide/chain-naming": "/docs/guide/chains/naming/",
+    "/docs/guide/agentic-loop": "/docs/guide/chains/agentic-loop/",
+    // Tutorials became a folder; the prefix was a category, not a title.
+    "/docs/guide/tutorial-first-agent": "/docs/guide/tutorials/first-agent/",
+    "/docs/guide/tutorial-mission-agent": "/docs/guide/tutorials/mission-agent/",
+    "/docs/guide/tutorial-vault-agent": "/docs/guide/tutorials/vault-agent/",
+    "/docs/guide/tutorial-recurring-work": "/docs/guide/tutorials/recurring-work/",
+    // The event tier is R&D, not a shipped use case.
+    "/docs/use-cases/event-driven-chains": "/docs/rnd/event-driven-chains/",
     // cookbook/ and stories/ merged into docs/use-cases/.
     "/cookbook": "/docs/use-cases/",
     "/stories": "/docs/use-cases/",

@@ -190,12 +190,8 @@ func resolveSystemChain(cmd *cobra.Command, contenoxDir, name string) (string, e
 }
 
 // lookupSystemFile finds a config file by name, strongest first: the workspace
-// .contenox/, then ~/.contenox/, then the transpiled chains in .generated/,
-// then the shipped copies in ~/.contenox/system/.
-//
-// The two operator-owned locations come first on purpose — copying a shipped
-// file up one level is how you take ownership of it, and that has to keep
-// working without anything being deleted or renamed.
+// .contenox/, then ~/.contenox/, then the transpiled chains in .generated/, then
+// the shipped copies in ~/.contenox/system/.
 func lookupSystemFile(contenoxDir, name string) (string, error) {
 	if contenoxDir != "" {
 		workspacePath := filepath.Join(contenoxDir, name)

@@ -300,7 +300,7 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		Missions:    missions,
 		ProjectRoot: projectRoot,
 		WorkspaceID: workspaceID,
-		// The database this fire resolved; the unit must report into the same one.
+		// The unit must report into the database this fire resolved.
 		DBPath:       dbPath,
 		Tracker:      tracker,
 		PolicySource: hitlPolicySource(contenoxDir),

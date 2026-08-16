@@ -22,8 +22,7 @@ You review code.
 `
 
 // The whole front door in one test: a Markdown file in .contenox/agents/
-// becomes a registered agent under the name its frontmatter gave it. Nothing
-// an operator types carries the word chain.
+// becomes a registered agent under the name its frontmatter gave it.
 func TestUnit_DeclaredAgentRegistersUnderItsBareName(t *testing.T) {
 	contenoxDir := t.TempDir()
 	agentsDir := filepath.Join(contenoxDir, agentdecl.NativeSourceDir)

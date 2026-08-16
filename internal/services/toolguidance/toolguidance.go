@@ -1,9 +1,6 @@
 // Package toolguidance appends short orientation lines to a tool's textual
-// result: a repeat-call marker, a re-read hint, and a periodic scope
-// summary, derived from per-session counters the harness maintains. It only
-// appends — never changes a result's shape, never fails or blocks a call —
-// and caps output at two lines per call. Toggle with
-// CONTENOX_TOOL_GUIDANCE=off.
+// result, derived from per-session counters. It only appends, caps output at two
+// lines per call, and is toggled with CONTENOX_TOOL_GUIDANCE=off.
 package toolguidance
 
 import (
@@ -38,8 +35,6 @@ const (
 	defaultMaxSessions = 512
 )
 
-// harnessPrefix marks every guidance line so it is distinguishable from tool
-// content by prefix alone.
 const harnessPrefix = "[harness] "
 
 // Options carries the three rule thresholds and the session-registry bound.
@@ -76,7 +71,6 @@ func (o Options) normalized() Options {
 	return o
 }
 
-// sessionCtxKey is an unexported context key for the bound session id.
 type sessionCtxKey struct{}
 
 // WithSession binds sessionID as the counter scope for every tool call on
@@ -89,9 +83,6 @@ func WithSession(ctx context.Context, sessionID string) context.Context {
 	return context.WithValue(ctx, sessionCtxKey{}, sessionID)
 }
 
-// sessionKeyFromContext resolves the counter scope for a tool call, in
-// priority order: an explicit WithSession id, then the per-turn request id
-// (libtracker.WithNewRequestID), then a process-global fallback bucket.
 func sessionKeyFromContext(ctx context.Context) string {
 	if v, ok := ctx.Value(sessionCtxKey{}).(string); ok && v != "" {
 		return "session:" + v
@@ -118,10 +109,8 @@ func Wrap(inner taskengine.ToolsRepo) taskengine.ToolsRepo {
 	return WrapWith(inner, DefaultOptions())
 }
 
-// WrapWith decorates inner with counters tuned by opts. It wraps the
-// aggregate ToolsRepo, so every provider behind it is observed uniformly,
-// and it should sit outside any HITL wrapper so it never sees the HITL
-// gate's internal reads.
+// WrapWith decorates inner with counters tuned by opts. It should sit outside
+// any HITL wrapper so it never sees the gate's internal reads.
 func WrapWith(inner taskengine.ToolsRepo, opts Options) taskengine.ToolsRepo {
 	opts = opts.normalized()
 	return &decorator{
@@ -140,9 +129,6 @@ func WrapFromEnv(inner taskengine.ToolsRepo) taskengine.ToolsRepo {
 	return Wrap(inner)
 }
 
-// decorator is the ToolsRepo wrapper. It is transparent on every method
-// except Exec, where a successful string result may gain up to two guidance
-// lines.
 type decorator struct {
 	inner taskengine.ToolsRepo
 	opts  Options
@@ -151,10 +137,6 @@ type decorator struct {
 
 var _ taskengine.ToolsRepo = (*decorator)(nil)
 
-// Exec runs the wrapped tool, then appends guidance. An error result is
-// returned untouched before any counting or appending. A non-string result
-// is counted but not appended to, unless it implements
-// AppendGuidance(string) any.
 func (d *decorator) Exec(ctx context.Context, startingTime time.Time, input any, debug bool, call *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	res, dt, err := d.inner.Exec(ctx, startingTime, input, debug, call)
 	if err != nil {
@@ -174,34 +156,25 @@ func (d *decorator) Exec(ctx context.Context, startingTime time.Time, input any,
 	if s, ok := res.(string); ok {
 		return s + suffix, dt, nil
 	}
-	// A typed result that renders as text can still carry the lines via this
-	// optional interface, asserted structurally so this package depends on
-	// no toolset.
+	// Asserted structurally so this package depends on no toolset.
 	if carrier, ok := res.(interface{ AppendGuidance(string) any }); ok {
 		return carrier.AppendGuidance(suffix), dt, nil
 	}
 	return res, dt, err
 }
 
-// Supports delegates to the inner repo — the decorator changes results, never
-// the tool surface.
 func (d *decorator) Supports(ctx context.Context) ([]string, error) {
 	return d.inner.Supports(ctx)
 }
 
-// GetSchemasForSupportedTools delegates to the inner repo.
 func (d *decorator) GetSchemasForSupportedTools(ctx context.Context) (map[string]*openapi3.T, error) {
 	return d.inner.GetSchemasForSupportedTools(ctx)
 }
 
-// GetToolsForToolsByName delegates to the inner repo.
 func (d *decorator) GetToolsForToolsByName(ctx context.Context, name string) ([]taskengine.Tool, error) {
 	return d.inner.GetToolsForToolsByName(ctx, name)
 }
 
-// observe updates the per-session counters for one call and returns at most
-// two guidance lines, priority repeat > revisit > scope. Holds the
-// session's lock for the whole update.
 func (d *decorator) observe(ctx context.Context, input any, call *taskengine.ToolsCall) []string {
 	sc := d.reg.get(sessionKeyFromContext(ctx), d.opts.MaxSessions)
 	leaf, full := toolNames(call)
@@ -249,8 +222,6 @@ func (d *decorator) observe(ctx context.Context, input any, call *taskengine.Too
 	return out
 }
 
-// registry holds per-session counters, bounded to max sessions with
-// least-recently-used eviction.
 type registry struct {
 	mu       sync.Mutex
 	sessions map[string]*sessionCounters
@@ -274,7 +245,6 @@ func (r *registry) get(key string, max int) *sessionCounters {
 	return sc
 }
 
-// evictLRULocked drops the least-recently-touched session. Caller holds r.mu.
 func (r *registry) evictLRULocked() {
 	var oldestKey string
 	var oldestSeq uint64
@@ -289,7 +259,6 @@ func (r *registry) evictLRULocked() {
 	}
 }
 
-// sessionCounters is one session's state, guarded by mu.
 type sessionCounters struct {
 	mu      sync.Mutex
 	lastSeq uint64
@@ -310,8 +279,6 @@ func newSessionCounters(seq uint64) *sessionCounters {
 	}
 }
 
-// toolNames returns the leaf name (for display) and the fully-qualified
-// provider.leaf name (for the fingerprint).
 func toolNames(call *taskengine.ToolsCall) (leaf, full string) {
 	leaf = call.ToolName
 	if leaf == "" {
@@ -328,11 +295,6 @@ func toolNames(call *taskengine.ToolsCall) (leaf, full string) {
 	return leaf, full
 }
 
-// fingerprint is a stable hash of (fully-qualified tool, canonicalized
-// args): two calls are identical iff tool and argument set match regardless
-// of map ordering. call.Args and the model's input map are merged, model
-// values winning on a clash; underscore-prefixed keys (harness-injected, not
-// model intent) are excluded.
 func fingerprint(full string, input any, call *taskengine.ToolsCall) string {
 	fields := map[string]string{}
 	if call != nil && call.Args != nil {
@@ -379,10 +341,6 @@ func canonicalValue(v any) string {
 	return fmt.Sprintf("%v", v)
 }
 
-// pathArgKeys are the argument names that carry a filesystem path across the
-// local providers and MCP tools. Limits: only declared path args are seen; a
-// multi-path tool contributes only the first match; file-vs-directory is
-// inferred from the tool name, not the filesystem.
 var pathArgKeys = []string{"path", "file", "file_path", "filepath", "filename", "dir", "dir_path", "directory", "target"}
 
 func extractPath(input any, call *taskengine.ToolsCall) string {
@@ -415,7 +373,6 @@ func dirOf(path string) string {
 	return d
 }
 
-// isReadLike reports whether a leaf tool name is a file read.
 func isReadLike(leaf string) bool {
 	l := strings.ToLower(leaf)
 	if strings.Contains(l, "read") {
@@ -428,13 +385,11 @@ func isReadLike(leaf string) bool {
 	return false
 }
 
-// isDirTool reports whether a leaf tool name operates on a directory.
 func isDirTool(leaf string) bool {
 	l := strings.ToLower(leaf)
 	return strings.Contains(l, "dir") || strings.Contains(l, "list") || l == "ls"
 }
 
-// ordinal renders 1->1st, 2->2nd, 3->3rd, 4->4th, 11->11th, 21->21st, ...
 func ordinal(n int) string {
 	if n%100 >= 11 && n%100 <= 13 {
 		return fmt.Sprintf("%dth", n)

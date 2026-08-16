@@ -33,10 +33,8 @@ type sessionIndexRow struct {
 	msgs      int
 }
 
-// querySessionIndex reads every session index in the database, across
-// workspaces and identities — the inventory these commands exist to show, so
-// it goes through the store's deliberately unscoped read rather than the
-// workspace-scoped MessageStore.
+// querySessionIndex reads every session index in the database, across workspaces
+// and identities, through the store's unscoped read.
 func querySessionIndex(ctx context.Context, exec libdb.Exec) ([]sessionIndexRow, error) {
 	rows, err := runtimetypes.ListAllMessageIndices(ctx, exec)
 	if err != nil {
@@ -155,8 +153,7 @@ func runSessionListFiltered(cmd *cobra.Command, ctx context.Context, db libdb.DB
 }
 
 // resolveSessionByID turns an internal session id into its name. The lookup is
-// workspace-independent on purpose (see GetMessageIndexName): the CLI resolves
-// ids the operator pasted from the cross-workspace inventory above.
+// workspace-independent, since the operator pastes ids from the inventory above.
 func resolveSessionByID(ctx context.Context, db libdb.DBManager, id string) (name string, found bool) {
 	name, err := runtimetypes.NewMessageStore(db.WithoutTransaction(), "").GetMessageIndexName(ctx, id)
 	if err != nil {

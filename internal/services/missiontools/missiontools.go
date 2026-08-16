@@ -147,15 +147,10 @@ func New(missions MissionStore, opts ...Option) taskengine.ToolsRepo {
 	return p
 }
 
-// Supports always reports the single provider name; exposure of the tools
-// themselves is gated in GetToolsForToolsByName.
 func (p *provider) Supports(context.Context) ([]string, error) {
 	return []string{ToolsProviderName}, nil
 }
 
-// GetToolsForToolsByName lists the mission tools only when the caller is on
-// a mission; off a mission it returns an empty slice so the tools are absent
-// from a model's tool list rather than present-and-refused.
 func (p *provider) GetToolsForToolsByName(ctx context.Context, name string) ([]taskengine.Tool, error) {
 	if name != ToolsProviderName {
 		return nil, fmt.Errorf("unknown tools: %s", name)
@@ -175,7 +170,6 @@ func (p *provider) GetToolsForToolsByName(ctx context.Context, name string) ([]t
 	return []taskengine.Tool{}, nil
 }
 
-// Exec runs one mission-tool call, refusing off-mission as the backstop for the deterministic `tools` path; a successful report or ask also stamps a heartbeat as proof of life.
 func (p *provider) Exec(ctx context.Context, _ time.Time, input any, _ bool, call *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	if call == nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: missing tools call")

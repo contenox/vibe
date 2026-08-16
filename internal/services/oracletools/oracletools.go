@@ -1,9 +1,7 @@
-// Package oracletools is the oracle's tool grant: exactly one model-facing
-// tool, submit_verdict, bound to exactly one durable ask for exactly one chain
-// execution. The binding rides the request context (WithBinding), set once by
-// the driver before it runs the oracle chain — the mission-tools idiom: off a
-// bound execution the provider lists no tools at all. The provider is
-// registered only in the driver's host engine, never in the global CLI toolset.
+// Package oracletools is the oracle's tool grant: one model-facing tool,
+// submit_verdict, bound to one durable ask for one chain execution. The binding
+// rides the request context, and off a bound execution the provider lists no
+// tools at all.
 package oracletools
 
 import (
@@ -165,12 +163,10 @@ func New(resolver Resolver) taskengine.ToolsRepo {
 	return &provider{resolver: resolver}
 }
 
-// Supports reports the one provider name; which tools it exposes is gated on the context binding.
 func (p *provider) Supports(context.Context) ([]string, error) {
 	return []string{ToolsProviderName}, nil
 }
 
-// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract, built from the same property table the tool descriptor renders so the two cannot drift.
 func (p *provider) GetSchemasForSupportedTools(context.Context) (map[string]*openapi3.T, error) {
 	schema := &openapi3.T{
 		OpenAPI: "3.1.0",
@@ -304,7 +300,6 @@ func verdictToolParameters() map[string]any {
 	}
 }
 
-// GetToolsForToolsByName lists submit_verdict only when ctx carries an ask binding; off a bound execution the tool is absent rather than present-and-refused.
 func (p *provider) GetToolsForToolsByName(ctx context.Context, name string) ([]taskengine.Tool, error) {
 	if name != ToolsProviderName {
 		return nil, fmt.Errorf("unknown tools: %s", name)

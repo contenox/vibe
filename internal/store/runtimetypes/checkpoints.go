@@ -65,7 +65,6 @@ func (s *store) GetChainCheckpoint(ctx context.Context, id string) (*ChainCheckp
 	return &cp, nil
 }
 
-// ClaimChainCheckpoint atomically claims id if unclaimed or claimed_at is older than staleBefore; returns libdb.ErrNotFound otherwise.
 func (s *store) ClaimChainCheckpoint(ctx context.Context, id string, now, staleBefore time.Time) error {
 	result, err := s.Exec.ExecContext(ctx, `
 		UPDATE chain_checkpoints
@@ -79,7 +78,6 @@ func (s *store) ClaimChainCheckpoint(ctx context.Context, id string, now, staleB
 	return checkRowsAffected(result)
 }
 
-// TouchChainCheckpointClaim refreshes id's claim timestamp as a liveness heartbeat; it only updates an existing claim, never creates one.
 func (s *store) TouchChainCheckpointClaim(ctx context.Context, id string, now time.Time) error {
 	result, err := s.Exec.ExecContext(ctx, `
 		UPDATE chain_checkpoints
@@ -93,7 +91,6 @@ func (s *store) TouchChainCheckpointClaim(ctx context.Context, id string, now ti
 	return checkRowsAffected(result)
 }
 
-// UpdateChainCheckpointPayload replaces id's payload; the payload stays opaque to this layer.
 func (s *store) UpdateChainCheckpointPayload(ctx context.Context, id string, payload json.RawMessage) error {
 	now := time.Now().UTC()
 	result, err := s.Exec.ExecContext(ctx, `
@@ -108,7 +105,6 @@ func (s *store) UpdateChainCheckpointPayload(ctx context.Context, id string, pay
 	return checkRowsAffected(result)
 }
 
-// SetChainCheckpointFailure annotates id with a failure reason without deleting the row.
 func (s *store) SetChainCheckpointFailure(ctx context.Context, id string, failure string) error {
 	now := time.Now().UTC()
 	result, err := s.Exec.ExecContext(ctx, `
@@ -123,7 +119,6 @@ func (s *store) SetChainCheckpointFailure(ctx context.Context, id string, failur
 	return checkRowsAffected(result)
 }
 
-// DeleteChainCheckpoint removes id, returning libdb.ErrNotFound if already gone.
 func (s *store) DeleteChainCheckpoint(ctx context.Context, id string) error {
 	result, err := s.Exec.ExecContext(ctx, `
 		DELETE FROM chain_checkpoints WHERE id = $1`, id)
@@ -133,7 +128,6 @@ func (s *store) DeleteChainCheckpoint(ctx context.Context, id string) error {
 	return checkRowsAffected(result)
 }
 
-// ListChainCheckpoints returns suspended runs newest first, paginated by createdAtCursor and limit.
 func (s *store) ListChainCheckpoints(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*ChainCheckpoint, error) {
 	cursor := time.Now().UTC()
 	if createdAtCursor != nil {

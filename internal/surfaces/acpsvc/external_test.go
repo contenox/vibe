@@ -20,18 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file exercises the external-agent-backed ACP session: contenox.agent
-// `_meta` binds a session to a registered external agent, spawned and driven
-// via runtime/agenthost instead of the native chain engine, against the
-// hermetic in-repo acp-stub-agent.
-
 // buildStubAgentBin compiles libacp/cmd/acp-stub-agent into t.TempDir() and
 // returns its path, mirroring agenthost's buildStubAgent.
-//
-// Every caller spawns this binary through the sandbox, which is
-// Landlock-based and Linux-only (see internal/libsandbox/isolation_other.go)
-// — off Linux the spawn always fails with ErrIsolation before the binary is
-// even exec'd, so there is nothing meaningful left to test.
 func buildStubAgentBin(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS != "linux" {
@@ -647,8 +637,7 @@ type wireExternalConn struct {
 }
 
 // dialWireTransport spins up a production Transport bound to the given DB and
-// returns a wireClient plus an idempotent shutdown. The DB is owned by the
-// caller, not closed here.
+// returns a wireClient plus an idempotent shutdown.
 func dialWireTransport(ctx context.Context, t *testing.T, db libdb.DBManager, workspaceID string) *wireExternalConn {
 	t.Helper()
 	agentR, clientW := io.Pipe()

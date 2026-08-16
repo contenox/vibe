@@ -25,11 +25,8 @@ type Deps struct {
 	Engine        *enginesvc.Engine
 	DB            libdb.DBManager
 	ChainRegistry *ChainRegistry
-	// FIMChainRegistry supplies the fill-in-the-middle chain the
-	// `_contenox/autocomplete` extension method runs. Nil disables
-	// autocomplete: the method reports a clean method-not-found error rather
-	// than a panic. Independent of ChainRegistry so the completion model can
-	// differ from the chat model (see LoadFIMChainRegistry).
+	// FIMChainRegistry supplies the fill-in-the-middle chain `_contenox/autocomplete`
+	// runs. Nil disables autocomplete.
 	FIMChainRegistry   *ChainRegistry
 	DefaultModel       string
 	DefaultProvider    string
@@ -42,28 +39,14 @@ type Deps struct {
 	// (e.g. chain-compact-default.json for /compact).
 	ContenoxDir string
 
-	// WorkspaceRoots is the machine's allowlist of directories a client may
-	// root a session in. The launch directory is always its default root;
-	// configured roots extend it. The sentinel "/" and "" resolve to that
-	// default, so a client that proposes nothing lands in the launch directory
-	// rather than at the filesystem root.
-	//
-	// Nil and empty are different states and must stay so: nil means no
-	// allowlist is configured, and the workspace-root config option is then
-	// absent from session/new and from the initialize `_meta` snapshot, so a
-	// client hides its picker instead of erroring. That is the stdio path,
-	// where the editor owns the filesystem and any absolute cwd is accepted.
-	//
-	// Set it on any surface reachable through the relay. A remote client holds
-	// only a session cookie, so its cwd is untrusted input and the machine
-	// stays authoritative: a cwd outside the allowlist is refused, not adopted.
-	// See Transport.resolveWorkspaceCwd, the single enforcement point.
+	// WorkspaceRoots is the machine's allowlist of directories a client may root a
+	// session in. Nil means no allowlist is configured and any absolute cwd is
+	// accepted; enforced in Transport.resolveWorkspaceCwd.
 	WorkspaceRoots *vfs.Factory
 
 	// KnownPolicies are the HITL policy preset names /policy lists. Display only.
 	KnownPolicies []string
 	// HITLDefaultPolicyName is the engine's fallback policy, shown by /policy.
-	// Display only.
 	HITLDefaultPolicyName string
 
 	// UpdateBanner is an optional one-shot agent_message_chunk sent on the
@@ -74,56 +57,46 @@ type Deps struct {
 	// initialize, Complete finishes setup non-interactively). Nil disables it.
 	EnvSetup *EnvSetupSpec
 
-	// SessionRouter is the process-shared (contenox session -> transport)
-	// registry a shared engine routes HITL approvals through. Required
-	// wherever one engine serves more than one connection — serve's
-	// WebSockets, and the ACP profile once relay attachments can arrive —
-	// because a shared engine has no other way to tell which client is
-	// driving the session an approval was raised on.
-	//
-	// Nil is legal and means "one transport, bound directly": a caller that
-	// serves exactly one connection may route through that connection and
-	// never consult a registry. Every method here is nil-safe, so an unwired
-	// router costs nothing rather than needing a guard at each call site.
+	// SessionRouter is the process-shared (contenox session -> transport) registry
+	// a shared engine routes HITL approvals through. Nil means one transport bound
+	// directly; every router method is nil-safe.
 	SessionRouter *SessionRouter
 
-	// Instances owns external-agent instances off any single connection, so
-	// the agent's process survives a client disconnect/reload and a reload
-	// re-attaches. Nil falls back to a connCtx-bound spawn (stdio behavior).
+	// Instances owns external-agent instances off any single connection, so the
+	// agent's process survives a client disconnect. Nil falls back to a
+	// connCtx-bound spawn.
 	Instances agentinstance.Manager
 
 	// NativeTurns is the survival layer for native turns: prompts run on this
-	// serve-rooted Registry, so a client drop no longer cancels the chain —
-	// the Transport attaches as a viewer, and only session/cancel or delete
-	// cancels the turn. Nil falls back to a connection-bound turn.
+	// serve-rooted Registry, so a client drop no longer cancels the chain. Nil
+	// falls back to a connection-bound turn.
 	NativeTurns *nativeturn.Registry
 
-	// Fleet, when set, is what `/mission` fires through (fleetservice.Dispatch,
-	// narrowed to Dispatch only). Nil for a dispatched unit or a setup-only editor.
+	// Fleet, when set, is what `/mission` fires through. Nil for a dispatched unit
+	// or a setup-only editor.
 	Fleet MissionDispatcher
 
-	// Agents resolves a declared agent by name for /mission's grammar. Fleet
-	// and Agents together gate whether `/mission` is advertised and usable.
+	// Agents resolves a declared agent by name for /mission's grammar. With Fleet
+	// it gates whether `/mission` is advertised.
 	Agents MissionAgentResolver
 
-	// MissionEnvelopes lists and resolves the HITL policy files /mission may
-	// fire under (`--policy`), over the host's own policy search path. Nil
-	// drops the listing and the pre-dispatch existence check; /mission still
-	// fires under whatever name it is given.
+	// MissionEnvelopes lists and resolves the HITL policy files /mission may fire
+	// under. Nil drops the listing and the pre-dispatch existence check.
 	MissionEnvelopes MissionEnvelopeSource
 
-	// Asks is the durable ask inbox /answer records through and parked approvals are re-offered from; it must be the process's OWN hitlservice.Service.
+	// Asks is the durable ask inbox /answer records through; it must be the
+	// process's own hitlservice.Service.
 	Asks AskInbox
 
-	// Supervision resolves which missions a session fired. With Asks, it gates whether /answer is advertised.
+	// Supervision resolves which missions a session fired. With Asks it gates
+	// whether /answer is advertised.
 	Supervision MissionSupervision
 
 	// OptInBeta mirrors the CLI's opt-in-beta gate.
 	OptInBeta bool
 }
 
-// EnvSetupSpec describes environment-variable-based setup (the non-interactive
-// sibling of the terminal setup wizard).
+// EnvSetupSpec describes environment-variable-based setup.
 type EnvSetupSpec struct {
 	Vars     []libacp.AuthEnvVar
 	Complete func(ctx context.Context) error
@@ -138,68 +111,43 @@ type sessionEntry struct {
 	Provider          string
 	Model             string
 	Think             string
-	// EffectiveTokenLimit is the user-chosen (or chain default) context
-	// budget, clamped to the model's ContextLength when known. 0 means chain
-	// default / unlimited; shown in usage indicators as "size".
+	// EffectiveTokenLimit is the context budget; 0 means chain default.
 	EffectiveTokenLimit int
-	// HITLPolicy is the per-session HITL policy ("" = the default sentinel),
-	// injected into the prompt context so a shared engine gates each session
-	// independently. Must never touch the global cli.hitl-policy-name KV.
+	// HITLPolicy is the per-session HITL policy ("" = the default sentinel). Must
+	// never touch the global cli.hitl-policy-name KV.
 	HITLPolicy string
 
-	// MissionID is the mission this session is a dispatched unit of (from
-	// session/new `_meta`), scoping its mission tools; "" for ordinary chat.
+	// MissionID is the mission this session is a dispatched unit of; "" for chat.
 	MissionID string
 
-	// ModelAllowlist / BackendAllowlist are the mission envelope's compute
-	// bound, applied on every turn context where a model is actually chosen.
-	// Nil (no binding) for ordinary chat or an unbounded mission.
+	// ModelAllowlist and BackendAllowlist are the mission envelope's compute bound.
 	ModelAllowlist   []string
 	BackendAllowlist []string
 
-	// FiredMissions marks that this session dispatched missions of its own,
-	// unlocking the supervisor tools.
 	FiredMissions bool
 
-	// driver is the execution backend (native chain or external downstream
-	// agent), chosen once at construction; all paths dispatch through it.
 	driver sessionDriver
 }
 
-// sessionDriver is the per-session execution backend a sessionEntry delegates
-// to. Implementations share the sessionEntry passed to each call; only the
-// execution mechanism differs.
+// sessionDriver is the per-session execution backend a sessionEntry delegates to:
+// the native chain engine or an external downstream agent.
 type sessionDriver interface {
-	// Prompt runs one full turn for sess, owning update relay, cancellation
-	// registration, and history persistence.
 	Prompt(ctx context.Context, req libacp.PromptRequest, sess *sessionEntry) (libacp.PromptResponse, error)
-	// ConfigOptions returns the options advertised for sess: native selects,
-	// or the downstream agent's own options for external.
 	ConfigOptions(ctx context.Context, sess *sessionEntry) []libacp.SessionConfigOption
-	// SetConfigOption applies a change: native mutates the session's own
-	// selection; external forwards downstream and adopts the confirmed set.
-	// value carries the wire union (string or boolean).
 	SetConfigOption(ctx context.Context, sess *sessionEntry, configID string, value libacp.SessionConfigOptionValue) error
-	// AvailableCommands returns the slash-command menu, or nil for external
-	// sessions (whose menu is relayed live via available_commands_update).
 	AvailableCommands() []libacp.AvailableCommand
-	// AgentName is the registered external agent name, or "" for native.
 	AgentName() string
-	// Close releases connection-local resources. Idempotent: native is a
-	// no-op, external closes the downstream Handle.
 	Close() error
 }
 
 type Transport struct {
 	deps Deps
 	conn *libacp.AgentSideConnection
-	// connectionID scopes client-supplied MCP servers to this ACP connection so
-	// two clients loading the same session cannot overwrite each other's tools.
+	// connectionID scopes client-supplied MCP servers to this ACP connection.
 	connectionID string
 
-	// connCtx binds spawned external agents to this connection; connCancel
-	// fires on the connection's Closed signal (the reliable teardown hook —
-	// serve never calls Transport.Close).
+	// connCtx binds spawned external agents to this connection; connCancel fires on
+	// the connection's Closed signal, since serve never calls Transport.Close.
 	connCtx    context.Context
 	connCancel context.CancelFunc
 
@@ -211,8 +159,8 @@ type Transport struct {
 	sessions        map[libacp.SessionID]*sessionEntry
 	contenoxToACPID map[string]libacp.SessionID
 
-	// cfgMu guards the live model/provider, mutated by /model and /provider
-	// while concurrent prompts read them. Seeded from Deps once at construction.
+	// cfgMu guards the live model/provider, mutated by /model and /provider while
+	// concurrent prompts read them.
 	cfgMu              sync.Mutex
 	defaultModel       string
 	defaultProvider    string
@@ -224,17 +172,15 @@ type Transport struct {
 	permMu      sync.Mutex
 	permPending map[string]struct{}
 
-	// nativeViewMu guards nativeViewing: sessions whose in-flight native
-	// turn this connection watches via an attached viewer; the mirror skips
-	// them (one delivery path per connection).
+	// nativeViewMu guards nativeViewing: sessions whose in-flight native turn this
+	// connection watches via an attached viewer; the mirror skips them.
 	nativeViewMu  sync.Mutex
 	nativeViewing map[libacp.SessionID]int
 
 	toolCallMu     sync.Mutex
 	toolCallStatus map[string]libacp.ToolCallStatus
-	// toolCallSeq / toolCallOpen disambiguate repeated invocations of a tool
-	// with no engine-minted ApprovalID: the name alone would reuse one wire id
-	// per run, merging cards and pinning status at the first completion's rank.
+	// toolCallSeq and toolCallOpen disambiguate repeated invocations of a tool with
+	// no engine-minted ApprovalID, which would otherwise share one wire id.
 	toolCallSeq  map[string]int
 	toolCallOpen map[string]int
 
@@ -242,33 +188,27 @@ type Transport struct {
 	pendingBanner string
 
 	// termSubMu guards termSubs, the per-session cancel funcs for live
-	// terminal-output subscriptions. Re-subscribing cancels the prior one.
+	// terminal-output subscriptions.
 	termSubMu sync.Mutex
 	termSubs  map[libacp.SessionID]func()
 
 	// promptCancelMu guards promptCancels, the per-session canceller for the
-	// in-flight turn: session/cancel, Close/Delete, or a connection drop abort
-	// through it rather than relying solely on libacp's promptCtx
-	// substitution. One turn per session; a superseding registration cancels
-	// the stale one.
+	// in-flight turn. One turn per session; a superseding registration cancels the
+	// stale one.
 	promptCancelMu sync.Mutex
 	promptCancels  map[libacp.SessionID]*inflightPrompt
 
-	// mirrorOnce starts the mirror pump on first use and mirrorCh is its
-	// bounded queue: updates produced by another connection on a session this
-	// one also holds. Separate from the turn's own write path so a screen that
-	// stopped reading cannot stall the turn feeding it. See mirror.go.
+	// mirrorOnce starts the mirror pump on first use; mirrorCh is its bounded queue,
+	// separate from the turn's write path so a stalled screen cannot stall the turn.
 	mirrorOnce sync.Once
 	mirrorCh   chan mirrorItem
 
-	// acAgent is a test seam: when set, _contenox/autocomplete uses it instead
-	// of building a fresh agentservice.Agent from deps. Nil in production.
+	// acAgent is a test seam; nil in production.
 	acAgent agentservice.Agent
 }
 
-// inflightPrompt is a running turn's cancellation registration. Pointer
-// identity is used for symmetric unregister so an ended turn never removes a
-// newer turn's registration.
+// inflightPrompt is a running turn's cancellation registration. Pointer identity
+// makes unregister symmetric.
 type inflightPrompt struct {
 	cancel context.CancelFunc
 }
@@ -287,16 +227,9 @@ func (t *Transport) markPermissionPending(sid libacp.SessionID, toolCallID strin
 }
 
 // claimPermissionCard reserves this connection's permission-card slot for
-// (sid, toolCallID), reporting false when one is already open here.
-//
-// It is markPermissionPending made conditional, and it is where the re-offer
-// path's idempotency lives (see reoffer.go). The slot is per connection
-// because that is what "a second card" means: a session is held by every
-// attached connection and SessionRouter.AskApproval already asks all of them,
-// so the same approval showing on a phone and a desk is the intended state,
-// not a duplicate. What must never happen is one connection being asked twice
-// about one approval — a live ask and a re-offer racing, or a client loading
-// the same session twice — and both of those collide on this key.
+// (sid, toolCallID), reporting false when one is already open here. The slot is
+// per connection, so one connection is never asked twice about one approval while
+// other holders are still asked once each.
 func (t *Transport) claimPermissionCard(sid libacp.SessionID, toolCallID string) bool {
 	t.permMu.Lock()
 	defer t.permMu.Unlock()
@@ -327,9 +260,7 @@ func (t *Transport) sendToolCallUpdateGuarded(ctx context.Context, sid libacp.Se
 }
 
 // isPermissionPending reports whether a permission dialog is open here for
-// (sid, toolCallID). The native-turn viewer consults it at delivery time —
-// survival-path translation runs off-connection, so it cannot rely on
-// sendToolCallUpdateGuarded's inline check.
+// (sid, toolCallID).
 func (t *Transport) isPermissionPending(sid libacp.SessionID, toolCallID string) bool {
 	t.permMu.Lock()
 	defer t.permMu.Unlock()
@@ -384,12 +315,9 @@ func New(deps Deps) libacp.AgentFactory {
 			termSubs:           make(map[libacp.SessionID]func()),
 			promptCancels:      make(map[libacp.SessionID]*inflightPrompt),
 		}
-		// The `!` shell passthrough and contenox-namespaced requests arrive as
-		// ACP extension methods (see terminal.go); unknown ones answer
-		// MethodNotFound since this handler only claims the contenox namespace.
 		conn.SetExtRequestHandler(t.handleExtRequest)
-		// Cancelling connCtx tears down every external-agent subprocess spawned
-		// on it, for both stdio and serve WS (which never calls Transport.Close).
+		// Cancelling connCtx tears down every external-agent subprocess spawned on
+		// it, including serve's WS, which never calls Transport.Close.
 		go func() {
 			<-conn.Closed()
 			connCancel()
@@ -400,7 +328,6 @@ func New(deps Deps) libacp.AgentFactory {
 }
 
 // takeBanner atomically reads and clears the pending update banner.
-// Returns "" after the first call, ensuring the banner is sent at most once.
 func (t *Transport) takeBanner() string {
 	t.bannerMu.Lock()
 	defer t.bannerMu.Unlock()
@@ -409,15 +336,12 @@ func (t *Transport) takeBanner() string {
 	return b
 }
 
-// model returns the live default model, which /model may have changed since
-// startup. Safe for concurrent reads/writes against the command handlers.
 func (t *Transport) model() string {
 	t.cfgMu.Lock()
 	defer t.cfgMu.Unlock()
 	return t.defaultModel
 }
 
-// provider returns the live default provider, which /provider may have changed.
 func (t *Transport) provider() string {
 	t.cfgMu.Lock()
 	defer t.cfgMu.Unlock()
@@ -442,17 +366,13 @@ func (t *Transport) maxTokens() string {
 	return t.defaultMaxTokens
 }
 
-// chainTemplateVars seeds the template vars every chain execution needs, so
-// default_model/default_provider ({{var:alt_model|var:default_model}} and the
-// provider equivalent) are always set when a model is known.
 func (t *Transport) chainTemplateVars(sess *sessionEntry) map[string]string {
 	vars := map[string]string{
 		"model":    sess.modelOrDefault(t.model()),
 		"provider": sess.providerOrDefault(t.provider()),
 	}
-	// default_model/default_provider must be the session-effective selection,
-	// not the transport default, or recovery tasks resolve a stale provider
-	// while the main tasks use the session's working one.
+	// default_model/default_provider must be the session-effective selection, or
+	// recovery tasks resolve a stale provider.
 	if vars["model"] != "" {
 		vars["default_model"] = vars["model"]
 	}
@@ -516,8 +436,6 @@ func (s *sessionEntry) setThink(v string) {
 	s.mu.Unlock()
 }
 
-// hitlPolicy returns the session's HITL policy selection, defaulting to the
-// "use configured default" sentinel when unset (nil-safe, mirroring think()).
 func (s *sessionEntry) hitlPolicy() string {
 	if s == nil {
 		return hitlPolicyDefaultValue
@@ -563,10 +481,8 @@ func (s *sessionEntry) modelOrDefault(defaultModel string) string {
 	return s.Model
 }
 
-// resolutionBounds is this session's envelope allowlist as
-// llmrepo.ResolutionBounds. Both turn paths must bind through this one
-// accessor, or a unit could escape its compute envelope depending on which
-// path ran it. Zero (binds nothing) for chat or an unbounded mission.
+// resolutionBounds is this session's envelope allowlist. Both turn paths must
+// bind through this one accessor, or a unit could escape its compute envelope.
 func (s *sessionEntry) resolutionBounds() llmrepo.ResolutionBounds {
 	if s == nil {
 		return llmrepo.ResolutionBounds{}
@@ -612,9 +528,6 @@ func (t *Transport) acpSessionForContenoxID(contenoxSessionID string) (libacp.Se
 	return sid, ok
 }
 
-// contenoxSessionForACPID is the inverse, over this connection's own sessions:
-// the mirror addresses holders by contenox session id, which is the identity
-// the router keys on and the one thing two connections agree about.
 func (t *Transport) contenoxSessionForACPID(sid libacp.SessionID) (string, bool) {
 	t.sessionMu.Lock()
 	defer t.sessionMu.Unlock()
@@ -626,38 +539,22 @@ func (t *Transport) contenoxSessionForACPID(sid libacp.SessionID) (string, bool)
 }
 
 // bindContenoxSession records the contenox<->ACP mapping and registers this
-// transport with the shared router for HITL routing. Callers hold sessionMu;
-// the router takes its own lock and never calls back under it, so there is
-// no lock-ordering hazard.
+// transport with the shared router. Callers hold sessionMu.
 func (t *Transport) bindContenoxSession(contenoxSessionID string, sid libacp.SessionID) {
 	t.contenoxToACPID[contenoxSessionID] = sid
 	t.deps.SessionRouter.bind(contenoxSessionID, t)
 }
 
-// unbindContenoxSession is the inverse: it drops the mapping and deregisters
-// this transport from the router (only if it is still the registered owner).
-// Callers hold sessionMu.
+// unbindContenoxSession drops the mapping and deregisters this transport from the
+// router if it is still the registered owner. Callers hold sessionMu.
 func (t *Transport) unbindContenoxSession(contenoxSessionID string) {
 	delete(t.contenoxToACPID, contenoxSessionID)
 	t.deps.SessionRouter.unbind(contenoxSessionID, t)
 }
 
-// claimSessionRouting records this transport as one of sess's holders: it
-// receives the session's updates and is asked its approvals, alongside every
-// other connection holding the same session.
-//
-// It is called at the top of every turn, not only when a session is created or
-// loaded. Joining is idempotent — [SessionRouter.bind] moves an existing holder
-// to the front rather than adding it twice — so the per-turn call costs
-// nothing and only refreshes the recency order [SessionRouter.transportFor]
-// reads.
-//
-// It does not evict anyone. Two clients on one session is the ordinary case,
-// not a conflict to resolve: a phone and a desk attached to one runtime are one
-// person looking at one session from two places, and both are addressed.
-//
-// A nil router, an unwired session and a session with no contenox id are all
-// no-ops, so the single-connection path pays nothing for this.
+// claimSessionRouting records this transport as one of sess's holders. Idempotent
+// and called at the top of every turn; it evicts no one, since two clients on one
+// session is the ordinary case.
 func (t *Transport) claimSessionRouting(sess *sessionEntry) {
 	if t.deps.SessionRouter == nil || sess == nil {
 		return
@@ -666,23 +563,10 @@ func (t *Transport) claimSessionRouting(sess *sessionEntry) {
 }
 
 // releaseSessionRouting deregisters every session this transport holds from the
-// shared router. It rides the connection's Closed signal, which is the only
-// teardown hook every caller reaches — serve and the relay tunnel never call
-// [Transport.Close] — so a client that detached, whether a phone that changed
-// network, a relay attachment torn down or a WebSocket dropped, stops being
-// asked and stops being mirrored to.
-//
-// Without it the router keeps naming a dead connection: every approval raised
-// on one of its sessions waits on a screen that is gone, and every update is
-// queued for a socket that will never drain. Deregistered, the remaining
-// holders carry on, and ErrNoBoundSession is reported only once the last one
-// leaves.
-//
-// It deliberately does NOT touch the connection-local session state, terminals
-// or downstream agents: a bare connection drop is not a session close (see
-// [Transport.Close]), and it is the router entry alone that must not outlive
-// the connection. The router's unbind is identity-guarded, so releasing a
-// session another connection has since claimed leaves that live claim standing.
+// shared router, riding the connection's Closed signal — the only teardown hook
+// serve and the relay tunnel reach. It deliberately leaves connection-local
+// session state, terminals and downstream agents alone: a bare connection drop is
+// not a session close.
 func (t *Transport) releaseSessionRouting() {
 	if t.deps.SessionRouter == nil {
 		return
@@ -695,8 +579,7 @@ func (t *Transport) releaseSessionRouting() {
 }
 
 // registerPromptCancel records cancel as sid's in-flight turn canceller,
-// superseding and cancelling any prior registration (one turn per session).
-// Returns the token for a symmetric unregisterPromptCancel.
+// superseding and cancelling any prior registration.
 func (t *Transport) registerPromptCancel(sid libacp.SessionID, cancel context.CancelFunc) *inflightPrompt {
 	reg := &inflightPrompt{cancel: cancel}
 	t.promptCancelMu.Lock()
@@ -712,9 +595,8 @@ func (t *Transport) registerPromptCancel(sid libacp.SessionID, cancel context.Ca
 	return reg
 }
 
-// unregisterPromptCancel drops reg's registration if — and only if — it is
-// still the current one for sid (pointer identity), so a turn that already
-// ended never clears a newer turn's registration.
+// unregisterPromptCancel drops reg's registration only if it is still the current
+// one for sid, so an ended turn never clears a newer turn's registration.
 func (t *Transport) unregisterPromptCancel(sid libacp.SessionID, reg *inflightPrompt) {
 	t.promptCancelMu.Lock()
 	if cur, ok := t.promptCancels[sid]; ok && cur == reg {
@@ -723,9 +605,7 @@ func (t *Transport) unregisterPromptCancel(sid libacp.SessionID, reg *inflightPr
 	t.promptCancelMu.Unlock()
 }
 
-// cancelInflightPrompt cancels sid's in-flight turn, reporting whether it
-// did; a no-op without one (the spec allows session/cancel at any time). The
-// registration stays; the turn's deferred unregisterPromptCancel removes it.
+// cancelInflightPrompt cancels sid's in-flight turn, reporting whether it did.
 func (t *Transport) cancelInflightPrompt(sid libacp.SessionID) bool {
 	t.promptCancelMu.Lock()
 	reg, ok := t.promptCancels[sid]
@@ -737,15 +617,14 @@ func (t *Transport) cancelInflightPrompt(sid libacp.SessionID) bool {
 	return true
 }
 
-// Cancel handles session/cancel, aborting the in-flight turn with
-// context.Canceled semantics: Prompt resolves it with stopReason "cancelled",
-// never a JSON-RPC error, per the ACP contract. A no-op with no running turn.
+// Cancel handles session/cancel, aborting the in-flight turn so Prompt resolves
+// it with stopReason "cancelled" rather than a JSON-RPC error.
 func (t *Transport) Cancel(ctx context.Context, req libacp.CancelNotification) error {
 	_, reportChange, end := t.tracker().Start(ctx, "cancel", "acp_session", "session_id", string(req.SessionID))
 	defer end()
 	cancelled := t.cancelInflightPrompt(req.SessionID)
-	// A survival turn's canceller is not in promptCancels; reach it through
-	// the Registry. A connection drop deliberately does not cancel it.
+	// A survival turn's canceller is not in promptCancels; reach it through the
+	// Registry. A connection drop deliberately does not cancel it.
 	if t.deps.NativeTurns != nil && t.deps.NativeTurns.Cancel(req.SessionID) {
 		cancelled = true
 	}
@@ -770,16 +649,8 @@ func (t *Transport) workspaceID() string {
 }
 
 // sendUpdate writes notif to this connection and mirrors it to every other
-// connection holding the same session.
-//
-// The mirror is what makes a session one thing several surfaces watch rather
-// than a private stream per connection: session/load already replays the
-// transcript to a late attacher, and this extends the same view to the live
-// tail, so a turn driven from a phone renders at the desk as it happens.
-//
-// Normalization runs once, here, and the mirror carries the result verbatim —
-// see [Transport.mirrorUpdate] for why re-normalizing per connection would
-// renumber tool cards.
+// connection holding the same session. Normalization runs once, here, and the
+// mirror carries the result verbatim.
 func (t *Transport) sendUpdate(ctx context.Context, notif libacp.SessionNotification) {
 	if t.conn == nil {
 		return
@@ -793,8 +664,7 @@ func (t *Transport) sendUpdate(ctx context.Context, notif libacp.SessionNotifica
 	}
 }
 
-// sendUpdateLocal writes to this connection only, never the mirror: re-sync
-// traffic (replay, usage gauges) is addressed to one connection.
+// sendUpdateLocal writes to this connection only, never the mirror.
 func (t *Transport) sendUpdateLocal(ctx context.Context, notif libacp.SessionNotification) {
 	if t.conn == nil {
 		return
@@ -802,9 +672,8 @@ func (t *Transport) sendUpdateLocal(ctx context.Context, notif libacp.SessionNot
 	t.writeUpdate(ctx, t.normalizeToolCallNotification(notif))
 }
 
-// writeUpdate writes one already-normalized notification to this connection.
-// It is the only place a session update reaches a socket, reached both by the
-// turn that produced it and by the mirror pump carrying another connection's.
+// writeUpdate writes one already-normalized notification to this connection. It is
+// the only place a session update reaches a socket.
 func (t *Transport) writeUpdate(ctx context.Context, notif libacp.SessionNotification) {
 	if t.conn == nil {
 		return
@@ -880,7 +749,7 @@ func (t *Transport) clearToolCallState(sid libacp.SessionID) {
 }
 
 // toolCallWireID resolves the ACP tool-call id for an event using this
-// connection's seq/open maps. See resolveToolCallWireID for the algorithm.
+// connection's seq/open maps.
 func (t *Transport) toolCallWireID(sid libacp.SessionID, ev taskengine.TaskEvent, closes bool) string {
 	t.toolCallMu.Lock()
 	defer t.toolCallMu.Unlock()
@@ -893,10 +762,8 @@ func (t *Transport) toolCallWireID(sid libacp.SessionID, ev taskengine.TaskEvent
 	return resolveToolCallWireID(t.toolCallSeq, t.toolCallOpen, sid, ev, closes)
 }
 
-// resolveToolCallWireID is the invocation-counter logic shared by Transport
-// and the native-turn translator over their own seq/open maps (caller-locked,
-// non-nil). An ApprovalID is used verbatim; otherwise the name-derived base
-// gets a counter so repeated runs of one tool stay distinct cards.
+// resolveToolCallWireID is the invocation-counter logic shared by Transport and
+// the native-turn translator over their own caller-locked seq/open maps.
 func resolveToolCallWireID(seq, open map[string]int, sid libacp.SessionID, ev taskengine.TaskEvent, closes bool) string {
 	if ev.ApprovalID != "" {
 		return ev.ApprovalID
@@ -965,9 +832,8 @@ func sessionIDFromCtx(ctx context.Context) string {
 	return v
 }
 
-// sendInitialUsageUpdate sends a brand-new session's usage_update: size is
-// the effective token budget, used is 0. Sessions with history use
-// sendUsageUpdate instead.
+// sendInitialUsageUpdate sends a brand-new session's usage_update; sessions with
+// history use sendUsageUpdate instead.
 func (t *Transport) sendInitialUsageUpdate(ctx context.Context, sid libacp.SessionID) {
 	if size := t.sessionTokenSize(ctx, sid); size > 0 {
 		t.sendUpdateLocal(ctx, libacp.SessionNotification{
@@ -980,9 +846,8 @@ func (t *Transport) sendInitialUsageUpdate(ctx context.Context, sid libacp.Sessi
 	}
 }
 
-// sendUsageUpdate emits the gauge for a session with history, used half
-// filled in. Emitted whenever either half is known, mirroring the live
-// token_usage translation in events.go.
+// sendUsageUpdate emits the gauge for a session with history, whenever either
+// half is known.
 func (t *Transport) sendUsageUpdate(ctx context.Context, sid libacp.SessionID, used int) {
 	size := t.sessionTokenSize(ctx, sid)
 	if size <= 0 && used <= 0 {
@@ -998,9 +863,8 @@ func (t *Transport) sendUsageUpdate(ctx context.Context, sid libacp.SessionID, u
 	})
 }
 
-// sendResumedUsageUpdate is sendUsageUpdate for session/resume, which unlike
-// session/load never reads the transcript, so history is fetched here. A read
-// failure degrades to a size-only update rather than failing the resume.
+// sendResumedUsageUpdate is sendUsageUpdate for session/resume, which never reads
+// the transcript, so history is fetched here.
 func (t *Transport) sendResumedUsageUpdate(ctx context.Context, sid libacp.SessionID, entry *sessionEntry) {
 	used := 0
 	if t.deps.DB != nil && entry != nil && entry.InternalSessionID != "" {
@@ -1012,11 +876,9 @@ func (t *Transport) sendResumedUsageUpdate(ctx context.Context, sid libacp.Sessi
 	t.sendUsageUpdate(ctx, sid, used)
 }
 
-// sessionTokenSize resolves the "size" half of a usage_update. It mirrors
-// the arithmetic taskengine uses to pick a turn's ctxLength (chain
-// token_limit as base, session override winning only when smaller) so the
-// gauge's denominator matches the next turn's first token_usage event. The
-// model-context-length scan is the last resort; 0 means no budget resolved.
+// sessionTokenSize resolves the "size" half of a usage_update. It mirrors the
+// arithmetic taskengine uses to pick a turn's ctxLength so the gauge's
+// denominator matches the next turn's first token_usage event.
 func (t *Transport) sessionTokenSize(ctx context.Context, sid libacp.SessionID) int {
 	t.sessionMu.Lock()
 	sess, hasSess := t.sessions[sid]
@@ -1037,7 +899,6 @@ func (t *Transport) sessionTokenSize(ctx context.Context, sid libacp.SessionID) 
 		return limit
 	}
 
-	// Fallback to model cap (for cases where no explicit budget set yet)
 	preferredModel := t.model()
 	t.sessionMu.Lock()
 	if entry, ok := t.sessions[sid]; ok && entry != nil {

@@ -22,18 +22,10 @@ const (
 // ReservedNames are the shipped agents a declaration may not take the id of.
 // The workspace directory is the first root chainagents scans, so a declaration
 // claiming one would shadow the shipped agent rather than error.
-//
-// ⚠ chain-acp and chain-acpx are NOT
-// here any more. They stopped being shipped JSON and became the seeded
-// declarations under agents/, so reserving their names would refuse the very
-// files init writes. They are ordinary declarations now, and a workspace copy
-// shadowing one is the same "your copy wins" rule every chain already follows.
 var ReservedNames = map[string]bool{
 	"agent-planner": true,
 }
 
-// marshalWithSchema splices the $schema key in ahead of the marshalled body so
-// an editor completes and checks an emitted file the way it does a shipped one.
 func marshalWithSchema(v any, schemaURL string) ([]byte, error) {
 	body, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {

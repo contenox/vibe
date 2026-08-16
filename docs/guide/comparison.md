@@ -1,32 +1,18 @@
 ---
 title: How contenox compares
 description: What contenox shares with the coding agents, the three things that are structurally different, what those cost, and which tool to pick.
+order: 3
 ---
 
 # How contenox compares
 
-The loop is not the difference. What the loop is allowed to do while nobody is watching — that is the difference.
+Before Apache, serving a website meant writing your own server. Everyone hand-rolled HTTP alongside their content, and the good ones were genuinely good. Apache did not win by writing better HTML — it moved the serving into infrastructure you install, and left the HTML to you.
 
-This page is written the way an evaluation actually goes: everything contenox has in common with the dedicated coding agents first, then the three things that are built differently, then what those cost, then which tool to reach for.
+Coding agents are the hand-rolled servers. Aider, OpenCode, Kilo Code and Claude Code each carry their own loop, their own tool gate, their own approval flow, their own session store — welded to their own product. They are good at what they are for.
 
-## What it shares with the coding agents
+contenox is the layer underneath. It runs agents you declare, under envelopes you write, and it does not care which of those tools you also use — an ACP client is an ACP client. The question is not which agent writes a better patch. It is what your agents are allowed to do while nobody is watching, and who can answer for it afterwards.
 
-A chat loop with tools. Tool calling. MCP servers. Provider switching. Editor integration over ACP. Sessions on local disk. A terminal UI. Aider, OpenCode, Kilo Code and Claude Code all ship that set, each in its own shape, and none of it is an argument for contenox.
-
-Concretely, the overlap:
-
-| Capability | In contenox |
-|---|---|
-| Agent declarations | One Markdown file with YAML frontmatter in `.contenox/agents/`; `.claude/agents/` is read where it already is — [declaring agents](/docs/guide/agents/) |
-| Tool-using chat loop | `chat_completion` + `execute_tool_calls` tasks with a back-edge — [the agentic loop](/docs/guide/agentic-loop/) |
-| MCP servers | `contenox mcp add <name> <url>` — [MCP integration](/docs/integrations/tools/mcp/) |
-| Provider switching | `contenox backend add` for Ollama, vLLM, OpenAI, Anthropic, Gemini, Vertex AI, Bedrock; routing is config, not code |
-| Editor sessions | `contenox acp` over stdio — [Zed](/docs/integrations/editors/zed/), [JetBrains](/docs/integrations/editors/jetbrains/), [AionUi](/docs/integrations/editors/aionui/), [OpenClaw](/docs/integrations/editors/openclaw/) |
-| Local session state | SQLite at `~/.contenox/local.db`; no account — the [relay](/docs/guide/pairing/) is opt-in and never contacted unpaired |
-
-An ACP editor session is a real coding session, not a demo shell: it routes coding turns into their own loop with its own budget, `local_shell` is available under policy, and the filesystem tools are editor-grade — `read_file`, `read_file_range`, `write_file`, `edit_file`, `sed`, with a read-before-write gate that refuses to mutate a file the model has not read. Directory listing, search, and globbing go through `local_shell` (`ls`, `find`, `grep`/`rg`) under the same policy. The `/mission` slash command works there too.
-
-And the honest half of that: for **pure coding ergonomics** — repository mapping, diff application, edit formats, the accumulated craft of getting a model to land a patch on the first try — the dedicated coding agents are more refined. That is what they are for, and they have spent their whole existence on it. Table stakes are table stakes; they are not the argument.
+Three things follow from being that layer rather than a tool.
 
 ## Three structural differences
 
@@ -43,7 +29,7 @@ contenox vet --all      # chains AND hitl-policy files, each with its own valida
 The envelope wraps the whole tool surface, so it is evaluated before every tool call the harness makes — and it fails closed three ways. A call that matches no rule takes `default_action`, which is `approve` when the field is absent. An unknown `default_action`, or a typo inside a `compute` or `trusted_binaries` block, refuses to load the policy at all rather than silently disarming it. And when the named file cannot be loaded, the fallback is a rule-free policy where every call — including reads — asks a human. A broken envelope stops work; it never quietly widens it.
 
 > **Note:**
-> `--auto` removes the gate rather than loosening it: the envelope is not consulted at all on that path. It is the honest escape hatch for a trusted script, not a permissive policy.
+> `--auto` removes the gate rather than loosening it: the envelope is not consulted at all on that path. It is the escape hatch for a trusted script, not a permissive policy.
 
 What an operator feels: you can hand someone a chain and keep the policy, or tighten the policy without touching the workflow. They move independently.
 
@@ -55,7 +41,7 @@ contenox mission fire agent-planner "..." --policy hitl-policy-strict.json --wai
 A mission's envelope is a required argument, not a default it inherits — the dispatch refuses without one, and validates the file before the first unit starts.
 
 - [HITL policies](/docs/guide/hitl/) — the envelope format, condition operators, and the shipped presets
-- [Writing a chain by hand](/docs/guide/first-chain/) and [chain files: naming, roles, and resolution](/docs/guide/chain-naming/) — the other artifact, and how each is resolved
+- [Writing a chain by hand](/docs/guide/chains/writing-a-chain/) and [chain files: naming, roles, and resolution](/docs/guide/chains/naming/) — the other artifact, and how each is resolved
 
 ### 2. Human gates are durable and resumable
 
@@ -100,31 +86,23 @@ Confidence-gated auto-approval exists in other tools. A separation of powers ove
 
 Supporting differences — less load-bearing than the three above, still rare:
 
-- **The chain is a state machine you author**, not one loop configured by flags. Classify, work, recover, report: the shipped agent chains open with a `route` task, run a bounded tool loop, fall into a recovery loop with a smaller budget, and end in a task with `"tools": []` that can only report. Per-task tool allowlists, the chain's own `tools_policies` command allow/deny lists (a separate thing from the envelope — these bound what a task may ask for, not what is permitted), `retry_policy` with backoff and jitter, and `edge_traversed_at_least` branches that bound a loop by counting edge traversals — all visible JSON keys. See [the agentic loop](/docs/guide/agentic-loop/).
+- **The chain is a state machine you author**, not one loop configured by flags. Classify, work, recover, report: the shipped agent chains open with a `route` task, run a bounded tool loop, fall into a recovery loop with a smaller budget, and end in a task with `"tools": []` that can only report. Per-task tool allowlists, the chain's own `tools_policies` command allow/deny lists (a separate thing from the envelope — these bound what a task may ask for, not what is permitted), `retry_policy` with backoff and jitter, and `edge_traversed_at_least` branches that bound a loop by counting edge traversals — all visible JSON keys. See [the agentic loop](/docs/guide/chains/agentic-loop/).
 - **Compute bounds are policy data**, carried in the envelope rather than in the workflow. `maxTurns` and `maxTokens` are enforced host-side in the drive loop; `modelAllowlist` and `backendAllowlist` are enforced at the one seam where a model and backend are actually chosen, covering chat, prompt, streaming and embedding calls alike — so a unit cannot switch itself onto a model you did not name. Matching there is exact rather than normalized, deliberately, because a security boundary must not silently widen. See [compute and attention bounds](/docs/guide/sovereignty/#compute-and-attention-bounds).
-- **A structural shell analyzer.** A command line is parsed as a syntax tree (parser only, no interpreter) rather than matched as a string, under an explicit monotonicity contract: structure may name a command the tokenizer could not see, and may upgrade an ask to an allow only inside an audited set of node kinds — it may never widen an allow or narrow a deny. Unparseable input, a non-literal word, or a shell the parser does not read keeps the tokenizer's verdict. [Trusted binaries](/docs/guide/trusted-binaries/) closes the gap on the other side, because an allow rule pins a command *name* and `PATH` decides what a name means: a declaration pins that name to an absolute real path and a SHA256, and can only ever withdraw an allow.
+- **A structural shell analyzer.** A command line is parsed as a syntax tree (parser only, no interpreter) rather than matched as a string, under an explicit monotonicity contract: structure may name a command the tokenizer could not see, and may upgrade an ask to an allow only inside an audited set of node kinds — it may never widen an allow or narrow a deny. Unparseable input, a non-literal word, or a shell the parser does not read keeps the tokenizer's verdict. [Trusted binaries](/docs/guide/confinement/trusted-binaries/) closes the gap on the other side, because an allow rule pins a command *name* and `PATH` decides what a name means: a declaration pins that name to an absolute real path and a SHA256, and can only ever withdraw an allow.
 - **Path containment is one shared mechanism**, not a check each tool reimplements. A single package resolves symlinks and decides whether a candidate path lies under a root, and the filesystem and git tools route through it — so an escape is refused structurally rather than by string-prefix comparison.
 - **Events fire chains through declared triggers.** Internal domain events land in a durable append-only log; operator-authored `trigger-*.json` files bind an event type to a chain, and each (trigger, event) pair fires at most once across processes and restarts. Opt-in and beta. See [Events & triggers](/docs/guide/events/).
 
-## What this costs
+## Where it fits
 
-- **The weakest surfaces are the ones you meet first.** Setup, `init`, and the first-run path are the least-polished parts of contenox; the differentiators sit behind them. A first hour spent on provider config is not the hour that shows you why this exists.
-- **Kernel-enforced confinement is Linux-only.** The [sandbox](/docs/guide/agent-sandbox/) uses Landlock and Linux namespaces. Off Linux it refuses to build rather than handing back an unconfined command — fail-closed, but unavailable. It also confines *foreign* agents, and registering one is not exposed yet, so nothing on a stock install takes that path. What governs contenox's own chains is the tool gate and the envelope, not a kernel wall.
-- **A few envelope fields declare more than the shipped hosts enforce.** `maxToolCalls` is validated but not enforced by any shipped host: its one enforcement seam is the unattended permission answerer, and nothing shipped wires that. `maxTokens` is best-effort — it applies when a unit reports usage and is inert when the provider reports none. Nothing catches either at author time: `contenox vet` is silent about both, and its `WARN` lines cover only trusted-binary declarations that no longer match this host. What carries the disclosure is the `//compute-fields` note each shipped preset keeps in its own file, which is the honest version of the problem but not a fix for it.
-- **Ask expiry is applied lazily.** A durable ask carries a deadline — an hour by default — and `on_timeout` defaults to deny. But nothing sweeps in the background: there is no daemon, so the deadline is applied when the inbox is listed, and until then a late answer still resumes the run. The no-daemon stance is deliberate; the consequence is still worth knowing before you rely on a deadline.
-- **The payoff is on day thirty, not day one.** On day one this is a chat loop with tools, and the dedicated coding agents polish that better. Separate envelopes, durable approvals, and delegation budgets start earning on the day you hand a workflow to somebody else, or leave one running overnight, or have to explain to a third party what an agent was permitted to do last Tuesday.
+Reach for contenox when the work is **governed, unattended, or repeatable**. When a run has to stop for a named human at a named point and survive the wait. When the person who owns the permissions is not the person who wrote the workflow. When the same thing must run identically in CI, in a cron job, and on your laptop. When you need to say afterwards, from a file rather than from memory, exactly what an agent was permitted to do last Tuesday.
 
-## Which one to pick
-
-If what you want is the best pure coding ergonomics available today — repository mapping, diff application, edit formats, the coding-specific interaction craft — use a dedicated coding agent. Aider, OpenCode, Kilo Code and Claude Code are further along there, contenox does not try to beat them at it, and nothing stops you from running one of them and contenox on the same repository. They are a layer, not an opponent.
-
-Reach for contenox when the work is **governed, unattended, or repeatable** and the coding agent is one workload among several. When a run has to stop for a named human at a named point and survive the wait. When the person who owns the permissions is not the person who wrote the workflow. When the same thing must run identically in CI, in a cron job, and on your laptop. When you need to say afterwards, from a file rather than from memory, exactly what the agent was allowed to do. A coding session is one shape that work takes here, but it is a workload on the harness, not the reason the harness exists.
+A coding session is one workload on that harness. Run whichever coding agent you like on the same repository — they are a layer, not an opponent.
 
 ## Next
 
 - [Declaring agents](/docs/guide/agents/) — the file an agent is
 - [Core concepts](/docs/guide/concepts/) — agents, chains, tasks, tools, transitions
 - [HITL policies](/docs/guide/hitl/) — the envelope in full
-- [The agentic loop](/docs/guide/agentic-loop/) — the loop as an authored task graph
-- [Request routing](/docs/guide/request-routing/) — one prompt, several specialist loops, each with its own tool scope and budget
+- [The agentic loop](/docs/guide/chains/agentic-loop/) — the loop as an authored task graph
+- [Request routing](/docs/guide/chains/routing/) — one prompt, several specialist loops, each with its own tool scope and budget
 - [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/) — hosting, state, and oversight controls you own

@@ -1,6 +1,7 @@
 ---
 title: The hard parts
 description: Things that only show up once an agent harness is real — cache prefixes, rule ordering, silent field loss, environments a shell can read. What each one costs and what contenox does about it.
+order: 1
 ---
 
 # The hard parts
@@ -21,7 +22,7 @@ Spawned shells get the runtime's environment scrubbed and only what you inject
 added back. It is not a kernel boundary and the page says so: on Linux a shell
 that can read files can still reach `/proc/<pid>/environ`.
 
-→ [Least-privilege shell environment](/docs/guide/environment-scrubbing/)
+→ [Least-privilege shell environment](/docs/guide/confinement/environment/)
 
 ## Rule order decides what a policy means
 

@@ -19,11 +19,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file exercises the Manager-backed external-agent path: a session attaches
-// to an agentinstance.Manager-owned instance whose subprocess outlives any single
-// connection, survives disconnect/reload, and re-attaches on load; only delete
-// stops it.
-
 // instancesFixture wires a Manager-backed acpsvc Deps and opens multiple
 // loopback connections against it, mirroring serve: one factory fronting many
 // connections behind one shared Manager + DB.

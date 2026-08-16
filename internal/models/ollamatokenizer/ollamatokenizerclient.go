@@ -33,7 +33,6 @@ func NewHTTPClient(ctx context.Context, cfg ConfigHTTP) (Tokenizer, func() error
 	return client, cleanup, nil
 }
 
-// ping checks if the tokenizer service is healthy.
 func (c *HTTPClient) ping(ctx context.Context) error {
 	healthURL := fmt.Sprintf("%s/healthz", c.baseURL)
 	req, err := http.NewRequestWithContext(ctx, "GET", healthURL, nil)

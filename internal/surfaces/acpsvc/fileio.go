@@ -21,12 +21,10 @@ type acpFileIO struct {
 
 // NewACPFileIO reads and writes through the ACP client attached to the calling
 // session, so an editor's unsaved buffers are what the agent sees.
-//
 func NewACPFileIO(transport TransportResolver) localtools.FileIO {
 	return &acpFileIO{transport: transport}
 }
 
-// resolve picks this call's transport, tolerating an unset resolver.
 func (a *acpFileIO) resolve(ctx context.Context) *Transport {
 	if a.transport == nil {
 		return nil
@@ -65,10 +63,8 @@ func (a *acpFileIO) WriteFile(ctx context.Context, path string, data []byte) err
 	return nil
 }
 
-// mapACPNotExist maps a *libacp.Error carrying a not-found code to
-// os.ErrNotExist. It also matches "not found" in an untyped downstream
-// error's text as a compat shim, scoped to non-*libacp.Error values only —
-// a typed error's classification stays libacp's alone.
+// mapACPNotExist maps a not-found *libacp.Error to os.ErrNotExist, and matches
+// "not found" in an untyped downstream error's text as a compat shim.
 func mapACPNotExist(err error) error {
 	if mapped := libacp.AsNotExist(err); errors.Is(mapped, os.ErrNotExist) {
 		return mapped
@@ -104,18 +100,10 @@ func NewACPCwdResolver(transport TransportResolver) func(context.Context) string
 	}
 }
 
-// NewServeCwdResolver returns the cwd resolver for the serve path, where one
-// shared local_fs tool serves many per-connection transports, so it resolves
-// the session's persisted workspace cwd from the database instead of closing
-// over one transport.
-//
-// The stored cwd is re-validated against the current allowlist (via
-// vfs.ResolveSessionCwd, the same procedure session/load and fleet dispatch
-// use) rather than trusted, since roots can be reconfigured after the record
-// was written. A refusal degrades to the default root rather than
-// propagating — there is no live request to refuse, only a stale or foreign
-// session record — but the degradation is reported through tracker so it
-// isn't silent to the operator. Nil tracker degrades to NoopTracker.
+// NewServeCwdResolver returns the cwd resolver for the serve path, resolving the
+// session's persisted workspace cwd from the database and re-validating it
+// against the current allowlist. A refusal degrades to the default root. A nil
+// tracker degrades to NoopTracker.
 func NewServeCwdResolver(db libdb.DBManager, roots *vfs.Factory, tracker libtracker.ActivityTracker) func(context.Context) string {
 	if tracker == nil {
 		tracker = libtracker.NoopTracker{}
@@ -145,14 +133,10 @@ func NewServeCwdResolver(db libdb.DBManager, roots *vfs.Factory, tracker libtrac
 	}
 }
 
-// serveSessionCwd maps an internal session id to its persisted workspace cwd:
-// message_indices.name is the ACP session id, under which persistSessionCwd
-// stores the cwd in the KV store.
+// serveSessionCwd maps an internal session id to its persisted workspace cwd.
 func serveSessionCwd(ctx context.Context, db libdb.DBManager, internalID string) string {
 	exec := db.WithoutTransaction()
-	// The store is workspace-scoped but this lookup is keyed on the session's
-	// primary key, which GetMessageIndexName documents as workspace-independent;
-	// the serve path has no workspace of its own to pass.
+	// GetMessageIndexName is workspace-independent; serve has no workspace to pass.
 	name, err := runtimetypes.NewMessageStore(exec, "").GetMessageIndexName(ctx, internalID)
 	if err != nil || name == "" {
 		return ""

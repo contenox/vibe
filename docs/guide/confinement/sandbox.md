@@ -1,6 +1,7 @@
 ---
-title: "Confining agents: the sandbox wall"
+title: "The sandbox wall"
 description: How the default filesystem/exec/environment fence and the opt-in network wall confine a foreign ACP agent's process.
+order: 3
 ---
 
 # Confining agents: the sandbox wall
@@ -30,7 +31,7 @@ A unit like this shares the one runtime state — the same database, the same se
 
 The same applies to every chain contenox runs in its own process — a `contenox serve` session, an editor `acp`/`acpx` session. `local_shell` in those sessions is **not confined** by this wall: contenox forwards the command to the ACP client's `terminal/*` capability rather than spawning it itself, so it runs as an ordinary child process of whatever is on the other end of that connection, free of the filesystem, exec, and environment fence a foreign agent gets. What governs a chain's shell access is the approval gate and the chain's tool policy — a gate at the tool layer, not a wall at the kernel. Give an untrusted driver the hardened `acpx` profile (`local_shell` denied outright) rather than assuming a sandbox that is not there.
 
-Because that gate is a tool gate, it decides on the *name* a call passes it. A policy that allows `go build` without asking allows whatever `go` resolves to, and the wall is not there to catch a substituted one. [Trusted binaries](/docs/guide/trusted-binaries/) closes that at the gate instead — pinning allowlisted names to an absolute real path and a SHA256 — and its per-platform matrix says what that delivers where the Landlock fence below does not exist (macOS and Windows).
+Because that gate is a tool gate, it decides on the *name* a call passes it. A policy that allows `go build` without asking allows whatever `go` resolves to, and the wall is not there to catch a substituted one. [Trusted binaries](/docs/guide/confinement/trusted-binaries/) closes that at the gate instead — pinning allowlisted names to an absolute real path and a SHA256 — and its per-platform matrix says what that delivers where the Landlock fence below does not exist (macOS and Windows).
 
 ## Confining the network too (the opt-in wall)
 

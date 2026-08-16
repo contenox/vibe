@@ -82,9 +82,8 @@ func (d RuntimeDefaults) Trimmed() RuntimeDefaults {
 func (d RuntimeDefaults) TemplateVars() map[string]string {
 	d = d.Trimmed()
 	vars := map[string]string{}
-	// The seeded chains reference {{var:alt_model|var:default_model}} (and the
-	// provider equivalent), so default_model/default_provider must be set
-	// whenever a model is known, matching the CLI chat and ACP paths.
+	// The seeded chains reference {{var:alt_model|var:default_model}}, so both
+	// defaults must be set whenever a model is known.
 	if d.Model != "" {
 		vars["model"] = d.Model
 		vars["default_model"] = d.Model

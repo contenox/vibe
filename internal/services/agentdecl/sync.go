@@ -31,10 +31,8 @@ var ForeignSourceDirs = []string{
 	filepath.Join(".agents", "agents"),
 }
 
-// SourceDir is one directory of declarations. Native directories are contenox's
-// own: their files are read as the declaration format and keep their own names,
-// where a foreign directory's are scoped by the product they came from so two
-// tools' identically named agents do not collide.
+// SourceDir is one directory of declarations. Native directories keep their own
+// names; a foreign directory's are scoped by the product they came from.
 type SourceDir struct {
 	Path   string
 	Native bool
@@ -48,11 +46,9 @@ type SyncResult struct {
 	Action   WriteAction
 	Reason   string
 	Unmapped []Unmapped
-	// MCP and Remote are the tool sources this declaration brought with it,
-	// for the caller to register scoped to Name. They are returned rather than
-	// registered here because registration needs a database, which this
-	// package deliberately does not have — the same split acpsvc makes for
-	// resolving an MCP allowlist.
+	// MCP and Remote are the tool sources this declaration brought with it, for
+	// the caller to register scoped to Name. Returned rather than registered
+	// here because registration needs a database this package does not have.
 	MCP    []DeclaredMCPServer
 	Remote []DeclaredRemoteTool
 }
@@ -111,8 +107,7 @@ func WithSkills(skills []Skill) SyncOption {
 
 // Sync transpiles every declaration under sourceDirs into generatedDir and
 // retires chains whose source is gone. An unreadable or unmappable source is
-// reported and skipped rather than failing the pass, so one bad declaration
-// cannot cost an operator the rest of their agents.
+// reported and skipped rather than failing the pass.
 func Sync(sourceDirs []SourceDir, generatedDir string, cfg Config, opts ...SyncOption) ([]SyncResult, error) {
 	var options syncOptions
 	for _, opt := range opts {
@@ -166,9 +161,7 @@ func Sync(sourceDirs []SourceDir, generatedDir string, cfg Config, opts ...SyncO
 			continue
 		}
 		res.Dialect, res.Unmapped = ir.Source.Dialect, ir.Unmapped
-		// Expanded at generation, not per request: the inventory changes when a
-		// file changes, and SystemInstruction is the provider cache's stable
-		// prefix.
+		// Expanded at generation, not per request.
 		ir.SystemPrompt = expandSkills(ir.SystemPrompt, options.skills)
 
 		agentCfg := cfg
@@ -210,11 +203,8 @@ func Sync(sourceDirs []SourceDir, generatedDir string, cfg Config, opts ...SyncO
 		}
 
 		// The generated filename keeps the chain-agent- prefix because
-		// chainagents.eligible reads the basename, not the id.
-		// The shipped files are chain-agent-acp.json for id chain-acp, so the
-		// stem drops the prefix the id carries. Without this a converted agent
-		// lands at chain-agent-chain-acp.json and chainagents, which reads the
-		// basename, stops recognising it.
+		// chainagents.eligible reads the basename, not the id, so the stem drops
+		// the prefix the id already carries.
 		stem := strings.TrimPrefix(chain.ID, "chain-")
 		rec := syncRecord{
 			SourcePath:   path,
@@ -234,9 +224,8 @@ func Sync(sourceDirs []SourceDir, generatedDir string, cfg Config, opts ...SyncO
 			return nil, err
 		}
 
-		// Compared against what is on disk rather than against the source hash
-		// alone: agents.toml is the other half of the input, so an edit there
-		// has to regenerate too, and a generated file someone truncated heals.
+		// Compared against what is on disk, not the source hash alone: agents.toml
+		// is the other half of the input.
 		if _, ok := state[path]; ok && fileHas(chainPath, chainJSON) && fileHas(policyPath, policyJSON) {
 			res.Action = ActionUnchanged
 			next[path] = rec
@@ -281,14 +270,11 @@ func Sync(sourceDirs []SourceDir, generatedDir string, cfg Config, opts ...SyncO
 	return results, nil
 }
 
-// fileHas reports whether path already holds exactly want.
 func fileHas(path string, want []byte) bool {
 	got, err := os.ReadFile(path)
 	return err == nil && bytes.Equal(got, want)
 }
 
-// retireAll clears the generated directory: removing the last declaration must
-// not leave a chain still answering to its name.
 func retireAll(generatedDir string) error {
 	state := readSyncState(generatedDir)
 	for _, rec := range state {
@@ -317,10 +303,8 @@ func collectSources(dirs []SourceDir) ([]sourceFile, error) {
 			if walkErr != nil {
 				return walkErr
 			}
-			// A directory holding an agent.md is a TREE: the whole subtree is
-			// one chain, so it is collected here and not descended into. Without
-			// the skip, every declaration inside it would also be read as a
-			// standalone agent and emit a chain of its own.
+			// A directory holding an agent.md is a tree: the whole subtree is one
+			// chain, so it is collected here and not descended into.
 			if entry.IsDir() {
 				if _, err := os.Stat(filepath.Join(p, AgentFilename)); err == nil {
 					found = append(found, sourceFile{path: p, native: native, tree: true})
@@ -331,9 +315,7 @@ func collectSources(dirs []SourceDir) ([]sourceFile, error) {
 			if !strings.EqualFold(filepath.Ext(p), ".md") {
 				return nil
 			}
-			// A README beside the declarations is documentation — contenox init
-			// writes one itself. Reading it as a declaration refuses it on every
-			// pass, which trains an operator to ignore the warnings.
+			// A README beside the declarations is documentation, not a declaration.
 			if strings.EqualFold(entry.Name(), "README.md") {
 				return nil
 			}

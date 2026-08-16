@@ -45,7 +45,6 @@ func (s *store) UpdateKV(ctx context.Context, key string, value json.RawMessage)
 	return checkRowsAffected(result)
 }
 
-// UpdateKVIfUnchanged is UpdateKV under a compare-and-swap predicate on the stored value; returns libdb.ErrNotFound if the key is gone or the value has moved on.
 func (s *store) UpdateKVIfUnchanged(ctx context.Context, key string, expected, value json.RawMessage) error {
 	now := time.Now().UTC()
 	result, err := s.Exec.ExecContext(ctx, `
@@ -64,7 +63,6 @@ func (s *store) GetKV(ctx context.Context, key string, out interface{}) error {
 	return s.getKVScoped(ctx, "", key, out)
 }
 
-// GetKVRaw returns key's stored value verbatim instead of decoding it into a caller type.
 func (s *store) GetKVRaw(ctx context.Context, key string) (json.RawMessage, error) {
 	var rawValue []byte
 	err := s.Exec.QueryRowContext(ctx, `

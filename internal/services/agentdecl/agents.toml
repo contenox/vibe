@@ -198,11 +198,8 @@ scope_with_dialect = true
 [tools]
 Bash = "local_shell.local_shell"
 Edit = "local_fs.edit_file"
-Glob = "local_fs.find_files"
-Grep = "local_fs.grep"
 PowerShell = "local_shell.local_shell"
 Read = "local_fs.read_file"
-WebFetch = "webtools.web_get"
 Write = "local_fs.write_file"
 replace_file_content = "local_fs.write_file"
 run_command = "local_shell.local_shell"

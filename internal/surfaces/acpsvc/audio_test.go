@@ -131,8 +131,7 @@ func TestUnit_Initialize_AdvertisesAudioPromptCapability(t *testing.T) {
 // TestUnit_ExplainDroppedContent_AudioNamesItsBounds pins the honesty of the
 // audio refusal: a dropped audio block is almost always a bounds refusal, and
 // the report must name the accepted types and the size cap — verbatim from the
-// modelrepo constants — instead of leaving the operator to guess. A report
-// that dropped no audio carries none of it.
+// modelrepo constants — instead of leaving the operator to guess.
 func TestUnit_ExplainDroppedContent_AudioNamesItsBounds(t *testing.T) {
 	report, ok := explainDroppedContent([]string{string(libacp.ContentKindAudio)}, "")
 	require.True(t, ok)
@@ -292,12 +291,9 @@ func installNonAudioRuntimeState(t *testing.T, h *loopbackHarness) {
 
 // TestLoopback_AudioWithoutAudioCapableModel_RefusedBeforeDispatch is the
 // bricked-session regression: before the pre-flight gate, a voice note on a
-// fleet with no audio-capable model rode to the resolver, failed the whole
-// turn as an RPC error, and — persisted into history — re-imposed the audio
-// requirement on every later turn, text-only ones included. The gate must
-// instead refuse the audio at the surface: the turn runs on the rest of the
-// prompt, nothing audio-bearing reaches the agent (so nothing can persist),
-// and the next turn works.
+// fleet with no audio-capable model rode to the resolver, failed the whole turn
+// as an RPC error, and — persisted into history — re-imposed the audio
+// requirement on every later turn, text-only ones included.
 func TestLoopback_AudioWithoutAudioCapableModel_RefusedBeforeDispatch(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()

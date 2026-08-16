@@ -69,10 +69,8 @@ type EventFiringStore interface {
 	GetEventCursor(ctx context.Context, consumer string) (int64, error)
 	// SetEventCursor upserts consumer's cursor to nid.
 	SetEventCursor(ctx context.Context, consumer string, nid int64) error
-	// BeginEventFiring claims (triggerName, nid) via a conflict-ignoring INSERT
-	// (never select-then-insert), returning false when already claimed; a
-	// stale running claim is reclaimable via a second conditional UPDATE,
-	// race-safe under the row's write lock.
+	// BeginEventFiring claims (triggerName, nid) via a conflict-ignoring INSERT,
+	// returning false when already claimed. A stale running claim is reclaimable.
 	BeginEventFiring(ctx context.Context, triggerName string, nid int64, requestID string) (bool, error)
 	// FinishEventFiring records the outcome of a claimed firing.
 	FinishEventFiring(ctx context.Context, triggerName string, nid int64, status, errMsg string) error

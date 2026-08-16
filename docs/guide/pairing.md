@@ -1,6 +1,7 @@
 ---
 title: "Pairing a machine with a relay"
 description: How pairing attaches a machine to a relay so it can be reached from a phone — what is sent, what is stored, and how to undo it.
+order: 14
 ---
 
 # Pairing a machine with a relay

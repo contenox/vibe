@@ -10,9 +10,8 @@ import (
 )
 
 // Supervisor keeps an agent subprocess alive across transient crashes by
-// respawning it with backoff and re-running a caller-supplied session; a
-// startup error (IsStartupError) is never retried, since looping on it only
-// hides the misconfiguration.
+// respawning it with backoff and re-running a caller-supplied session. A startup
+// error (IsStartupError) is never retried.
 type Supervisor struct {
 	// Command builds a fresh *exec.Cmd for each (re)start; required, since an
 	// exec.Cmd cannot be reused once started.
@@ -50,8 +49,6 @@ func (s *Supervisor) Serve(ctx context.Context, session func(ctx context.Context
 
 		proc, err := Spawn(ctx, s.Command(ctx), s.SpawnOptions...)
 		if err != nil {
-			// A start failure is a startup error by definition; surface it
-			// rather than loop, since a retry cannot cure a bad binary.
 			return fmt.Errorf("%w: %w", libacp.ErrAgentStartFailed, err)
 		}
 

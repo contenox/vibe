@@ -11,16 +11,9 @@ import (
 // brings with it.
 const FieldMCPServers = "mcpServers"
 
-// FieldRemoteTools has no counterpart in any source dialect — it is contenox's
-// own, and it is deliberately in the config half of the format rather than a
-// new vocabulary a Claude Code file would have to learn. A declaration without
-// it parses exactly as before.
+// FieldRemoteTools has no counterpart in any source dialect; it is contenox's own.
 const FieldRemoteTools = "remoteTools"
 
-// parseMCPServers reads the two shapes of mcpServers. Names and definitions are
-// mutually exclusive per file: mixing them in YAML needs a heterogeneous
-// collection, and a file that tried would be ambiguous about which half is
-// which.
 func parseMCPServers(path string, fields map[string]any, ir *AgentIR) error {
 	raw, ok := fields[FieldMCPServers]
 	if !ok || raw == nil {
@@ -57,8 +50,8 @@ func mcpServerFrom(path, name string, raw any) (DeclaredMCPServer, error) {
 		srv.Args = append(srv.Args, arg)
 	}
 
-	// A declaration is a file, and files get committed. An env var name may
-	// live in one; the token it resolves to may not.
+	// A declaration is a file that gets committed: an env var name may live in
+	// one, the token it resolves to may not.
 	for _, secret := range []string{"authToken", "token", "password", "secret"} {
 		if mapString(body, secret) != "" {
 			return DeclaredMCPServer{}, fmt.Errorf(
@@ -90,8 +83,6 @@ func mcpServerFrom(path, name string, raw any) (DeclaredMCPServer, error) {
 	return srv, nil
 }
 
-// parseRemoteTools reads contenox's own OpenAPI field. Each entry becomes the
-// same registration `contenox tools add` writes, scoped to this agent.
 func parseRemoteTools(path string, fields map[string]any, ir *AgentIR) error {
 	raw, ok := fields[FieldRemoteTools]
 	if !ok || raw == nil {

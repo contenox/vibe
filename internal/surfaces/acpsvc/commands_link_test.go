@@ -9,9 +9,7 @@ import (
 )
 
 // Pins /link to /pair's availability shape: advertised and dispatchable
-// regardless of the beta opt-in. The command answers "not paired" itself, so
-// hiding it on an unpaired machine would only replace a teaching answer with
-// an unknown-command error.
+// regardless of the beta opt-in.
 func TestUnit_AcpCommands_LinkIsStable(t *testing.T) {
 	tr, _ := newMissionTestTransport(t, nil, nil)
 

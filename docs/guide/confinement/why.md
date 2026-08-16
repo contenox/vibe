@@ -1,11 +1,12 @@
 ---
-title: Why contenox confines agents
+title: "Why contenox confines agents"
 description: The threat model behind the sandbox — you cannot trust the process of an external ACP agent, so contenox confines it below the agent, kernel-enforced and fail-closed, instead of relying on the agent's or the model's goodwill.
+order: 1
 ---
 
 # Why contenox confines agents
 
-When contenox hosts an external ACP agent, it spawns a program you did not write, running on your machine, as you. The [sandbox](/docs/guide/agent-sandbox/) is how it does that safely. This page covers the threat model: why confinement is structural rather than optional.
+When contenox hosts an external ACP agent, it spawns a program you did not write, running on your machine, as you. The [sandbox](/docs/guide/confinement/sandbox/) is how it does that safely. This page covers the threat model: why confinement is structural rather than optional.
 
 > You cannot trust the **process** of an external agent. So contenox confines it **below** the agent — in the kernel, fail-closed — instead of trusting the agent, or the model driving it, to behave.
 
@@ -45,7 +46,7 @@ The same model can be safe in one mode and dangerous in the other. The differenc
 
 ## What the threats demand of the design
 
-Because these threats compose, cooperation is not an option: an untrusted process will not honor a proxy environment variable, a clean `PATH`, or a request to stay in its lane. The confinement has to hold regardless of what the process wants. That forces four properties, which the [sandbox](/docs/guide/agent-sandbox/) is built to:
+Because these threats compose, cooperation is not an option: an untrusted process will not honor a proxy environment variable, a clean `PATH`, or a request to stay in its lane. The confinement has to hold regardless of what the process wants. That forces four properties, which the [sandbox](/docs/guide/confinement/sandbox/) is built to:
 
 - **Structural and kernel-enforced, not cooperative.** Blocked paths are absent by construction, not denied by policy: the rest of the filesystem is not mounted, the network has no route, inherited credentials are scrubbed from the environment. There is nothing to honor and nothing to bypass.
 - **Fail-closed.** If the confinement cannot be built, the agent does not start. It never falls back to running with the wall open.
@@ -59,11 +60,11 @@ The wall is not a rulebook of allowed operations. It is a deny-by-default fence 
 The loot paths a supply-chain payload hunts — `~/.ssh`, `~/.aws`, `~/.npmrc`, the control plane — are not on the list unless a real breakage forces them, and the carve-out list itself lives where the agent cannot reach it, so the agent can never punch its own hole.
 
 > **Note:**
-> This page is the rationale; the [sandbox guide](/docs/guide/agent-sandbox/) is the mechanism — how the default filesystem/exec/environment fence works with no setup, and how to turn on the per-host network wall by naming the hosts an agent needs.
+> This page is the rationale; the [sandbox guide](/docs/guide/confinement/sandbox/) is the mechanism — how the default filesystem/exec/environment fence works with no setup, and how to turn on the per-host network wall by naming the hosts an agent needs.
 
 ## Next steps
 
-- [Confining agents: the sandbox wall](/docs/guide/agent-sandbox/) — the default fence and the opt-in network wall.
-- [Least-privilege shell environment](/docs/guide/environment-scrubbing/) — the same idea for the shells contenox runs in its own process; configured, not yet enforced.
+- [Confining agents: the sandbox wall](/docs/guide/confinement/sandbox/) — the default fence and the opt-in network wall.
+- [Least-privilege shell environment](/docs/guide/confinement/environment/) — the same idea for the shells contenox runs in its own process; configured, not yet enforced.
 - [Human-in-the-loop](/docs/guide/hitl/) — the tool-layer gate that governs a declared chain's effects, and the only thing governing contenox's own chains, which run outside the wall.
 - [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/) — how this confinement posture, local state, and authored oversight fit together as an operator-controlled deployment.

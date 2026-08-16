@@ -1,11 +1,12 @@
 ---
-title: "Tutorial: a recurring job"
+title: "A recurring job"
 description: "Build one real repeating job — filing a timesheet — and learn the whole declaration format on the way: what an agent file is, how it brings its own tools, where the approval step lives, and when a procedure should be a skill instead of an agent."
+order: 4
 ---
 
 # Tutorial: a recurring job
 
-[Your first agent](/docs/guide/tutorial-first-agent/) gets one file running in
+[Your first agent](/docs/guide/tutorials/first-agent/) gets one file running in
 five minutes. This one takes a job you actually repeat and builds it properly,
 because that is where the format's shape becomes clear.
 
@@ -288,5 +289,5 @@ follow.
 Read them when you want to see exactly what an agent may do. Write one yourself
 when you need something a declaration cannot say — a branch, a different model
 per step, a recovery path, a step that must happen whether or not the model
-agrees. That is [writing a chain by hand](/docs/guide/first-chain/), and it is
+agrees. That is [writing a chain by hand](/docs/guide/chains/writing-a-chain/), and it is
 the next tier down, not a different product.

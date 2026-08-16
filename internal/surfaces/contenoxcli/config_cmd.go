@@ -31,7 +31,7 @@ var validConfigKeys = map[string]string{
 	"hitl-policy-name":              "Active HITL policy file name (e.g. hitl-policy-strict.json). Empty = use hitl-policy-default.json.",
 	"telemetry-enabled":             "Enable writing telemetry logs to <data-dir>/telemetry.log (true/false)",
 	"update-check":                  "Enable automatic update availability checks (true/false). Set false for zero-trust/air-gapped environments.",
-	"opt-in-beta":                   "Enable beta features (true/false): shell_session, agent roster. CONTENOX_OPT_IN_BETA overrides per invocation.",
+	"opt-in-beta":                   "Enable beta features (true/false): agent roster, event triggers. CONTENOX_OPT_IN_BETA overrides per invocation.",
 	"default-mission-agent":         "Default declared agent run as a subagent by '/plan', mission_start, '/mission <intent>' and 'contenox mission fire' with no --agent.",
 	"default-mission-policy":        "Default subagent envelope (HITL policy) used when none is named.",
 	"default-oracle-chain":          "Chain that adjudicates a subagent's asks (e.g. chain-oracle-default.json). Unset means no oracle: every ask waits for a human.",
@@ -64,7 +64,7 @@ Supported keys:
   default-think                  Default reasoning level: auto, off, minimal, low, medium, high, xhigh
   telemetry-enabled              Enable local telemetry logs (true/false)
   update-check                   Enable automatic update checks (true/false)
-  opt-in-beta                    Enable beta features: shell_session, agent roster (true/false)
+  opt-in-beta                    Enable beta features: agent roster, event triggers (true/false)
   default-chain                  Default chain file path
   hitl-policy-name               Active HITL policy file name (e.g. hitl-policy-strict.json)
   default-mission-agent          Default agent run as a subagent when none is named
@@ -96,7 +96,7 @@ Examples:
 
   contenox config set default-max-tokens 8192
   contenox config set default-think    high
-  contenox config set default-chain    .contenox/chain-agent-contenox.json
+  contenox config set default-chain    .contenox/.generated/chain-agent-acp.json
   contenox config set hitl-policy-name hitl-policy-strict.json`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -118,10 +118,8 @@ Examples:
 			}
 			value = normalized
 		}
-		// Log bounds are validated here rather than at read time: a host reads
-		// them while booting, where the only options are to ignore a bad value
-		// or refuse to start. Refusing at `config set` is the moment the person
-		// who typed it is still watching.
+		// Validated here rather than at read time, while the person who typed it
+		// is still watching.
 		if normalized, err := normalizeLogConfig(key, value); err != nil {
 			return err
 		} else if normalized != "" {

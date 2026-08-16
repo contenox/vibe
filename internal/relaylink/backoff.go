@@ -67,8 +67,7 @@ func (b *backoffState) next() time.Duration {
 	}
 	grown := time.Duration(float64(b.ceiling) * b.policy.Factor)
 	if grown > b.policy.Max || grown < b.ceiling {
-		// Guards overflow: a large Factor could otherwise wrap the
-		// duration negative and turn backoff into a busy loop.
+		// Guards overflow: a large Factor could wrap the duration negative.
 		grown = b.policy.Max
 	}
 	b.ceiling = grown
@@ -90,8 +89,8 @@ func (b *backoffState) nextHinted(hint time.Duration) time.Duration {
 	if hint > b.policy.Max {
 		hint = b.policy.Max
 	}
-	// Schedule still advances even when hinted, so a relay hinting on
-	// every attempt cannot hold the connector at its initial delay.
+	// The schedule still advances when hinted, so a relay cannot hold the
+	// connector at its initial delay.
 	b.next()
 	return time.Duration(rand.Int64N(int64(hint))) + 1
 }

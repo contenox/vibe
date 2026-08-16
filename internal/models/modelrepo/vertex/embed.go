@@ -11,9 +11,6 @@ type vertexEmbedClient struct {
 	vertexClient
 }
 
-// vertexPredictEmbedRequest is the documented Vertex AI text-embedding request:
-// POST .../publishers/{publisher}/models/{model}:predict with one instance per
-// input text.
 type vertexPredictEmbedRequest struct {
 	Instances []vertexEmbedInstance `json:"instances"`
 }

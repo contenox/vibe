@@ -11,9 +11,8 @@ import (
 	"github.com/contenox/contenox/libkvstore"
 )
 
-// OpenDBAt opens (and creates if needed) the SQLite database at the given path.
-// It applies the application schema and the KV store schema so the kv_store table
-// is always present for provider model-list caching.
+// OpenDBAt opens (and creates if needed) the SQLite database at the given path,
+// applying the application and KV store schemas.
 func OpenDBAt(ctx context.Context, dbPath string) (libdb.DBManager, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		return nil, fmt.Errorf("cannot create database directory: %w", err)
@@ -26,9 +25,6 @@ func OpenDBAt(ctx context.Context, dbPath string) (libdb.DBManager, error) {
 	return db, nil
 }
 
-// withTransaction is a convenience wrapper around DBManager.WithTransaction.
-// It handles the boilerplate (defer release, check commit) so callers only
-// supply the work function.
 func withTransaction(ctx context.Context, db libdb.DBManager, fn func(tx libdb.Exec) error) error {
 	txExec, commit, release, err := db.WithTransaction(ctx)
 	if err != nil {
@@ -44,7 +40,7 @@ func withTransaction(ctx context.Context, db libdb.DBManager, fn func(tx libdb.E
 	return nil
 }
 
-// WithTransaction is the exported version for use by sub-packages.
+// WithTransaction wraps DBManager.WithTransaction, handling release and commit.
 func WithTransaction(ctx context.Context, db libdb.DBManager, fn func(tx libdb.Exec) error) error {
 	return withTransaction(ctx, db, fn)
 }

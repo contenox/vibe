@@ -11,7 +11,8 @@ const (
 	ScrubStrict = "strict"
 )
 
-// EnvPolicyForMode builds the EnvPolicy for a named scrub posture extended with extra allow/deny entries, returning active=false for ScrubOff and any unrecognized mode.
+// EnvPolicyForMode builds the EnvPolicy for a named scrub posture extended with
+// extra allow/deny entries; active is false for ScrubOff and unknown modes.
 func EnvPolicyForMode(mode string, extraAllow, extraDeny []string) (policy EnvPolicy, active bool) {
 	switch mode {
 	case ScrubStrict:

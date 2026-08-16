@@ -1,6 +1,7 @@
 ---
-title: "Chain files: naming, roles, and resolution"
+title: "Naming, roles, and resolution"
 description: The chain-<role>-<variant>.json convention, what each role means, where each chain is selectable, and exactly what contenox init touches.
+order: 3
 ---
 
 # Chain files: naming, roles, and resolution
@@ -24,7 +25,7 @@ One name everywhere is the rule behind the grammar: the name embedded in the bin
 | `compact` | Summarizes conversation history | The compaction machinery: `/compact` in editor and terminal-UI sessions, `contenox session fork --summary` |
 | `fim` | Fill-in-the-middle completion | Editor autocomplete (`_contenox/autocomplete`) |
 
-What every `agent` chain shares — the bounded ReAct loop inside it — is mapped in [The agentic loop](/docs/guide/agentic-loop/).
+What every `agent` chain shares — the bounded ReAct loop inside it — is mapped in [The agentic loop](/docs/guide/chains/agentic-loop/).
 
 The seeded set:
 
@@ -62,7 +63,7 @@ contenox mission fire vaultfiler "…" --policy <envelope> --wait
 Rename the file freely; the agent keeps its name. Change the `id` and you have
 renamed the agent, and anything referencing the old name — a stored
 `default-mission-agent`, a trigger — stops resolving. A full worked example is
-in [Tutorial: a mission agent](/docs/guide/tutorial-mission-agent/).
+in [A mission agent](/docs/guide/tutorials/mission-agent/).
 
 ## Resolution: which file wins
 
@@ -101,7 +102,7 @@ Your **own** files are yours: `--update` never renames or rewrites anything init
 
 ## Next
 
-- [Writing a chain by hand](/docs/guide/first-chain/) — author a chain from scratch
+- [Writing a chain by hand](/docs/guide/chains/writing-a-chain/) — author a chain from scratch
 - [Declaring agents](/docs/guide/agents/) — the shorter road, and the one most agents take
 - [Core concepts](/docs/guide/concepts/) — agents, chains, tasks, tools, transitions
 - [`contenox init` reference](/docs/reference/contenox-cli/#contenox-init-provider) — every flag

@@ -24,21 +24,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file drives the real production acpsvc Transport through a real
-// libacp.ClientSideConnection over an in-memory duplex pipe, both Run loops
-// live — proving the two libacp halves interoperate, not re-testing either
-// in isolation. Deps are mocked (sessionEntry.Agent swapped for a scripted
-// double after a real session/new), but the event bus uses the SQLite
-// backend serve wires, not libbus.NewInMem(): prompt.go's post-turn
-// `sub.Unsubscribe(); close(rawCh); <-translateDone` only reliably drains
-// trailing events on a backend that hands over what was published before
-// Unsubscribe (a libbus conformance property that is SQLite-only); on InMem
-// the queued events race the teardown and can be lost under load.
+// This file drives the real production Transport through a real
+// libacp.ClientSideConnection over an in-memory duplex pipe, both Run loops live.
+// The event bus is the SQLite backend serve wires, not libbus.NewInMem(): only
+// SQLite's Unsubscribe reliably drains trailing events.
 
-// loopbackClient is a minimal libacp.Client that answers the agent's reverse
-// calls (session/request_permission, fs/*) deterministically instead of
-// prompting a human, and buffers every session/update notification in wire
-// order so tests can assert on the stream a real editor would render.
+// loopbackClient is a minimal libacp.Client that answers the agent's reverse calls
+// deterministically and buffers every session/update notification in wire order.
 type loopbackClient struct {
 	libacp.UnimplementedClient
 
@@ -50,12 +42,9 @@ type loopbackClient struct {
 	permMu   sync.Mutex
 	permReqs []libacp.RequestPermissionRequest
 	permResp libacp.RequestPermissionResponse
-	// permGate, when set, holds RequestPermission until it is closed or the
-	// request is cancelled — a client with a card on screen and nobody
-	// answering it. Nil by default, so a client answers instantly as before.
-	permGate chan struct{}
-	// permCancelled counts requests that ended in cancellation rather than an
-	// answer, which is how a torn-down card is observed from the client side.
+	// permGate, when set, holds RequestPermission until it is closed or the request
+	// is cancelled.
+	permGate      chan struct{}
 	permCancelled int
 }
 
@@ -97,8 +86,7 @@ func (c *loopbackClient) RequestPermission(ctx context.Context, req libacp.Reque
 }
 
 // holdPermission makes this client show the card and never answer, until the
-// returned release is called. Used to make "the first answer wins" observable
-// without racing two instant answers.
+// returned release is called.
 func (c *loopbackClient) holdPermission() (release func()) {
 	gate := make(chan struct{})
 	c.permMu.Lock()
@@ -162,9 +150,8 @@ func (c *loopbackClient) drain(t *testing.T, n int) []libacp.SessionNotification
 	return got
 }
 
-// loopbackAgent is an agentservice.Agent double whose Prompt each test
-// scripts directly; every other method is a no-op since session lifecycle
-// runs through the real agentservice.Agent NewSession already wired up.
+// loopbackAgent is an agentservice.Agent double whose Prompt each test scripts
+// directly; every other method is a no-op.
 type loopbackAgent struct {
 	promptFunc func(ctx context.Context, req agentservice.PromptRequest) (*agentservice.PromptResponse, error)
 }
@@ -212,15 +199,12 @@ func newLoopbackHarness(t *testing.T) *loopbackHarness {
 	agentSide := &wirePipe{r: agentR, w: agentW}
 	clientSide := &wirePipe{r: clientR, w: clientW}
 
-	// Poll interval shortened only so events surface promptly; the delivery
-	// guarantee this harness relies on (Unsubscribe's final drain) doesn't
-	// depend on the tick. See the file header.
+	// Shortened only so events surface promptly; the delivery guarantee this
+	// harness relies on does not depend on the tick.
 	bus := libbus.NewSQLiteWithOptions(db.WithoutTransaction(), libbus.SQLiteBusOptions{
 		EventPoll:   5 * time.Millisecond,
 		RequestPoll: 5 * time.Millisecond,
 	})
-	// Mirrors serve's shared SessionRouter for HITL approval routing; inert
-	// for tests that never consult it.
 	router := NewSessionRouter()
 	factory := New(Deps{
 		Engine:        &enginesvc.Engine{Bus: bus},
@@ -304,12 +288,9 @@ func TestUnit_Initialize_DoesNotAdvertiseAdditionalDirectories(t *testing.T) {
 	require.Nil(t, resp.AgentCapabilities.SessionCapabilities.AdditionalDirectories)
 }
 
-// TestLoopback_Prompt_StreamsUpdatesThroughRealClient pins: a streamed turn's chunk, tool-call pending/completed pair, and usage update all reach the real client, alongside session_info_update.
-//
-// Ordering note: session_info_update is not last on the wire — session/prompt's
-// per-turn context doesn't carry an after-response sink, so AfterResponse
-// runs synchronously before the turn's own streamed events flush. Existing,
-// already-shipped behavior; asserted by kind below, not position.
+// TestLoopback_Prompt_StreamsUpdatesThroughRealClient pins: a streamed turn's
+// chunk, tool-call pending/completed pair, and usage update all reach the real
+// client, alongside session_info_update.
 func TestLoopback_Prompt_StreamsUpdatesThroughRealClient(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()

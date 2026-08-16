@@ -67,7 +67,6 @@ func (p *anthropicProvider) CanPrompt() bool         { return p.canPrompt }
 func (p *anthropicProvider) CanThink() bool          { return p.canThink }
 func (p *anthropicProvider) CanVision() bool         { return p.canVision }
 
-// CanAudio always reports false; audio input is refused, not dropped.
 func (p *anthropicProvider) CanAudio() bool { return false }
 
 func (p *anthropicProvider) base() anthropicClient {

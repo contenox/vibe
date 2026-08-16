@@ -2,10 +2,9 @@ package modelrepo
 
 import "sync"
 
-// Shutdown hook registry. Backend packages that hold process-lifetime resources
-// (e.g. native in-process inference sessions) register a cleanup function from
-// init() — the same self-registration pattern as RegisterCatalogProvider — so
-// the runtime can drain them generically without importing any concrete backend.
+// Shutdown hook registry. Backend packages holding process-lifetime resources
+// register a cleanup function from init(), so the runtime can drain them
+// without importing any concrete backend.
 
 var (
 	shutdownHooksMu sync.Mutex

@@ -21,10 +21,8 @@ const DefaultMaxHop = 4
 const DefaultConsumer = "eventtrigger.dispatcher"
 
 // ChainRunner executes one trigger's chain against one event. The context
-// carries the firing's request ID (libtracker.ContextKeyRequestID) and the
-// incremented hop (runtimetypes.WithEventHop) — implementations must thread it into
-// the execution so appended events inherit both. A returned error is recorded
-// on the firing row; it never stops the dispatch loop.
+// carries the firing's request ID and the incremented hop, which implementations
+// must thread into the execution. A returned error never stops the dispatch loop.
 type ChainRunner interface {
 	RunChain(ctx context.Context, t Trigger, ev runtimetypes.Event) error
 }
@@ -35,11 +33,8 @@ type ChainRunner interface {
 type Deps struct {
 	Log   eventlog.Service
 	Store runtimetypes.EventFiringStore
-	// WorkspaceID scopes the drain: the dispatcher processes ONLY events of
-	// its own workspace (bob2's invariant, tenant → workspace — one
-	// workspace's triggers never fire on another's events). Home-level
-	// trigger files are defaults firing within this workspace, never
-	// cross-workspace listeners.
+	// WorkspaceID scopes the drain: one workspace's triggers never fire on
+	// another's events.
 	WorkspaceID string
 	Triggers    []Trigger
 	Runner      ChainRunner
@@ -55,30 +50,22 @@ type Deps struct {
 	Batch int
 }
 
-// Dispatcher is a durable named consumer over the event log: on Run it
-// catches up from its cursor, then live-tails the bus, reconciling both paths
-// through the firings table (an event may arrive via both; the
-// (trigger, nid) claim dedups).
+// Dispatcher is a durable named consumer over the event log: on Run it catches
+// up from its cursor, then live-tails the bus, deduping both paths through the
+// (trigger, nid) claim in the firings table.
 type Dispatcher struct {
 	firingCore
 	cursor int64
 }
 
-// firingCore is the shared claim/refuse/run/record engine behind both
-// delivery paths: the Dispatcher's cursor drain and the in-process Handler.
-// Both write the same event_firings claims, so a (trigger, nid) pair fires at
-// most once no matter which path saw the event first.
 type firingCore struct {
 	deps Deps
-	// triggers is kept as an ordered slice rather than a type-keyed map:
-	// listen_for.type is a PATTERN (an exact type, or a dotted prefix ending
-	// in ".*"), so the set a given event selects cannot be indexed by string
-	// equality. Declaration order is firing order.
+	// An ordered slice rather than a type-keyed map: listen_for.type is a
+	// pattern, so it cannot be indexed by string equality. Declaration order is
+	// firing order.
 	triggers []Trigger
 }
 
-// newFiringCore validates the Deps both paths share (Log is the Dispatcher's
-// own requirement, checked in New).
 func newFiringCore(deps Deps) (firingCore, error) {
 	if deps.Store == nil {
 		return firingCore{}, fmt.Errorf("eventtrigger: Store is required")
@@ -107,8 +94,6 @@ func newFiringCore(deps Deps) (firingCore, error) {
 	return firingCore{deps: deps, triggers: append([]Trigger(nil), deps.Triggers...)}, nil
 }
 
-// matching returns the triggers whose listener selects eventType, in
-// declaration order.
 func (d *firingCore) matching(eventType string) []Trigger {
 	var matched []Trigger
 	for _, t := range d.triggers {
@@ -119,11 +104,6 @@ func (d *firingCore) matching(eventType string) []Trigger {
 	return matched
 }
 
-// liveSubjects returns the distinct EXACT event types the loaded triggers
-// listen for. Bus subjects are exact strings, so a prefix pattern gets no live
-// subscription: it is covered by the backstop poll, which is the only
-// load-bearing path anyway (a live delivery never does more than shorten the
-// wait).
 func (d *firingCore) liveSubjects() []string {
 	seen := map[string]bool{}
 	subjects := []string{}
@@ -149,8 +129,6 @@ func New(deps Deps) (*Dispatcher, error) {
 	return &Dispatcher{firingCore: core}, nil
 }
 
-// nudgeBuffer bounds the live-delivery channel; a dropped nudge only delays
-// a drain until the next poll tick.
 const nudgeBuffer = 64
 
 // Run loads the cursor, drains the backlog, then tails live deliveries and
@@ -164,8 +142,6 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 
 	// Live subscriptions attach before the catch-up drain so no event falls
 	// between backlog and tail; overlap is deduped by the firings table.
-	// Subscription failure is reported, not fatal — the poll tick still
-	// drains the log.
 	nudge := make(chan []byte, nudgeBuffer)
 	var subs []libbus.Subscription
 	for _, eventType := range d.liveSubjects() {
@@ -193,8 +169,7 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-nudge:
-			// A delivery is a wake-up only; the log is the source of truth, so
-			// the payload (which varies by producer) is never interpreted.
+			// A delivery is a wake-up only; the payload is never interpreted.
 			d.drain(ctx)
 		case <-ticker.C:
 			d.drain(ctx)
@@ -202,8 +177,6 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	}
 }
 
-// drain processes every event past the cursor, advancing it per event so a
-// crash resumes exactly where processing stopped.
 func (d *Dispatcher) drain(ctx context.Context) {
 	for {
 		if ctx.Err() != nil {
@@ -225,8 +198,7 @@ func (d *Dispatcher) drain(ctx context.Context) {
 			}
 			d.handle(ctx, ev)
 			d.cursor = ev.NID
-			// WithoutCancel: the event is fully handled — recording that fact
-			// must survive a shutdown racing the last firing.
+			// WithoutCancel: recording the handled event must survive a shutdown.
 			if err := d.deps.Store.SetEventCursor(context.WithoutCancel(ctx), d.deps.Consumer, ev.NID); err != nil {
 				reportErr, _, end := d.deps.Tracker.Start(ctx, "cursor", "event_dispatch", "nid", ev.NID)
 				reportErr(err)
@@ -239,10 +211,6 @@ func (d *Dispatcher) drain(ctx context.Context) {
 	}
 }
 
-// handle fires every trigger matching ev's type. Each firing is claimed
-// before it runs (dedup), refused when the hop budget is spent, and its
-// outcome — including a chain failure — is recorded without ever stopping
-// the loop.
 func (d *firingCore) handle(ctx context.Context, ev runtimetypes.Event) {
 	for _, t := range d.matching(ev.Type) {
 		requestID := newRequestID()
@@ -271,15 +239,12 @@ func (d *firingCore) handle(ctx context.Context, ev runtimetypes.Event) {
 	}
 }
 
-// finish records a firing outcome and notifies the observer; a failed record
-// write is reported, never propagated.
 func (d *firingCore) finish(ctx context.Context, t Trigger, ev runtimetypes.Event, status, requestID string, firingErr error) {
 	msg := ""
 	if firingErr != nil {
 		msg = firingErr.Error()
 	}
-	// WithoutCancel: the chain already ran; a shutdown racing this write must
-	// not strand the firing as 'running'.
+	// WithoutCancel: a shutdown racing this write must not strand the firing as 'running'.
 	if err := d.deps.Store.FinishEventFiring(context.WithoutCancel(ctx), t.Name, ev.NID, status, msg); err != nil {
 		reportErr, _, end := d.deps.Tracker.Start(ctx, "record", "event_firing", "trigger", t.Name, "nid", ev.NID)
 		reportErr(err)
@@ -296,9 +261,6 @@ func (d *firingCore) finish(ctx context.Context, t Trigger, ev runtimetypes.Even
 	}
 }
 
-// newRequestID mints a firing's run correlation ID, the same register as
-// libtracker.WithNewRequestID ("cli-…") with an "evt-" prefix so a firing's
-// runs are recognizable in `contenox state list`.
 func newRequestID() string {
 	return fmt.Sprintf("evt-%016x", rand.Uint64())
 }

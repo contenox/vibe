@@ -64,8 +64,6 @@ func (a *acpCommandRunner) Run(ctx context.Context, spec localtools.CommandSpec,
 		t.sessionMu.Unlock()
 	}
 
-	// libacp.RunTerminal owns the create/wait/kill-on-cancel/fetch/release
-	// protocol; everything below is service policy over its result.
 	res, err := libacp.RunTerminal(ctx, t.conn, req, func(terminalID string) {
 		if sid == "" {
 			return
@@ -78,9 +76,8 @@ func (a *acpCommandRunner) Run(ctx context.Context, spec localtools.CommandSpec,
 		return -1, fmt.Errorf("acpsvc terminal: %w", err)
 	}
 
-	// A cancelled or timed-out command still reports why it stopped, even when
-	// the output fetch itself failed — the cause is more useful than the fetch
-	// error, and the model must not be told a user cancellation was a timeout.
+	// A cancelled or timed-out command reports why it stopped, even when the
+	// output fetch itself failed.
 	if err != nil {
 		if res.Cancelled {
 			return -1, fmt.Errorf("acpsvc terminal: command cancelled: %w", context.Canceled)
@@ -93,7 +90,6 @@ func (a *acpCommandRunner) Run(ctx context.Context, spec localtools.CommandSpec,
 	}
 
 	if res.Output != "" {
-		// Cap trailing newlines at 2 to avoid UI padding.
 		output := res.Output
 		for strings.HasSuffix(output, "\n\n\n") {
 			output = strings.TrimSuffix(output, "\n")

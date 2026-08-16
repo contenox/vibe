@@ -65,7 +65,6 @@ func (s *service) admitUnit(ctx context.Context) error {
 		return nil
 	}
 	recordCapRefusal()
-	// 409: reflects fleet state, not request shape; retrying after a unit
-	// concludes is legitimate.
+	// Reflects fleet state, not request shape: retrying later is legitimate.
 	return errdefs.Conflict(admissionRefusal(open, s.maxParallel))
 }

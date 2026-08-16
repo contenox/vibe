@@ -1,8 +1,6 @@
 // Package messages is a transport-agnostic codec for Anthropic's Messages API
-// wire format (request, content-block response, and named-SSE-event
-// streaming). It maps between neutral modelrepo types and Anthropic's JSON
-// shape, and does no I/O — the transport supplies the envelope (model in
-// body, version via the anthropic-version header, auth via x-api-key).
+// wire format. It maps between neutral modelrepo types and Anthropic's JSON
+// shape and does no I/O.
 package messages
 
 import (
@@ -16,17 +14,10 @@ import (
 )
 
 // DefaultMaxTokens is used when the caller does not set ChatConfig.MaxTokens.
-// Anthropic requires max_tokens; it has no "unlimited" sentinel.
 const DefaultMaxTokens = 4096
 
-// Request is the Anthropic Messages request body. The direct transport sets
-// Model in the body and the API version via header.
-//
-// System is either a plain string (the default, byte-identical to the
-// pre-cache wire shape) or a []wireBlock of text blocks when a cache
-// breakpoint is placed on it — Anthropic documents both forms as equivalent,
-// and the model-visible content is identical. It is only ever the block form
-// when CacheHints ask for it.
+// Request is the Anthropic Messages request body. System is a plain string, or
+// a []wireBlock of text blocks when a cache breakpoint is placed on it.
 type Request struct {
 	Model        string          `json:"model,omitempty"`
 	MaxTokens    int             `json:"max_tokens"`
@@ -40,25 +31,18 @@ type Request struct {
 	Stream       bool            `json:"stream,omitempty"`
 }
 
-// CacheControl marks a cache breakpoint on a content block or tool
-// definition: everything rendered up to and including the marked element is
-// cached (tools → system → messages order). Type is always "ephemeral"; TTL
-// is the optional documented variant ("5m" default, "1h").
+// CacheControl marks a cache breakpoint on a content block or tool definition:
+// everything rendered up to and including the marked element is cached.
 type CacheControl struct {
 	Type string `json:"type"`
 	TTL  string `json:"ttl,omitempty"`
 }
 
-// MaxCacheBreakpoints is Anthropic's documented per-request limit on
-// cache_control breakpoints.
+// MaxCacheBreakpoints is Anthropic's per-request limit on cache_control breakpoints.
 const MaxCacheBreakpoints = 4
 
 // ThinkingBlocksMetaKey is the ToolCall.ProviderMeta key under which the
-// assistant turn's thinking blocks (with signatures) round-trip, mirroring the
-// Gemini thought_signature pattern: tool-call ProviderMeta is the one field
-// the engine persists into history verbatim. The value is the JSON array of
-// wire blocks exactly as Anthropic sent them (thinking + signature, and
-// redacted_thinking + data).
+// assistant turn's thinking blocks round-trip, as the JSON array of wire blocks.
 const ThinkingBlocksMetaKey = "anthropic_thinking_blocks"
 
 type ThinkingConfig struct {
@@ -76,7 +60,6 @@ type wireMessage struct {
 	Content []wireBlock `json:"content"`
 }
 
-// wireBlock is one content block. Only the fields relevant to its Type are set.
 type wireBlock struct {
 	Type string `json:"type"`
 	// text
@@ -90,19 +73,14 @@ type wireBlock struct {
 	// tool_result
 	ToolUseID string `json:"tool_use_id,omitempty"`
 	Content   string `json:"content,omitempty"`
-	// thinking (round-tripped verbatim with its signature)
+	// thinking
 	Thinking  string `json:"thinking,omitempty"`
 	Signature string `json:"signature,omitempty"`
 	// redacted_thinking
-	Data string `json:"data,omitempty"`
-	// CacheControl marks a cache breakpoint after this block (metadata only,
-	// never model-visible content).
+	Data         string        `json:"data,omitempty"`
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
-// wireImageSource is the `source` object of an Anthropic `image` content block.
-// Only the base64 inline form is emitted: type="base64", the image media_type
-// (e.g. image/png), and the base64-encoded image bytes in data.
 type wireImageSource struct {
 	Type      string `json:"type"`
 	MediaType string `json:"media_type"`
@@ -110,16 +88,14 @@ type wireImageSource struct {
 }
 
 type wireTool struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	InputSchema any    `json:"input_schema,omitempty"`
-	// CacheControl on the last tool definition caches the whole tool list
-	// (tools render first, so this is the deepest stable breakpoint).
+	Name         string        `json:"name"`
+	Description  string        `json:"description,omitempty"`
+	InputSchema  any           `json:"input_schema,omitempty"`
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
-// Build converts neutral messages + config into an Anthropic Messages Request.
-// The transport must still set Model (the version travels as a header).
+// Build converts neutral messages and config into an Anthropic Messages Request.
+// The transport must still set Model.
 func Build(messages []modelrepo.Message, cfg *modelrepo.ChatConfig) (Request, map[string]string) {
 	req := Request{MaxTokens: DefaultMaxTokens}
 	nameMap := make(map[string]string)
@@ -155,9 +131,7 @@ func Build(messages []modelrepo.Message, cfg *modelrepo.ChatConfig) (Request, ma
 	}
 
 	var systemParts []string
-	// srcIdx[j] is the index into the neutral messages slice that produced
-	// wire message j; applyCacheHints uses it to map StableHistoryLen (a
-	// neutral-message count) onto a wire-message breakpoint.
+	// srcIdx[j] is the index into the neutral messages slice that produced wire message j.
 	var srcIdx []int
 	for i, m := range messages {
 		before := len(req.Messages)
@@ -167,7 +141,6 @@ func Build(messages []modelrepo.Message, cfg *modelrepo.ChatConfig) (Request, ma
 				systemParts = append(systemParts, m.Content)
 			}
 		case "tool":
-			// A tool result becomes a user message carrying a tool_result block.
 			req.Messages = append(req.Messages, wireMessage{
 				Role: "user",
 				Content: []wireBlock{{
@@ -178,10 +151,7 @@ func Build(messages []modelrepo.Message, cfg *modelrepo.ChatConfig) (Request, ma
 			})
 		case "assistant", "model":
 			var blocks []wireBlock
-			// Replay the turn's thinking blocks first: Anthropic requires the
-			// signed thinking blocks to precede tool_use blocks when a
-			// thinking-enabled assistant turn re-enters the history, or the
-			// follow-up request 400s.
+			// Anthropic requires signed thinking blocks to precede tool_use blocks.
 			blocks = append(blocks, thinkingBlocksFromToolCalls(m.ToolCalls)...)
 			if m.Content != "" {
 				blocks = append(blocks, wireBlock{Type: "text", Text: m.Content})
@@ -211,7 +181,7 @@ func Build(messages []modelrepo.Message, cfg *modelrepo.ChatConfig) (Request, ma
 			if len(blocks) > 0 {
 				req.Messages = append(req.Messages, wireMessage{Role: "assistant", Content: blocks})
 			}
-		default: // "user" and anything else
+		default:
 			if len(m.Images) > 0 {
 				req.Messages = append(req.Messages, wireMessage{
 					Role:    "user",
@@ -237,20 +207,12 @@ func Build(messages []modelrepo.Message, cfg *modelrepo.ChatConfig) (Request, ma
 	return req, nameMap
 }
 
-// applyCacheHints places cache_control breakpoints where the hints assert
-// stability. Placement is metadata-only: no content is added, removed, or
-// reordered — the sole structural change is rendering the system string in
-// its documented equivalent block form so the breakpoint has a block to sit
-// on. At most three of Anthropic's MaxCacheBreakpoints are used (tools,
-// system, stable-history), leaving one in reserve.
 func applyCacheHints(req *Request, hints *modelrepo.CacheHints, srcIdx []int) {
 	if hints == nil {
 		return
 	}
 	cc := func() *CacheControl {
 		c := &CacheControl{Type: "ephemeral"}
-		// Anthropic documents exactly two TTL tiers: the 5m default (omitted)
-		// and the opt-in 1h variant.
 		if hints.TTL >= time.Hour {
 			c.TTL = "1h"
 		}
@@ -263,17 +225,11 @@ func applyCacheHints(req *Request, hints *modelrepo.CacheHints, srcIdx []int) {
 	}
 	if hints.StableSystem && placed < MaxCacheBreakpoints {
 		if sys, ok := req.System.(string); ok && sys != "" {
-			// Equivalent block form of the same string; a breakpoint here
-			// caches tools+system together (render order tools → system).
 			req.System = []wireBlock{{Type: "text", Text: sys, CacheControl: cc()}}
 			placed++
 		}
 	}
 	if hints.StableHistoryLen > 0 && placed < MaxCacheBreakpoints {
-		// Mark the last content block of the last wire message derived from
-		// the asserted-stable neutral prefix. If that block is a thinking
-		// block (cache_control is not valid there), the hint is dropped
-		// rather than moved — hints never relocate content.
 		last := -1
 		for j, src := range srcIdx {
 			if src < hints.StableHistoryLen {
@@ -290,11 +246,6 @@ func applyCacheHints(req *Request, hints *modelrepo.CacheHints, srcIdx []int) {
 	}
 }
 
-// thinkingBlocksFromToolCalls restores the wire thinking blocks persisted
-// under ThinkingBlocksMetaKey on the turn's tool calls (the engine round-trips
-// only tool-call ProviderMeta through history). The blocks were stored
-// verbatim, so they replay with their signatures intact. Unparseable meta is
-// dropped rather than sent malformed.
 func thinkingBlocksFromToolCalls(toolCalls []modelrepo.ToolCall) []wireBlock {
 	for _, tc := range toolCalls {
 		raw := tc.ProviderMeta[ThinkingBlocksMetaKey]
@@ -310,10 +261,8 @@ func thinkingBlocksFromToolCalls(toolCalls []modelrepo.ToolCall) []wireBlock {
 	return nil
 }
 
-// StripThinkingBlocks removes replayed thinking/redacted_thinking blocks from
-// every message. Transports call it when the outgoing request does not enable
-// thinking — Anthropic rejects thinking blocks in history unless thinking is
-// on. Messages left with no blocks are removed entirely.
+// StripThinkingBlocks removes replayed thinking blocks from every message, and
+// any message left empty. Transports call it when the request does not enable thinking.
 func StripThinkingBlocks(req *Request) {
 	if req == nil {
 		return
@@ -336,11 +285,6 @@ func StripThinkingBlocks(req *Request) {
 	req.Messages = msgs
 }
 
-// imageContentBlocks renders a message's text plus its image attachments as an
-// Anthropic content-blocks array: a leading text block (only when the message
-// carries text), then one base64 `image` block per attachment, in attachment
-// order. Each image block's source is {type:"base64", media_type, data} where
-// data is the base64-encoding of the raw image bytes.
 func imageContentBlocks(m modelrepo.Message) []wireBlock {
 	blocks := make([]wireBlock, 0, len(m.Images)+1)
 	if m.Content != "" {
@@ -367,10 +311,6 @@ type Response struct {
 	Usage      *wireUsage      `json:"usage"`
 }
 
-// wireUsage is Anthropic's usage report. input_tokens counts only the
-// uncached remainder; cache read/write counts are reported separately, and
-// the true prompt total is the sum of all three (normalization rule,
-// modelrepo.TokenUsage).
 type wireUsage struct {
 	InputTokens              int `json:"input_tokens"`
 	OutputTokens             int `json:"output_tokens"`
@@ -378,8 +318,6 @@ type wireUsage struct {
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
-// normalizeUsage maps wireUsage onto the neutral TokenUsage per the
-// normalization rule above.
 func normalizeUsage(u wireUsage) modelrepo.TokenUsage {
 	prompt := u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
 	return modelrepo.TokenUsage{
@@ -392,16 +330,14 @@ func normalizeUsage(u wireUsage) modelrepo.TokenUsage {
 }
 
 type responseBlock struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text"`
-	Thinking string          `json:"thinking"`
-	ID       string          `json:"id"`
-	Name     string          `json:"name"`
-	Input    json.RawMessage `json:"input"`
-	// Signature signs a thinking block; Data carries a redacted_thinking
-	// block. Both must round-trip verbatim on the next turn.
-	Signature string `json:"signature"`
-	Data      string `json:"data"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	Thinking  string          `json:"thinking"`
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Input     json.RawMessage `json:"input"`
+	Signature string          `json:"signature"`
+	Data      string          `json:"data"`
 }
 
 // DecodeResponse parses a non-streaming response into a neutral ChatResult.
@@ -440,10 +376,6 @@ func DecodeResponse(raw []byte, nameMap map[string]string) (modelrepo.ChatResult
 			toolCalls = append(toolCalls, newToolCall(b.ID, name, args))
 		}
 	}
-	// Thinking blocks must survive into the next turn's history when the model
-	// also called tools (Anthropic requires them replayed before tool_use);
-	// they ride on the first tool call's ProviderMeta, and Build restores them
-	// for the whole turn.
 	attachThinkingBlocks(toolCalls, thinkingBlocks)
 	role := resp.Role
 	if role == "" {
@@ -466,9 +398,6 @@ func DecodeResponse(raw []byte, nameMap map[string]string) (modelrepo.ChatResult
 	}, nil
 }
 
-// attachThinkingBlocks serializes the turn's thinking blocks onto the first
-// tool call's ProviderMeta. No tool calls means no replay obligation (a final
-// answer's thinking is display-only).
 func attachThinkingBlocks(toolCalls []modelrepo.ToolCall, blocks []wireBlock) {
 	if len(toolCalls) == 0 || len(blocks) == 0 {
 		return
@@ -483,7 +412,6 @@ func attachThinkingBlocks(toolCalls []modelrepo.ToolCall, blocks []wireBlock) {
 	toolCalls[0].ProviderMeta[ThinkingBlocksMetaKey] = string(raw)
 }
 
-// newToolCall builds a neutral ToolCall (Function is an anonymous struct).
 func newToolCall(id, name, args string) modelrepo.ToolCall {
 	tc := modelrepo.ToolCall{ID: id, Type: "function"}
 	tc.Function.Name = name
@@ -491,8 +419,6 @@ func newToolCall(id, name, args string) modelrepo.ToolCall {
 	return tc
 }
 
-// streamEvent is the JSON `data:` payload of any Messages SSE event; the `type`
-// field discriminates. (The `event:` line is redundant and can be ignored.)
 type streamEvent struct {
 	Type         string `json:"type"`
 	Index        int    `json:"index"`
@@ -500,7 +426,6 @@ type streamEvent struct {
 		Type string `json:"type"`
 		ID   string `json:"id"`
 		Name string `json:"name"`
-		// redacted_thinking blocks arrive whole in content_block_start.
 		Data string `json:"data"`
 	} `json:"content_block"`
 	Delta struct {
@@ -508,16 +433,13 @@ type streamEvent struct {
 		Text        string `json:"text"`
 		Thinking    string `json:"thinking"`
 		PartialJSON string `json:"partial_json"`
-		// signature_delta closes a thinking block with its signature.
-		Signature string `json:"signature"`
-		// message_delta carries the final stop_reason here.
-		StopReason string `json:"stop_reason"`
+		Signature   string `json:"signature"`
+		StopReason  string `json:"stop_reason"`
 	} `json:"delta"`
 	Message struct {
 		Usage streamUsage `json:"usage"`
 	} `json:"message"`
 	Usage streamUsage `json:"usage"`
-	// error events carry the failure detail.
 	Error struct {
 		Type    string `json:"type"`
 		Message string `json:"message"`
@@ -531,26 +453,14 @@ type streamUsage struct {
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
-// StreamDecoder translates streamed Messages SSE events into raw-delta
-// parcels (per the modelrepo.StreamParcel contract); it does not assemble —
-// tool_use blocks surface as ToolCallDelta parcels (id/name from
-// content_block_start, argument fragments from input_json_delta) and
-// assembly is left to the engine-side modelrepo.StreamAssembler. In-stream
-// `error` events decode as Go errors so the transport surfaces them as Error
-// parcels instead of swallowing them. Stop reason and usage accumulate across
-// message_start/message_delta and are surfaced by Finish.
+// StreamDecoder translates streamed Messages SSE events into raw-delta parcels.
+// It does not assemble tool calls; that is left to modelrepo.StreamAssembler.
 type StreamDecoder struct {
 	nameMap    map[string]string
 	stopReason string
-	// usage accumulates the raw wire fields across message_start/message_delta
-	// (input tokens arrive at start, output tokens at the end).
-	usage    wireUsage
-	sawUsage bool
+	usage      wireUsage
+	sawUsage   bool
 
-	// Thinking-block round-trip state: thinking/redacted_thinking blocks
-	// accumulate per index and, once complete, ride the first tool_use
-	// content_block_start's ToolCallDelta.ProviderMeta (Anthropic streams all
-	// thinking blocks before tool_use).
 	openThinking     *wireBlock
 	thinkingBlocks   []wireBlock
 	thinkingAttached bool
@@ -560,9 +470,8 @@ func NewStreamDecoder(nameMap map[string]string) *StreamDecoder {
 	return &StreamDecoder{nameMap: nameMap}
 }
 
-// DecodeLine parses one SSE `data:` payload (bytes after "data: ") and returns
-// the raw-delta parcels it carries, in wire order. An Anthropic `error` event
-// returns an error carrying the API's type and message.
+// DecodeLine parses one SSE data payload and returns the parcels it carries, in
+// wire order. An Anthropic error event returns an error.
 func (d *StreamDecoder) DecodeLine(payload []byte) ([]*modelrepo.StreamParcel, error) {
 	var ev streamEvent
 	if err := json.Unmarshal(payload, &ev); err != nil {
@@ -593,8 +502,6 @@ func (d *StreamDecoder) DecodeLine(payload []byte) ([]*modelrepo.StreamParcel, e
 				Type:  "function",
 				Name:  name,
 			}
-			// All thinking blocks precede tool_use in the stream; attach the
-			// completed set to the first call so it round-trips via history.
 			if meta := d.takeThinkingBlocksMeta(); meta != "" {
 				delta.ProviderMeta = map[string]string{ThinkingBlocksMetaKey: meta}
 			}
@@ -643,9 +550,6 @@ func (d *StreamDecoder) DecodeLine(payload []byte) ([]*modelrepo.StreamParcel, e
 	}
 }
 
-// takeThinkingBlocksMeta serializes the completed thinking blocks once; later
-// tool_use blocks of the same turn get no copy (Build restores the blocks for
-// the whole turn from the first call's meta).
 func (d *StreamDecoder) takeThinkingBlocksMeta() string {
 	if d.thinkingAttached || len(d.thinkingBlocks) == 0 {
 		return ""
@@ -678,8 +582,7 @@ func (d *StreamDecoder) recordUsage(u streamUsage) {
 	}
 }
 
-// Finish returns the typed terminal parcel: the stop reason from
-// message_delta plus the accumulated usage, normalized per normalizeUsage.
+// Finish returns the terminal parcel: the stop reason plus accumulated usage.
 // Callers emit it after the SSE stream ends cleanly.
 func (d *StreamDecoder) Finish() *modelrepo.StreamParcel {
 	term := &modelrepo.StreamTerminal{FinishReason: d.stopReason}

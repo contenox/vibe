@@ -1,4 +1,4 @@
-// Contenox CLI: run task chains locally with SQLite-backed state.
+// Command contenox is the contenox agent server and its CLI.
 package main
 
 import (

@@ -44,16 +44,11 @@ const (
 	chainOracleDefaultFilename  = "chain-oracle-default.json"
 )
 
-// SystemDirName holds the shipped chain files — the runtime's own execution
-// paths for chat, editor sessions and one-shot runs. They are machinery, not
-// files an operator is expected to author, and a directory of them at the top
-// level was the first thing `contenox init` said about the product.
-//
-// Loaders still read a same-named file in the workspace or directly in
-// ~/.contenox/ first, so copying one up a level is all it takes to own it.
+// SystemDirName holds the shipped chain files. Loaders read a same-named file in
+// the workspace or directly in ~/.contenox/ first, so copying one up a level is
+// all it takes to own it.
 const SystemDirName = acpsvc.SystemDirName
 
-// systemDir is where a contenox directory keeps its shipped chains.
 func systemDir(contenoxDir string) string {
 	return filepath.Join(contenoxDir, SystemDirName)
 }
@@ -110,12 +105,8 @@ func migrateLegacyChainNamesOnSearchPath(out io.Writer, contenoxDir string) erro
 }
 
 // migrateChainsIntoSystemDir relocates shipped chain files an earlier version
-// wrote to the top level of contenoxDir.
-//
-// Only a file still byte-identical to what we shipped is moved: anything else
-// is the operator's, and their copy at the top level keeps winning over the
-// system one by the ordinary lookup order. So a customised chain survives an
-// upgrade untouched, and an untouched one stops being clutter.
+// wrote to the top level of contenoxDir. Only a file still byte-identical to
+// what we shipped is moved.
 func migrateChainsIntoSystemDir(out io.Writer, contenoxDir string) error {
 	if contenoxDir == "" {
 		return nil
@@ -160,18 +151,9 @@ func seedFIMChainIfMissing(contenoxDir string) error {
 	return os.WriteFile(dst, []byte(initFIMChain), 0644)
 }
 
-// initChainFiles are the chains still shipped as JSON.
-//
-// ⚠ acp and acpx are NOT here: they are declarations under
-// agents/, seeded by agentdecl.Preseed and transpiled into .generated on every
-// discovery pass. Shipping both would be two sources for one agent, and the
-// JSON would be the one nobody edits — which is what made the recommended
-// authoring format look optional.
-//
-// The four that remain are the ones the declaration format does not describe:
-// compact and fim are single-task chains with no tool loop, and planner and
-// oracle carry stages (a settle check, an early exit) with no counterpart in a
-// declaration. Converting them would mean inventing behaviour, so they stay.
+// initChainFiles are the chains still shipped as JSON: the ones the declaration
+// format does not describe. acp and acpx are declarations under agents/ instead,
+// seeded by agentdecl.Preseed and transpiled on every discovery pass.
 var initChainFiles = []struct {
 	Name    string
 	Content string
@@ -290,8 +272,7 @@ func RunGlobalInit(out io.Writer) error {
 		return nil
 	}
 	for _, f := range initChainFiles {
-		// Skipped when the operator already owns a copy a level up, so a
-		// customised chain is never shadowed by a fresh shipped one.
+		// Skipped when the operator already owns a copy a level up.
 		if _, err := os.Stat(filepath.Join(homeDir, f.Name)); err == nil {
 			continue
 		}
@@ -305,8 +286,8 @@ func RunGlobalInit(out io.Writer) error {
 	if _, err := agentdecl.Preseed(homeDir); err != nil {
 		return err
 	}
-	// Same reason as RunInit: the seeded declarations ARE the shipped agents, so
-	// they have to be chains before anything looks one up.
+	// The seeded declarations are the shipped agents, so they have to be chains
+	// before anything looks one up.
 	transpileSeededAgents(io.Discard, homeDir)
 	return nil
 }
@@ -442,8 +423,7 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
 		return fmt.Errorf("failed to create .contenox directory: %w", err)
 	}
-	// A fresh marker gets a new UUID; an existing one keeps its ID (an
-	// explicit projectName renames it, "" leaves the stored name alone).
+	// A fresh marker gets a new UUID; an existing one keeps its ID.
 	marker, err := project.EnsureInContenoxDir(contenoxDir, projectName)
 	if err != nil {
 		return fmt.Errorf("failed to write project marker: %w", err)
@@ -490,8 +470,7 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 		return fmt.Errorf("create %s: %w", homeSystemDir, err)
 	}
 	for _, f := range initChainFiles {
-		// A copy the operator keeps a level up wins at lookup, so refreshing
-		// the system copy underneath it would be invisible and confusing.
+		// A copy the operator keeps a level up wins at lookup.
 		if _, err := os.Stat(filepath.Join(homeDir, f.Name)); err == nil {
 			fmt.Fprintf(out, "  note: %s is yours and still wins; %s not written\n",
 				filepath.Join(homeDir, f.Name), filepath.Join(homeSystemDir, f.Name))
@@ -516,10 +495,8 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 	if _, err := agentdecl.Preseed(homeDir); err != nil {
 		return err
 	}
-	// The seeded declarations become chains here rather than at first use, so a
-	// fresh install has a working acp before anything asks for
-	// one. Reported, not fatal: a declaration that will not transpile is worth
-	// naming, and the rest of init still stands.
+	// Transpiled here rather than at first use, so a fresh install has a working
+	// acp before anything asks for one. Reported, not fatal.
 	if problems := transpileSeededAgents(out, homeDir); problems != nil {
 		printSyncProblems(out, problems)
 	}
@@ -663,12 +640,12 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 			chatStep = registerStep
 		}
 	}
-	fmt.Fprintf(out, "  %d. Chat with your model:\n", chatStep)
-	fmt.Fprintln(out, "       contenox hey, what can you do?")
-	fmt.Fprintln(out, "       echo 'fix the typos in README.md' | contenox")
+	fmt.Fprintf(out, "  %d. Attach an editor over ACP, or fire an agent as a mission:\n", chatStep)
+	fmt.Fprintln(out, "       contenox acp                     # serve this workspace to your editor")
+	fmt.Fprintln(out, "       contenox agent list              # the agents you declared")
+	fmt.Fprintln(out, "       contenox mission fire acp <intent>")
 	fmt.Fprintln(out, "")
-	fmt.Fprintln(out, "  To enable shell and filesystem tools pass --shell to any command, e.g.:")
-	fmt.Fprintln(out, "       contenox --shell \"run the tests\"")
+	fmt.Fprintln(out, "  Your agents are declared under agents/ and compiled on every start.")
 	fmt.Fprintln(out, "")
 	fmt.Fprintln(out, "  Run 'contenox --help' for full usage.")
 	return nil

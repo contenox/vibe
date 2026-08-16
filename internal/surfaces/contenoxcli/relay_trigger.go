@@ -112,7 +112,7 @@ func (h *relayTriggerHandler) handle(ctx context.Context, f librelay.Frame) {
 	case req.Chain == "":
 		refusal = "chain is required"
 	case req.SessionMode == librelay.ChainSessionReused:
-		// Running "reused" as "new" would report a reuse that never happened, so the mode is refused instead.
+		// Running "reused" as "new" would report a reuse that never happened.
 		refusal = `session_mode "reused" is not supported by this build; use "new"`
 	case req.SessionMode != "" && req.SessionMode != librelay.ChainSessionNew:
 		refusal = fmt.Sprintf("unknown session_mode %q", req.SessionMode)
@@ -122,14 +122,14 @@ func (h *relayTriggerHandler) handle(ctx context.Context, f librelay.Frame) {
 		return
 	}
 	if !h.begin(req.RequestID) {
-		// A re-delivered RequestID while the first delivery still owes its result: a second run would answer twice.
+		// The first delivery still owes its result; a second run would answer twice.
 		return
 	}
 	h.wg.Add(1)
 	go func() {
 		defer h.wg.Done()
 		defer h.end(req.RequestID)
-		// The frame's request_id becomes the run's correlation key: events the chain appends and records the run writes all carry it.
+		// The frame's request_id becomes the run's correlation key.
 		runCtx := context.WithValue(ctx, libtracker.ContextKeyRequestID, req.RequestID)
 		status, msg := librelay.ChainTriggerStatusOK, ""
 		if err := h.triggers.runner.RunChain(runCtx, relayChainRequest{
@@ -216,7 +216,8 @@ func (r *relayTriggerRunner) RunChain(ctx context.Context, req relayChainRequest
 	if err := json.Unmarshal(req.Input, &input); err != nil {
 		return refuseChainTrigger(fmt.Errorf("input is not a JSON object: %w", err))
 	}
-	// An envelope past the hop budget is refused before the chain; a run that proceeds executes at hop+1 so events the chain appends inherit it.
+	// An envelope past the hop budget is refused before the chain; a run that
+	// proceeds executes at hop+1.
 	var envelope struct {
 		Hop int `json:"hop"`
 	}

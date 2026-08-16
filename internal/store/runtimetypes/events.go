@@ -282,7 +282,6 @@ func (s *eventStore) eventPartitionsInRange(ctx context.Context, from, to time.T
 
 const eventColumns = "nid, workspace_id, type, source, subject, time, data, hop"
 
-// ListEventsSince gathers up to limit rows past afterNID from every partition, merging by NID rather than period order to preserve ascending-NID order.
 func (s *eventStore) ListEventsSince(ctx context.Context, workspaceID string, afterNID int64, limit int) ([]Event, error) {
 	if err := requireEventWorkspace(workspaceID); err != nil {
 		return nil, err
@@ -330,7 +329,6 @@ func (s *eventStore) ListEventsSince(ctx context.Context, workspaceID string, af
 	return events, nil
 }
 
-// ListRecentEvents is the descending-nid sibling of ListEventsSince: newest first, for an operator activity view.
 func (s *eventStore) ListRecentEvents(ctx context.Context, workspaceID string, beforeNID int64, limit int) ([]Event, error) {
 	if err := requireEventWorkspace(workspaceID); err != nil {
 		return nil, err

@@ -14,7 +14,7 @@ Most recipes here are written as chain files rather than [agent declarations](/d
 > - Run `contenox init` in your project once, then either point Contenox at a local Ollama model or configure a cloud backend — see [Quickstart](/docs/guide/quickstart/).
 > - Tool access — `local_shell`, `local_fs`, and any MCP servers or registered remote tools — is governed by each chain's `tools_policies`.
 
-Several recipes below are one branch of a router rather than a standalone chain: a `route` task labels the request and hands it to the loop built for that label, with its own instruction, tool scope and budget. See [Request routing](/docs/guide/request-routing/) for the shape.
+Several recipes below are one branch of a router rather than a standalone chain: a `route` task labels the request and hands it to the loop built for that label, with its own instruction, tool scope and budget. See [Request routing](/docs/guide/chains/routing/) for the shape.
 
 ## Categories
 
@@ -30,4 +30,3 @@ Several recipes below are one branch of a router rather than a standalone chain:
 - [The nested permission bomb](/docs/use-cases/nested-permission-bomb/) — give a workflow its own scoped credential and authored HITL policy instead of inheriting the operator's access
 - [HubSpot via MCP](/docs/use-cases/hubspot-mcp/) — OAuth + pre-issued client credentials, works for any vendor MCP without dynamic registration
 - [The oracle](/docs/use-cases/auto-attention/) — an adjudicating agent rules on a subagent's routine asks so unattended runs finish; consequential ones still wait for you
-- [Event-driven chains: three stories (beta)](/docs/use-cases/event-driven-chains/) — a trigger buzzes your phone when a mission asks for a human, another writes the completion summary, and `contenox events firings` keeps both honest

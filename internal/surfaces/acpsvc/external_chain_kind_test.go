@@ -13,12 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A chain-kind agent must work via the Manager-owned chat path; the
-// connection-owned (stdio) path has no chain config and must refuse honestly.
-
 // registerChainAgentInDB declares a chain-kind agent via the normal registry
-// path. The chain file is never read: spawn is redirected via
-// WithSelfExecutable, and ChainConfig deliberately does not stat its path.
+// path.
 func registerChainAgentInDB(t *testing.T, db libdb.DBManager, name string) string {
 	t.Helper()
 	svc := agentregistryservice.New(db)

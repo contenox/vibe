@@ -1,8 +1,7 @@
-// Package shellenvservice persists the operator-defined environment
-// variables contenox injects into shells it spawns (local_shell,
-// shell_session, the interactive terminal), layered on top of the
-// environment scrub so they always win. Scope is global; values are
-// plaintext in the kv table, so no secrets belong here.
+// Package shellenvservice persists the operator-defined environment variables
+// contenox injects into shells it spawns, layered on top of the environment
+// scrub so they always win. Values are plaintext in the kv table, so no secrets
+// belong here.
 package shellenvservice
 
 import (
@@ -15,8 +14,6 @@ import (
 	libdb "github.com/contenox/contenox/libdbexec"
 )
 
-// globalKVKey holds the global shell-env map (a JSON object of name→value) at the
-// global kv scope (workspace_id "").
 const globalKVKey = "shellenv.global"
 
 // ErrInvalidName is returned when a variable name is not a usable environment
@@ -74,9 +71,7 @@ func (s *service) Set(ctx context.Context, vars map[string]string) error {
 }
 
 // ValidEnvName reports whether name is a usable environment-variable name: a
-// non-empty run of ASCII letters, digits, and underscores, not starting with a
-// digit. This is the shape a POSIX shell accepts and keeps a bad name (with "=",
-// whitespace, or worse) from ever reaching an exec.
+// non-empty run of ASCII letters, digits and underscores, not starting with a digit.
 func ValidEnvName(name string) bool {
 	if name == "" {
 		return false

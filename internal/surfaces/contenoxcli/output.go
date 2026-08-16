@@ -1,4 +1,3 @@
-// output.go holds CLI output helpers.
 package contenoxcli
 
 import (
@@ -11,7 +10,6 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
-// splitAndTrim splits s by sep and trims each element.
 func splitAndTrim(s, sep string) []string {
 	var out []string
 	for _, p := range strings.Split(s, sep) {
@@ -22,7 +20,6 @@ func splitAndTrim(s, sep string) []string {
 	return out
 }
 
-// lastAssistantContentFromHistory returns the content of the last assistant message with non-empty content.
 func lastAssistantContentFromHistory(chat taskengine.ChatHistory) string {
 	for i := len(chat.Messages) - 1; i >= 0; i-- {
 		m := chat.Messages[i]
@@ -33,7 +30,6 @@ func lastAssistantContentFromHistory(chat taskengine.ChatHistory) string {
 	return ""
 }
 
-// printRelevantOutput prints only the relevant part of the result based on output type, unless raw is true.
 func printRelevantOutput(w io.Writer, output any, outputType taskengine.DataType, raw bool) {
 	if raw {
 		printOutput(w, output)
@@ -56,7 +52,6 @@ func printRelevantOutput(w io.Writer, output any, outputType taskengine.DataType
 	printOutput(w, output)
 }
 
-// printOutput prints output in a human-friendly way.
 func printOutput(w io.Writer, output any) {
 	switch v := output.(type) {
 	case string:
@@ -73,7 +68,6 @@ func printOutput(w io.Writer, output any) {
 	}
 }
 
-// formatDuration formats a duration for step output (e.g. "1.70s", "53ms").
 func formatDuration(d time.Duration) string {
 	if d < time.Millisecond {
 		return fmt.Sprintf("%dµs", d.Microseconds())

@@ -1,6 +1,7 @@
 ---
-title: "Tutorial: your first agent"
+title: "Your first agent"
 description: Declare an agent in one file, watch what contenox puts behind it, and run it. What a permission setting expands into, what a declaration cannot say, and where the knobs are.
+order: 1
 ---
 
 # Tutorial: your first agent

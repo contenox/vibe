@@ -10,9 +10,7 @@ import (
 )
 
 // Wire types for the Ollama HTTP API. Field names, JSON tags and custom
-// marshalling must stay byte-identical to what an Ollama server emits and
-// accepts; drift here is silent cross-version incompatibility, so treat
-// wiretypes_test.go as the contract.
+// marshalling must stay byte-identical to what an Ollama server emits and accepts.
 
 // Capability is a model capability reported by /api/show.
 type Capability string
@@ -113,13 +111,6 @@ func (t *ThinkValue) UnmarshalJSON(data []byte) error {
 	return fmt.Errorf("think must be a boolean or string (\"high\", \"medium\", \"low\", true, or false)")
 }
 
-// orderedMap is a string-keyed map that preserves the key order of the JSON
-// document it was decoded from, and reproduces it on encode. Ollama's tool
-// schemas and tool-call arguments are order-sensitive on the wire; a plain Go
-// map would re-emit them sorted.
-//
-// Only the top level is ordered: an any-typed value decodes nested objects to
-// plain maps, matching the upstream behaviour.
 type orderedMap[V any] struct {
 	keys   []string
 	values map[string]V
@@ -129,8 +120,6 @@ func newOrderedMap[V any]() *orderedMap[V] {
 	return &orderedMap[V]{values: make(map[string]V)}
 }
 
-// set appends key on first insert and updates in place afterwards, so an
-// update never moves a key.
 func (m *orderedMap[V]) set(key string, value V) {
 	if m.values == nil {
 		m.values = make(map[string]V)
@@ -141,7 +130,6 @@ func (m *orderedMap[V]) set(key string, value V) {
 	m.values[key] = value
 }
 
-// MarshalJSON writes entries in insertion order. A nil map marshals as null.
 func (m *orderedMap[V]) MarshalJSON() ([]byte, error) {
 	if m == nil || m.values == nil {
 		return []byte("null"), nil
@@ -168,8 +156,6 @@ func (m *orderedMap[V]) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// UnmarshalJSON records keys in document order. A null document clears the map
-// so that it marshals back as null.
 func (m *orderedMap[V]) UnmarshalJSON(data []byte) error {
 	m.keys = nil
 	m.values = nil

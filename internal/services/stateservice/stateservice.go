@@ -75,11 +75,8 @@ type service struct {
 	workspaceID string
 }
 
-// Get implements Service.
 func (s *service) Get(ctx context.Context) ([]runtimestate.BackendRuntimeState, error) {
-	// serve reconciles at startup and on explicit refresh only; this debounced
-	// reconcile lets /state and /setup-status self-heal a backend that came up
-	// later. Best-effort: serve the existing snapshot if it fails.
+	// Debounced self-heal for a backend that came up after startup; best-effort.
 	_ = s.state.ReconcileIfStale(ctx)
 	m := s.state.Get(ctx)
 	l := make([]runtimestate.BackendRuntimeState, 0, len(m))
@@ -89,7 +86,6 @@ func (s *service) Get(ctx context.Context) ([]runtimestate.BackendRuntimeState, 
 	return l, nil
 }
 
-// SetupStatus implements Service.
 func (s *service) SetupStatus(ctx context.Context) (setupcheck.Result, error) {
 	states, err := s.Get(ctx)
 	if err != nil {
@@ -102,7 +98,6 @@ func (s *service) SetupStatus(ctx context.Context) (setupcheck.Result, error) {
 	return setupcheck.Evaluate(in), nil
 }
 
-// Refresh implements Service.
 func (s *service) Refresh(ctx context.Context) (setupcheck.Result, error) {
 	if err := s.state.RunBackendCycle(ctx); err != nil {
 		return setupcheck.Result{}, err
@@ -110,13 +105,11 @@ func (s *service) Refresh(ctx context.Context) (setupcheck.Result, error) {
 	return s.SetupStatus(ctx)
 }
 
-// CLIConfig implements Service.
 func (s *service) CLIConfig(ctx context.Context) (CLIConfigSnapshot, error) {
 	store := runtimetypes.New(s.db.WithoutTransaction())
 	return s.cliConfigSnapshot(ctx, store), nil
 }
 
-// SetCLIConfig implements Service.
 func (s *service) SetCLIConfig(ctx context.Context, patch CLIConfigPatch) (CLIConfigSnapshot, error) {
 	if patch.DefaultModel == nil &&
 		patch.DefaultProvider == nil &&
@@ -203,9 +196,8 @@ func (s *service) SetCLIConfig(ctx context.Context, patch CLIConfigPatch) (CLICo
 			return CLIConfigSnapshot{}, fmt.Errorf("set update-check: %w", err)
 		}
 	}
-	// Global, like the model defaults: a mission fires at the fleet, not a
-	// project. Written verbatim; names are validated where used (dispatch),
-	// so setting one before its agent exists is a stale pointer, not corruption.
+	// Global, like the model defaults. Written verbatim; names are validated at
+	// dispatch, so setting one before its agent exists is a stale pointer.
 	if patch.DefaultMissionAgent != nil {
 		if err := clikv.SetString(ctx, store, "default-mission-agent", strings.TrimSpace(*patch.DefaultMissionAgent)); err != nil {
 			return CLIConfigSnapshot{}, fmt.Errorf("set default-mission-agent: %w", err)
@@ -280,11 +272,6 @@ func readCLIConfigValue(ctx context.Context, store runtimetypes.Store, key strin
 	return strings.TrimSpace(val), true
 }
 
-// readWorkspaceCLIConfigValue reports what `contenox config get` would show
-// for key in workspaceID, plus whether a row backs it. It defers the scope
-// decision to clikv rather than re-deriving it, so `contenox state` cannot
-// report a different effective value than the readers that consume the
-// setting (an empty workspace row falls back to the global one there).
 func readWorkspaceCLIConfigValue(ctx context.Context, store runtimetypes.Store, workspaceID, key string) (string, string, bool) {
 	val, scope := clikv.ReadConfig(ctx, store, workspaceID, key)
 	if scope == "workspace" {
@@ -294,9 +281,6 @@ func readWorkspaceCLIConfigValue(ctx context.Context, store runtimetypes.Store, 
 	return val, scope, present
 }
 
-// normalizeDefaultThink validates/normalizes a default-think value the same
-// way `contenox config set default-think` does (see reasoning.Normalize).
-// Empty clears the override, letting the runtime's own "high" fallback apply.
 func normalizeDefaultThink(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {

@@ -1,8 +1,3 @@
-// mission_answer_bounds_test.go pins the bounded-delegation guarantee at the
-// mission_answer write. A session agent can reach a live askId from
-// mission_list or a delivered ask and call the tool unprompted, so the offer
-// path's check never runs for it; the envelope has to hold at the write or it
-// holds nowhere.
 package contenoxcli
 
 import (

@@ -11,23 +11,9 @@ import (
 	"github.com/contenox/contenox/librelay"
 )
 
-// FuzzReadFrame drives the decoder with arbitrary bytes. The decoder is the
-// only code in this repository that runs on input chosen by whatever is on the
-// far end of a relay connection, so its contract is stated as properties rather
-// than examples:
-//
-//  1. It never panics, on any input — malformed, truncated, oversized, or
-//     valid-JSON-but-nonsense.
-//  2. It never amplifies: the bytes it hands back across a whole stream stay
-//     bounded by the bytes it was given, so no input can make a receiver
-//     allocate more than the sender spent. (The absolute per-frame ceiling is
-//     asserted separately by TestUnit_ReaderOversizeIsTerminal and
-//     TestUnit_ReaderDoesNotAllocatePastTheLimit, which do not need a fuzzer.)
-//  3. Every frame it accepts is one the writer will accept back, so a frame
-//     cannot be received-but-unforwardable — that asymmetry would strand
-//     traffic at whichever hop is stricter than the one before it.
-//  4. Accepting a frame implies re-encode/re-decode is stable, which is what
-//     makes a relay's store-and-forward hop lossless.
+// FuzzReadFrame drives the decoder with arbitrary bytes, asserting that it
+// never panics, never amplifies, only accepts frames the writer accepts back,
+// and re-encodes/re-decodes stably.
 func FuzzReadFrame(f *testing.F) {
 	f.Add([]byte(`{"type":"relay.heartbeat","instance":"i1","id":"h1"}` + "\n"))
 	f.Add([]byte(`{"type":"acp.message","instance":"i1","session":"s1","payload":{"jsonrpc":"2.0","id":1}}` + "\n"))

@@ -9,7 +9,6 @@ import (
 
 type bedrockChatClient struct{ bedrockClient }
 
-// Chat implements modelrepo.LLMChatClient via the Bedrock Converse API.
 func (c *bedrockChatClient) Chat(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (modelrepo.ChatResult, error) {
 	reportErr, reportChange, end := c.tracker.Start(ctx, "chat", "bedrock", "model", c.modelName)
 	defer end()

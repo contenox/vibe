@@ -1,6 +1,7 @@
 ---
-title: The agentic loop
+title: "The agentic loop"
 description: The ReAct loop as contenox implements it — an authored task graph you copy and trim, not vendor plumbing you configure.
+order: 2
 ---
 
 # The agentic loop
@@ -9,7 +10,7 @@ In contenox the ReAct loop — model reasons, calls a tool, observes, reasons ag
 
 You do not have to author one to get one. [Declare an agent](/docs/guide/agents/) and contenox generates the chain behind it, staged the way the shipped ones are. This page is for reading that chain, and for the case where you write your own: a branch, a different model per step, a recovery path, a declared point where a human stands.
 
-It maps the loop as the shipped chains actually implement it, then shows how to derive your own. Authoring basics — tasks, handlers, transitions — are covered in [Writing a chain by hand](/docs/guide/first-chain/); this page is about loop engineering: the topology, the budgets, and the doctrine for adapting it.
+It maps the loop as the shipped chains actually implement it, then shows how to derive your own. Authoring basics — tasks, handlers, transitions — are covered in [Writing a chain by hand](/docs/guide/chains/writing-a-chain/); this page is about loop engineering: the topology, the budgets, and the doctrine for adapting it.
 
 ## Anatomy of one turn
 
@@ -151,7 +152,7 @@ The result is the minimal agentic loop — derived from the real template, compl
 }
 ```
 
-`contenox vet ./chain-agent-diffreview.json` must pass it — the linter checks handler signatures, dataflow across every `goto` and `on_failure` edge, and branches that can never fire. Drop it in `.contenox/` and it's discovered as agent `chain-agent-diffreview` ([chain files: naming, roles, and resolution](/docs/guide/chain-naming/)); fire it, and let its own `local_shell` run the `git diff` the system prompt asks for:
+`contenox vet ./chain-agent-diffreview.json` must pass it — the linter checks handler signatures, dataflow across every `goto` and `on_failure` edge, and branches that can never fire. Drop it in `.contenox/` and it's discovered as agent `chain-agent-diffreview` ([chain files: naming, roles, and resolution](/docs/guide/chains/naming/)); fire it, and let its own `local_shell` run the `git diff` the system prompt asks for:
 
 ```bash
 contenox mission fire chain-agent-diffreview "review the current diff" --wait
@@ -173,9 +174,9 @@ The production set is the template you copied — so "upgrading" the minimal loo
 
 ## Next
 
-- [Request routing](/docs/guide/request-routing/) — the layer above this one: how a `route` task picks which loop runs, and what a specialist carries beyond its prompt
-- [Writing a chain by hand](/docs/guide/first-chain/) — authoring basics: tasks, prompts, models, policies
-- [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) — where chain files live and what the `agent` role means
+- [Request routing](/docs/guide/chains/routing/) — the layer above this one: how a `route` task picks which loop runs, and what a specialist carries beyond its prompt
+- [Writing a chain by hand](/docs/guide/chains/writing-a-chain/) — authoring basics: tasks, prompts, models, policies
+- [Chain files: naming, roles, and resolution](/docs/guide/chains/naming/) — where chain files live and what the `agent` role means
 - [Transitions & branching](/docs/specification/transitions/) and [Handlers](/docs/specification/handlers/) — the full operator and handler reference
 - [HITL policies](/docs/guide/hitl/) — the approval envelope around the loop
 - [Chains](/docs/development/chains/) — the authored-contract framing behind all of this

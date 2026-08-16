@@ -465,15 +465,10 @@ func (h *HITLWrapper) askDurable(
 	return h.inner.Exec(ctx, startTime, input, debug, tools)
 }
 
-// guidanceReader reads the redirect a non-human denial attached to an ask.
 type guidanceReader interface {
 	AskGuidance(ctx context.Context, approvalID string) (by string, guidance string)
 }
 
-// denyMessage tells the caller what actually happened. The default text says a
-// user denied the call, which is false when an adjudicator did — and it drops
-// the redirect that denial carried, which is the whole point of denying with
-// guidance rather than just refusing.
 func (h *HITLWrapper) denyMessage(ctx context.Context, approvalID string) string {
 	reader, ok := h.recorder.(guidanceReader)
 	if !ok {
@@ -505,8 +500,7 @@ func (h *HITLWrapper) deliverLateVerdict(approvalID, toolName string, outcomeCh 
 	h.hitlLog(bg, "verdict entered", "tool", toolName, "approval_id", approvalID, "approved", out.approved, "late", true)
 	if err := h.responder.Respond(bg, approvalID, out.approved); err != nil {
 		if errors.Is(err, hitlservice.ErrApprovalAlreadyResolved) {
-			// A racing SweepExpired or external Respond may have already
-			// closed this row; the late answer is then moot, not an error.
+			// A racing sweep or external Respond may have closed this row already.
 			h.hitlLog(bg, "verdict entered", "tool", toolName, "approval_id", approvalID, "approved", out.approved, "late", true, "outcome", "already_resolved")
 			return
 		}
@@ -636,8 +630,7 @@ func (h *HITLWrapper) readCurrentContent(ctx context.Context, tools *taskengine.
 	}
 
 	if _, cached := result.(FsUnchangedResult); cached {
-		// Defence in depth: a status message must never stand in for the file
-		// the operator is about to overwrite.
+		// A status message must never stand in for the file being overwritten.
 		return "", fmt.Errorf("%w: read_file answered from its session cache", errDiffBaseUnavailable)
 	}
 	s, ok := result.(string)

@@ -2,7 +2,6 @@ package agentservice
 
 import "github.com/contenox/contenox/internal/kernel/taskengine"
 
-// trimHistoryChunked enforces the HistoryTrim message budget, cutting to budget minus one chunk (25%) so the kept prefix stays byte-identical across turns until it must move; leading system messages are pinned and the kept tail never opens on an orphaned "tool" message.
 func trimHistoryChunked(history []taskengine.Message, budget int) []taskengine.Message {
 	if budget <= 0 || len(history) <= budget {
 		return history

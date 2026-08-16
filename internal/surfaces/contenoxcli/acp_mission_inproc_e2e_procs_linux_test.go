@@ -11,8 +11,7 @@ import (
 )
 
 // childPIDs returns the pids of live processes whose parent is parentPid — the
-// dispatched unit subprocess(es) an editor spawned. Linux-only (the e2e env),
-// read straight from /proc.
+// dispatched unit subprocess(es) an editor spawned.
 func childPIDs(parentPid int) []int {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {

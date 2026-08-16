@@ -24,8 +24,6 @@ const AbandonedBySweepReason = "reclaimed: host process gone"
 
 const abandonedReportSummary = "Mission reclaimed: its host process is gone."
 
-// SweepAbandoned implements Service.SweepAbandoned: see its doc on the
-// interface.
 func (s *service) SweepAbandoned(ctx context.Context) (int, error) {
 	now := time.Now().UTC()
 	reclaimed := 0

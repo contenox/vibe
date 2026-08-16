@@ -18,7 +18,6 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-// closeTimeout bounds how long Handle.Close waits for the read loop to return.
 const closeTimeout = 5 * time.Second
 
 // ExternalACPAgent is the Agent implementation for
@@ -37,10 +36,9 @@ type ExternalACPAgent struct {
 	// nil is treated as libtracker.NoopTracker.
 	Tracker libtracker.ActivityTracker
 
-	// SelfSpawn marks this as the runtime re-invoking its own binary, not a
-	// foreign agent: it runs unsandboxed under the runtime's own capability
-	// grants and HITL gate. Set by the chain spawn, or inferred from
-	// selfInvocation — never by config or env.
+	// SelfSpawn marks this as the runtime re-invoking its own binary: it runs
+	// unsandboxed under the runtime's own grants and HITL gate. Never set by
+	// config or env.
 	SelfSpawn bool
 }
 
@@ -71,9 +69,6 @@ func (a *ExternalACPAgent) Connect(ctx context.Context, harness libacp.Client) (
 	}
 }
 
-// connectStdio spawns a.Config.Command and wires a connection to it over
-// stdin/stdout. ctx governs the whole subprocess lifetime (Spawn tears it
-// down on cancellation), so a long-lived agent needs a ctx the caller owns.
 func (a *ExternalACPAgent) connectStdio(ctx context.Context, harness libacp.Client) (*Handle, error) {
 	cmd, err := buildAgentCmd(ctx, a)
 	if err != nil {
@@ -119,18 +114,10 @@ func (a *ExternalACPAgent) connectStdio(ctx context.Context, harness libacp.Clie
 	return &Handle{Conn: conn, closeFn: closeFn}, nil
 }
 
-// sandboxDocsURL is surfaced in the preflight error when the sandbox cannot be built.
 const sandboxDocsURL = "https://contenox.com/docs/guide/agent-sandbox/"
 
-// sandboxCarveoutFile is the operator-authored necessity-list at
-// ~/.contenox/sandbox-carveouts.json that widens the wall. Absent means
-// offline-by-construction defaults; read from the operator's real home.
 const sandboxCarveoutFile = ".contenox/sandbox-carveouts.json"
 
-// buildAgentCmd assembles the confined *exec.Cmd for agent a: every agent
-// runs inside libsandbox's wall except a self-spawned unit (see SelfSpawn).
-// Fails closed if the wall cannot be built. Home is always the operator's
-// real home — Landlock still denies ~/.ssh, ~/.aws, ~/.contenox.
 func buildAgentCmd(ctx context.Context, a *ExternalACPAgent) (*exec.Cmd, error) {
 	// Self-spawn is exempt from the wall; see SelfSpawn.
 	if a.SelfSpawn || selfInvocation(a.Config.Command) {
@@ -164,25 +151,18 @@ func buildAgentCmd(ctx context.Context, a *ExternalACPAgent) (*exec.Cmd, error) 
 		Tracker:            tracker,
 	}
 
-	// Layer operator carve-outs on top: absent file = defaults only; a
-	// malformed one fails closed.
+	// An absent carve-out file means defaults only; a malformed one fails closed.
 	if err := applyCarveoutFile(filepath.Join(home, sandboxCarveoutFile), &spec); err != nil {
 		return nil, err
 	}
 
-	// The network wall is opt-in (needs unprivileged userns): on when Net
-	// carve-outs are named or CONTENOX_SANDBOX_NETWORK_WALL is set;
-	// otherwise Landlock still confines filesystem/exec but the network
-	// stays open. Fails closed where userns is unsupported.
+	// The network wall is opt-in (needs unprivileged userns); Landlock still
+	// confines filesystem and exec either way.
 	spec.NetworkWall = len(spec.Net) > 0 || networkWallOptIn()
 
 	return libsandbox.Command(ctx, spec, a.Config.Command, a.Config.Args...)
 }
 
-// selfInvocation reports whether command resolves to this running
-// executable — contenox spawning contenox, not confined (see SelfSpawn).
-// Identity is os.SameFile, not string equality; anything unresolved is
-// treated as not us, failing toward confinement.
 func selfInvocation(command string) bool {
 	command = strings.TrimSpace(command)
 	if command == "" {
@@ -210,10 +190,6 @@ func selfInvocation(command string) bool {
 	return os.SameFile(selfInfo, cmdInfo)
 }
 
-// selfSpawnCmd assembles the unconfined command for a self-spawned unit:
-// this binary with the parent's environment plus the config's vars, pinned
-// to Config.Cwd. Does not bind the command's lifetime to ctx — that is the
-// caller's job.
 func selfSpawnCmd(a *ExternalACPAgent) *exec.Cmd {
 	cmd := exec.Command(a.Config.Command, a.Config.Args...)
 	cmd.Dir = a.Config.Cwd
@@ -225,8 +201,6 @@ func selfSpawnCmd(a *ExternalACPAgent) *exec.Cmd {
 	return cmd
 }
 
-// networkWallOptIn reports whether CONTENOX_SANDBOX_NETWORK_WALL is set to a
-// truthy value. See buildAgentCmd.
 func networkWallOptIn() bool {
 	switch os.Getenv("CONTENOX_SANDBOX_NETWORK_WALL") {
 	case "1", "true", "TRUE", "yes", "on":
@@ -236,8 +210,6 @@ func networkWallOptIn() bool {
 	}
 }
 
-// defaultAgentCarveouts lists the read-only auth/config dirs every confined
-// agent gets; a missing dir is skipped, not an error.
 func defaultAgentCarveouts() []libsandbox.FSCarveout {
 	return []libsandbox.FSCarveout{
 		{Path: "~/.claude", Mode: libsandbox.ModeRO, Needs: "agent auth/config"},
@@ -246,8 +218,6 @@ func defaultAgentCarveouts() []libsandbox.FSCarveout {
 	}
 }
 
-// applyCarveoutFile loads carve-outs from path into spec; an absent file is
-// not an error, a malformed one fails closed.
 func applyCarveoutFile(path string, spec *libsandbox.Spec) error {
 	f, err := os.Open(path)
 	if err != nil {

@@ -43,9 +43,7 @@ type Result struct {
 	// the client since StopReason cannot express it; empty unless Suspended.
 	ApprovalID string
 	// DroppedContentKinds are the prompt content kinds the turn could not forward to
-	// the model, ridden on Result so a reattaching client (which resolves its prompt
-	// from here, not the original connection) still sees them; empty when the whole
-	// prompt was forwarded.
+	// the model, ridden on Result so a reattaching client still sees them.
 	DroppedContentKinds []string
 }
 

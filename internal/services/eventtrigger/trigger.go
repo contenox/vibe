@@ -1,11 +1,7 @@
-// Package eventtrigger routes durable events (internal/services/eventlog) to
-// the task chains operators configured to react to them. Triggers are
-// operator-authored trigger-*.json files discovered like every other system
-// file — workspace .contenox/ first, ~/.contenox fallback, same-named
-// workspace files shadow home copies. The dispatcher is a durable named
-// consumer: an NID cursor for catch-up, a firings table for at-least-once
-// dedup, and a hop guard against event→chain→event loops. Execution itself
-// is pluggable via ChainRunner — this package runs no chains.
+// Package eventtrigger routes durable events to the task chains operators
+// configured to react to them, declared in trigger-*.json files. The dispatcher
+// keeps an NID cursor for catch-up, a firings table for dedup, and a hop guard
+// against loops. Execution is pluggable via ChainRunner; this package runs no chains.
 package eventtrigger
 
 import (
@@ -95,11 +91,9 @@ type SkippedFile struct {
 	Reason string
 }
 
-// Load walks roots (precedence order) for trigger-*.json files and returns
-// the valid triggers. A basename seen in an earlier root shadows the same
-// basename in a later root (workspace shadows home); a duplicate trigger
-// name keeps the first definition. Malformed or unknown-type files are
-// skipped with a tracker report — never an error, never a crash.
+// Load walks roots in precedence order for trigger-*.json files and returns the
+// valid triggers. An earlier root shadows a later one by basename, and a
+// duplicate trigger name keeps the first definition. Malformed files are skipped.
 func Load(ctx context.Context, tracker libtracker.ActivityTracker, roots ...string) (LoadResult, error) {
 	return LoadKept(ctx, tracker, nil, roots...)
 }

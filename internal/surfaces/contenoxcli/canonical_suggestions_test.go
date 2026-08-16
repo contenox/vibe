@@ -10,8 +10,6 @@ import (
 
 // canonicalSuggestedModels is the single source of truth for the model names
 // the CLI suggests in help text, wizard defaults, and docs examples.
-// internal/services/setupcheck/canonical_suggestions_test.go duplicates the
-// values it needs — keep the two files in sync.
 var canonicalSuggestedModels = map[string]string{
 	"ollama":        "qwen3:8b",
 	"ollama-cloud":  "gpt-oss:20b",

@@ -9,22 +9,13 @@ import (
 	"github.com/contenox/contenox/libacp"
 )
 
-// planToolEventName is the fully-qualified tool name a mission_plan call
-// carries on its task event ("<provider>.<tool>"); matched as an exact string
-// so a differently-named provider can't collide via a suffix.
+// planToolEventName is the fully-qualified tool name a mission_plan call carries
+// on its task event.
 const planToolEventName = missiontools.ToolsProviderName + "." + missiontools.ToolNamePlan
 
-// planUpdateNotification projects a successful mission_plan tool event's
-// stored plan snapshot into a full-snapshot ACP `plan` session update, in
-// addition to the tool-call card events.go already emits for every tool event.
-//
-// The enum cast from missionservice to libacp is a safe plain string
-// conversion: the two enum sets are contracted byte-equal, pinned by
-// TestUnit_PlanProjection_EnumParity.
-//
-// Returns (_, false) — emit nothing — when the event is not a successful,
-// parseable mission_plan call. The durable plan is unaffected either way; the
-// next revision re-projects the full snapshot.
+// planUpdateNotification projects a successful mission_plan tool event's stored
+// plan snapshot into a full-snapshot ACP plan session update. The enum cast to
+// libacp is byte-equal by contract, pinned by TestUnit_PlanProjection_EnumParity.
 func planUpdateNotification(sid libacp.SessionID, ev taskengine.TaskEvent) (libacp.SessionNotification, bool) {
 	if ev.ToolName != planToolEventName || ev.Error != "" {
 		return libacp.SessionNotification{}, false
@@ -36,8 +27,7 @@ func planUpdateNotification(sid libacp.SessionID, ev taskengine.TaskEvent) (liba
 	if err := json.Unmarshal([]byte(ev.Content), &plan); err != nil {
 		return libacp.SessionNotification{}, false
 	}
-	// SetPlan rejects an empty plan, so zero entries here means the content
-	// wasn't really a plan revision — skip rather than emit an empty update.
+	// SetPlan rejects an empty plan, so zero entries means this wasn't one.
 	if len(plan.Entries) == 0 {
 		return libacp.SessionNotification{}, false
 	}

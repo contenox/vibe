@@ -11,47 +11,13 @@ import (
 	"github.com/contenox/contenox/libacp"
 )
 
-// parkedAskReofferLimit bounds how many parked approvals one attach
-// re-presents. A session with more open asks than this has a problem no card
-// stack solves; the rest stay answerable from a terminal.
 const parkedAskReofferLimit = 20
 
-// parkedAskListTimeout bounds the durable lookup an attach triggers. The
-// lookup runs off the session/load response entirely, so this is not a
-// deadline the client waits on — it exists so a stalled database cannot leave
-// a goroutine pinned for the life of the connection.
 const parkedAskListTimeout = 5 * time.Second
 
-// reofferParkedAsks re-presents every approval this session is still parked
-// on to the connection that just attached.
-//
-// # Why an attach has to do this at all
-//
-// An ask outlives the goroutine that raised it. When
-// localtools.ApprovalParkWindow elapses with no verdict, the run checkpoints
-// and releases its process, and the ask() call that was driving the card is
-// abandoned — which reaches the client as a cancelled request, so the card
-// disappears. The durable row stays pending and the run stays resumable, but
-// nothing re-presents the question. A client attaching a second later, or
-// reconnecting an hour later, sees a session that has simply stopped.
-//
-// # Where it is wired, and where it is not
-//
-// LoadSession and ResumeSession, beside reattachNativeTurn: those are the
-// three things a returning client needs re-established — the transcript, the
-// turn in flight, and the question the turn is parked on. NewSession is not
-// wired: it mints a fresh contenox session id, and no ask can already name a
-// session that did not exist when the ask was recorded. Wiring it would buy a
-// guaranteed-empty query on the hottest path.
-//
-// # It cannot make an attach slow or fallible
-//
-// Everything after the response is scheduled: the lookup runs on its own
-// goroutine, bound to the connection rather than to the request, and each
-// card blocks on its own. A lookup that fails or returns nothing is dropped —
-// session/load succeeds either way, because someone reconnecting on a phone
-// must not be held behind a database query, and refusing the load would cost
-// them the transcript as well as the card.
+// reofferParkedAsks re-presents every approval this session is still parked on to
+// the connection that just attached. Everything runs after the response, on its
+// own goroutine, so an attach is never slowed or failed by it.
 func (t *Transport) reofferParkedAsks(ctx context.Context, sid libacp.SessionID, contenoxSessionID string) {
 	if t.deps.Asks == nil || t.conn == nil || contenoxSessionID == "" {
 		return
@@ -61,8 +27,6 @@ func (t *Transport) reofferParkedAsks(ctx context.Context, sid libacp.SessionID,
 	})
 }
 
-// offerParkedAsks reads contenoxSessionID's open asks and raises one card per
-// live row on this connection. Runs detached from the attach request.
 func (t *Transport) offerParkedAsks(sid libacp.SessionID, contenoxSessionID string) {
 	base := t.connContext()
 	reportErr, reportChange, end := t.tracker().Start(base, "reoffer", "acp_parked_asks", "session_id", string(sid))
@@ -91,13 +55,8 @@ func (t *Transport) offerParkedAsks(sid libacp.SessionID, contenoxSessionID stri
 	reportChange(string(sid), map[string]any{"pending": len(rows), "offered": offered})
 }
 
-// offerParkedAsk raises one re-offered permission card and records whatever
-// answer comes back through the durable responder.
-//
-// The verdict goes to AskInbox.Respond, never to a channel this surface owns:
-// the original waiter is gone, so Respond's resume hook is what actually
-// restarts the checkpointed run. An answer that resolved only the card would
-// be worse than no card at all.
+// offerParkedAsk raises one re-offered permission card and records the answer
+// through AskInbox.Respond, whose resume hook restarts the checkpointed run.
 //
 // A verdict refused because the ask was already resolved elsewhere — the
 // operator answered on another screen, or the sweeper applied OnTimeout — is

@@ -6,15 +6,9 @@ import (
 	"github.com/contenox/contenox/libbus"
 )
 
-// SubscribeMessenger triggers r (see Trigger) every time a message is
-// published to subject on bus, so a Job chain can react to an external
-// event — e.g. another component publishing "process.myproc.running" —
-// through this codebase's existing pub/sub abstraction (libbus.Messenger)
-// rather than a bespoke event mechanism.
-//
-// The subscription is torn down automatically when ctx is done (see
-// libbus.Messenger.Stream); the returned Subscription can also be used to
-// unsubscribe earlier.
+// SubscribeMessenger triggers r every time a message is published to subject on
+// bus. The subscription is torn down when ctx is done, or earlier via the
+// returned Subscription.
 func (r *Runner) SubscribeMessenger(ctx context.Context, bus libbus.Messenger, subject string) (libbus.Subscription, error) {
 	ch := make(chan []byte, 1)
 	sub, err := bus.Stream(ctx, subject, ch)

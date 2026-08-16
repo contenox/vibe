@@ -1,8 +1,5 @@
-// Package acpexec spawns a subprocess and wires its stdin/stdout together as
-// a single io.ReadWriteCloser — the transport shape
-// libacp.NewAgentSideConnection and libacp.NewClientSideConnection expect —
-// so an ACP peer (an editor, or a test driving a reference binary) can be
-// reached over stdio without hand-rolled pipe/shutdown bookkeeping.
+// Package acpexec spawns a subprocess and wires its stdin/stdout together as a
+// single io.ReadWriteCloser, the transport shape libacp's connections expect.
 package acpexec
 
 import (
@@ -39,10 +36,8 @@ func WithKillGrace(d time.Duration) Option {
 	return func(c *config) { c.killGrace = d }
 }
 
-// Process is a spawned subprocess wired up as an io.ReadWriteCloser: Read
-// pulls from its stdout, Write pushes to its stdin, Close begins shutdown;
-// Spawn returns this concrete type, not a bare io.ReadWriteCloser, so callers
-// can still reach Wait's exit error.
+// Process is a spawned subprocess wired up as an io.ReadWriteCloser: Read pulls
+// from its stdout, Write pushes to its stdin, Close begins shutdown.
 type Process struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
@@ -79,8 +74,7 @@ func Spawn(ctx context.Context, cmd *exec.Cmd, opts ...Option) (*Process, error)
 	cmd.Stderr = cfg.stderr
 
 	// Own process group (unix) so Close's kill escalation takes down forked
-	// children too (e.g. npx/uvx wrapper commands) — a surviving grandchild
-	// would leak and hold our pipes open, blocking Wait.
+	// children too; a surviving grandchild would hold our pipes open.
 	setProcessGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
@@ -95,9 +89,8 @@ func Spawn(ctx context.Context, cmd *exec.Cmd, opts ...Option) (*Process, error)
 		waitDone: make(chan struct{}),
 	}
 
-	// This goroutine owns the only call to cmd.Wait: exec.Cmd.Wait closes the
-	// pipes on exit, so a single always-running Wait must serve every caller
-	// (Read draining stdout, Close waiting on waitDone) to stay safe.
+	// This goroutine owns the only call to cmd.Wait, which closes the pipes on
+	// exit.
 	go func() {
 		p.waitErr = cmd.Wait()
 		close(p.waitDone)
@@ -147,9 +140,7 @@ func (p *Process) Close() error {
 		_ = p.stdout.Close()
 		p.closeErr = p.waitErr
 
-		// Only an exit status caused by this method's own kill is suppressed
-		// (see exitFromKill); a process that died with a bad status on its
-		// own still surfaces that error even if the kill branch also ran.
+		// Only an exit status caused by this method's own kill is suppressed.
 		if killed && exitFromKill(p.waitErr) {
 			p.closeErr = nil
 		}

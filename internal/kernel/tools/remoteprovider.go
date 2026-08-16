@@ -62,8 +62,6 @@ func (p *PersistentRepo) insecureClient() *http.Client {
 	}
 }
 
-// protocolFor returns a ToolProtocol configured to load the OpenAPI spec from specURL
-// when non-empty. Falls back to the stored toolProtocol (backward compatible).
 func (p *PersistentRepo) protocolFor(specURL string) ToolProtocol {
 	if specURL == "" {
 		return p.toolProtocol
@@ -122,7 +120,6 @@ func (p *PersistentRepo) Exec(
 	return out, dt, execErr
 }
 
-// execMCPTools routes a tool call to the persistent session worker via NATS.
 func (p *PersistentRepo) execMCPTools(
 	ctx context.Context,
 	srv *runtimetypes.MCPServer,

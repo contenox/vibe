@@ -5,7 +5,8 @@ import (
 	"strings"
 )
 
-// OverlayEnv returns env with the pairs in set applied on top (set always wins), de-duplicated by name and sorted; malformed entries (no "=") are dropped and an empty set returns env unchanged.
+// OverlayEnv returns env with the pairs in set applied on top, de-duplicated by
+// name and sorted. Malformed entries are dropped.
 func OverlayEnv(env []string, set map[string]string) []string {
 	if len(set) == 0 {
 		return env

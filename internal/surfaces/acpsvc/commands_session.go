@@ -17,9 +17,6 @@ import (
 
 const compactDefaultKeep = 8
 
-// handleClear wipes the session's conversation history in place. The ACP
-// session keeps its identity (and the client keeps its window); only the
-// stored messages are removed.
 func (t *Transport) handleClear(ctx context.Context, _ libacp.SessionID, sess *sessionEntry) (string, error) {
 	mgr := chatservice.NewManager(sess.WorkspaceID)
 
@@ -37,10 +34,8 @@ func (t *Transport) handleClear(ctx context.Context, _ libacp.SessionID, sess *s
 	return "Conversation history cleared.", nil
 }
 
-// handleRename sets the session's display title, stored server-side so
-// session/list and session_info_update show it to every surface, not just
-// the client that typed it. No argument reports the current title; "-"
-// clears the override back to the derived heuristic.
+// handleRename sets the session's display title; no argument reports the current
+// one and "-" clears the override.
 func (t *Transport) handleRename(ctx context.Context, sess *sessionEntry, args string) (string, error) {
 	if t.deps.DB == nil {
 		return "", fmt.Errorf("renaming is unavailable without a database")
@@ -71,12 +66,9 @@ func (t *Transport) handleRename(ctx context.Context, sess *sessionEntry, args s
 	return fmt.Sprintf("Session renamed to %s.", title), nil
 }
 
-// handleNewSessionCommand starts a second session in this workspace and
-// reports its id. It runs the same Transport.NewSession the client's own
-// session/new runs, so the new session is durable, listed by /sessions, and
-// loadable from any client — the one thing it cannot do is move this client
-// onto it: ACP has no agent→client "switch session" message, so the switch
-// stays the client's act (session/load, or its session picker).
+// handleNewSessionCommand starts a second session in this workspace and reports
+// its id. ACP has no agent-to-client switch message, so moving onto it stays the
+// client's act.
 func (t *Transport) handleNewSessionCommand(ctx context.Context, sess *sessionEntry) (string, error) {
 	if t.deps.DB == nil || t.deps.Engine == nil {
 		return "", errSetupRequired()
@@ -93,10 +85,8 @@ func (t *Transport) handleNewSessionCommand(ctx context.Context, sess *sessionEn
 		resp.SessionID, cwd, resp.SessionID), nil
 }
 
-// handleSessions lists this workspace's sessions — the roster session/list
-// serves, rendered for a client with no session UI of its own. Titles follow
-// the same precedence session/list uses (sessionListTitle), so the two
-// surfaces never disagree about what a session is called.
+// handleSessions renders session/list's roster for a client with no session UI
+// of its own.
 func (t *Transport) handleSessions(ctx context.Context, sess *sessionEntry) (string, error) {
 	if t.deps.DB == nil {
 		return "", fmt.Errorf("listing sessions is unavailable without a database")
@@ -122,8 +112,7 @@ func (t *Transport) handleSessions(ctx context.Context, sess *sessionEntry) (str
 		if info.SessionID == current {
 			marker = "* "
 		}
-		// session/list falls back to the id as the title; printing it twice
-		// would read as two different facts.
+		// session/list falls back to the id as the title.
 		title := info.Title
 		if title == string(info.SessionID) {
 			title = "(no title yet)"
@@ -144,9 +133,8 @@ func (t *Transport) handleSessions(ctx context.Context, sess *sessionEntry) (str
 	return strings.TrimRight(b.String(), "\n"), nil
 }
 
-// handleCompact summarizes older history into a single message, reclaiming
-// context while keeping the last `keep` messages verbatim. It reuses the same
-// chatservice.CompactHistory core the CLI's `session fork --summary` uses.
+// handleCompact summarizes older history into a single message, keeping the last
+// `keep` messages verbatim.
 func (t *Transport) handleCompact(ctx context.Context, _ libacp.SessionID, sess *sessionEntry, args string) (string, error) {
 	keep := compactDefaultKeep
 	if s := strings.TrimSpace(args); s != "" {
@@ -180,7 +168,6 @@ func (t *Transport) handleCompact(ctx context.Context, _ libacp.SessionID, sess 
 		return "", err
 	}
 
-	// Replace the stored history with the compacted set in place.
 	exec, commit, release, err := t.deps.DB.WithTransaction(ctx)
 	if err != nil {
 		return "", fmt.Errorf("start transaction: %w", err)
@@ -200,9 +187,7 @@ func (t *Transport) handleCompact(ctx context.Context, _ libacp.SessionID, sess 
 }
 
 // loadCompactChain reads chain-compact-default.json from the active .contenox
-// directory, falling back to ~/.contenox. It does not import the CLI's resolver
-// (that would create an import cycle); this is a plain file lookup, not
-// duplicated logic.
+// directory, falling back to ~/.contenox.
 func (t *Transport) loadCompactChain() (*taskengine.TaskChainDefinition, error) {
 	const name = "chain-compact-default.json"
 	var candidates []string

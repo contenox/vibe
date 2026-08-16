@@ -66,7 +66,6 @@ func New(dbInstance libdb.DBManager, toolsRegistry taskengine.ToolsProvider, tra
 	}
 }
 
-// GetSchemasForSupportedTools delegates the call to the tools registry.
 func (s *service) GetSchemasForSupportedTools(ctx context.Context) (map[string]*openapi3.T, error) {
 	if s.toolsRegistry == nil {
 		return nil, errors.New("tools registry is not configured for this service")
@@ -74,7 +73,6 @@ func (s *service) GetSchemasForSupportedTools(ctx context.Context) (map[string]*
 	return s.toolsRegistry.GetSchemasForSupportedTools(ctx)
 }
 
-// ListLocalTools returns all locally registered tools
 func (s *service) ListLocalTools(ctx context.Context) ([]LocalTools, error) {
 	reportErr, reportChange, end := s.tracker.Start(ctx, "list_tools", "local_tools")
 	defer end()
@@ -152,7 +150,6 @@ func (s *service) toolsSource(ctx context.Context, name string) string {
 	return "builtin"
 }
 
-// shortenToolsListError produces a short UI-safe message from a tool-listing failure.
 func shortenToolsListError(err error) string {
 	if err == nil {
 		return ""
@@ -235,8 +232,6 @@ func validate(tools *runtimetypes.RemoteTools) error {
 	return nil
 }
 
-// isValidSpecSource reports whether s is an acceptable spec source:
-// an http/https URL or a file:// URI (absolute path stored by the CLI).
 func isValidSpecSource(s string) bool {
 	return strings.HasPrefix(s, "http://") ||
 		strings.HasPrefix(s, "https://") ||

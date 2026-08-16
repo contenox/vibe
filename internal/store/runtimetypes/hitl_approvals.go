@@ -88,7 +88,6 @@ func (s *store) scanHITLApproval(ctx context.Context, query string, arg any) (*H
 	return &a, nil
 }
 
-// ResolveHITLApproval atomically transitions id from pending to state via a compare-and-swap, returning libdb.ErrNotFound when id does not exist or is no longer pending.
 func (s *store) ResolveHITLApproval(ctx context.Context, id string, state HITLApprovalState, resolution json.RawMessage, resolvedAt time.Time) error {
 	result, err := s.Exec.ExecContext(ctx, `
 		UPDATE hitl_approvals
@@ -117,7 +116,6 @@ type AgentAnswerBound struct {
 	Max int
 }
 
-// ResolveHITLApprovalWithinBound is ResolveHITLApproval's pending-state CAS with bound's count predicate carried in the same WHERE clause, returning libdb.ErrNotFound when id does not exist, is no longer pending, or the bound is already spent.
 func (s *store) ResolveHITLApprovalWithinBound(ctx context.Context, id string, bound AgentAnswerBound, state HITLApprovalState, resolution json.RawMessage, resolvedAt time.Time) error {
 	result, err := s.Exec.ExecContext(ctx, `
 		UPDATE hitl_approvals
@@ -144,8 +142,6 @@ func nullableJSON(raw json.RawMessage) any {
 	return string(raw)
 }
 
-// ListExpiredHITLApprovals returns pending approvals whose deadline has
-// passed as of asOf, oldest deadline first — the batch a sweeper resolves.
 func (s *store) ListExpiredHITLApprovals(ctx context.Context, asOf time.Time, limit int) ([]*HITLApproval, error) {
 	if limit <= 0 || limit > MAXLIMIT {
 		limit = MAXLIMIT
@@ -163,7 +159,6 @@ func (s *store) ListExpiredHITLApprovals(ctx context.Context, asOf time.Time, li
 	return scanHITLApprovalRows(rows)
 }
 
-// ListHITLApprovals returns approvals in state, newest first.
 func (s *store) ListHITLApprovals(ctx context.Context, state HITLApprovalState, createdAtCursor *time.Time, limit int) ([]*HITLApproval, error) {
 	cursor := time.Now().UTC()
 	if createdAtCursor != nil {
@@ -188,7 +183,6 @@ func (s *store) ListHITLApprovals(ctx context.Context, state HITLApprovalState, 
 	return scanHITLApprovalRows(rows)
 }
 
-// ListHITLApprovalsForMission returns every ask raised by missionID's unit, newest first, in any state.
 func (s *store) ListHITLApprovalsForMission(ctx context.Context, missionID string, limit int) ([]*HITLApproval, error) {
 	if limit > MAXLIMIT {
 		return nil, ErrLimitParamExceeded
@@ -208,7 +202,6 @@ func (s *store) ListHITLApprovalsForMission(ctx context.Context, missionID strin
 	return scanHITLApprovalRows(rows)
 }
 
-// ListPendingHITLApprovalsForSession returns sessionID's unanswered asks, newest first; an empty sessionID matches nothing rather than every unattributed ask.
 func (s *store) ListPendingHITLApprovalsForSession(ctx context.Context, sessionID string, limit int) ([]*HITLApproval, error) {
 	if limit > MAXLIMIT {
 		return nil, ErrLimitParamExceeded

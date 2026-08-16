@@ -153,14 +153,16 @@ func applyLandlock(plan isolationPlan) error {
 		}
 	}
 
-	// NO_NEW_PRIVS is a precondition of landlock_restrict_self for an unprivileged process, and it also seals the wall against setuid re-privileging.
+	// NO_NEW_PRIVS is a precondition of landlock_restrict_self, and seals the
+	// wall against setuid re-privileging.
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return fmt.Errorf("set no_new_privs: %w", err)
 	}
 	return landlockRestrictSelf(rulesetFD)
 }
 
-// ErrLandlockUnsupported reports that the running kernel exposes no usable Landlock filesystem ABI; wrapped in ErrIsolation, it fails closed rather than running the agent unconfined.
+// ErrLandlockUnsupported reports that the running kernel exposes no usable
+// Landlock filesystem ABI; it fails closed rather than running unconfined.
 var ErrLandlockUnsupported = errors.New("libsandbox: landlock unsupported by kernel")
 
 func landlockABI() (int, error) {

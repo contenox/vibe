@@ -1,6 +1,7 @@
 ---
 title: Handlers
 description: Every task handler type and the fields valid for each.
+order: 1
 ---
 
 # Handlers

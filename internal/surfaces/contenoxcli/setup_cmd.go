@@ -304,10 +304,10 @@ func reportSetupReadiness(ctx context.Context, cmd *cobra.Command, db libdb.DBMa
 
 func printSetupNextCommand(out io.Writer, tty bool) {
 	if tty {
-		fmt.Fprintln(out, "  Next: run `contenox \"your first prompt\"`, or point an ACP client at `contenox acp`.")
+		fmt.Fprintln(out, "  Next: point an ACP client at `contenox acp`, or fire an agent with `contenox mission fire`.")
 		return
 	}
-	fmt.Fprintln(out, "  Next: run `contenox \"your first prompt\"`.")
+	fmt.Fprintln(out, "  Next: point an ACP client at `contenox acp`.")
 }
 
 func stdoutIsTerminal() bool {
@@ -386,8 +386,7 @@ func promptOllamaModel(out io.Writer, scanner *bufio.Scanner, defaultModel strin
 
 	models := probe.ChatModels()
 	if len(models) == 0 {
-		// Covers both "nothing pulled" and "listing degraded" — the probe does
-		// not distinguish them, so the message must be true of either.
+		// The probe does not distinguish "nothing pulled" from "listing degraded".
 		fmt.Fprintln(out, "  No chat-capable model reported by this daemon.")
 		fmt.Fprintf(out, "    Pull one with: ollama pull %s — or enter a model id below.\n", setupcheck.DefaultOllamaSuggestModel)
 		fmt.Fprintln(out, "")

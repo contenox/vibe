@@ -81,7 +81,6 @@ func (e *Evaluator) Verdict(ctx context.Context, rootRelPath string, isDir bool)
 	return v
 }
 
-// interestingReason explains a non-allow verdict; allow returns "".
 func interestingReason(res hitlservice.EvaluationResult) string {
 	if res.Action == hitlservice.ActionAllow {
 		return ""

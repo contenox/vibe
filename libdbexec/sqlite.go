@@ -12,41 +12,19 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// sqliteDBManager implements the DBManager interface for SQLite.
-// Use for local single-process mode (Contenox Local); the server keeps using Postgres.
 type sqliteDBManager struct {
 	dbInstance *sql.DB
 }
 
-// NewSQLiteDBManager creates a new DBManager for SQLite.
-// path is the database file path (e.g. "./.contenox/local.db" or "file:local.db").
-// The parent directory is created if missing. schema is applied on open (e.g. runtimetypes.SchemaSQLite).
-//
-// It is NewSQLiteDBManagerWithOptions with a zero SQLiteOptions, which is
-// defined to reproduce this constructor's DSN and pool configuration exactly.
-// Callers needing synchronous, cache_size, or pool limits use that constructor.
+// NewSQLiteDBManager creates a DBManager for the SQLite database at path,
+// creating the parent directory if missing and applying schema on open.
 func NewSQLiteDBManager(ctx context.Context, path string, schema string) (DBManager, error) {
 	return NewSQLiteDBManagerWithOptions(ctx, path, schema, SQLiteOptions{})
 }
 
-// NewSQLiteDBManagerWithOptions creates a DBManager for SQLite tuned by opts.
-// path and schema behave as in NewSQLiteDBManager; a zero opts is byte-for-byte
-// equivalent to it.
-//
-// opts is validated before anything is opened, so an unsafe combination such as
-// a reduced synchronous level outside WAL fails here rather than silently
-// degrading durability. See SQLiteOptions for what each zero value means.
-//
-// Capping SQLiteOptions.MaxOpenConns suits a single-writer database on
-// network-attached storage, but database/sql does not distinguish readers from
-// writers: a cap of 1 serialises every query, forfeits WAL's concurrent-reader
-// advantage in-process, lets one slow query stall all others, and turns any
-// code path that issues a query on this DBManager while holding one of its
-// transactions open into a deadlock instead of an error. busy_timeout stays
-// load-bearing regardless of the cap, because it governs contention this
-// process cannot see: another pod during a Recreate rollout, a Litestream
-// sidecar or backup tool on the same file, WAL checkpointing, and any second
-// DBManager over the same path.
+// NewSQLiteDBManagerWithOptions creates a DBManager for SQLite tuned by opts,
+// which is validated before anything is opened. A zero opts is equivalent to
+// NewSQLiteDBManager.
 func NewSQLiteDBManagerWithOptions(ctx context.Context, path string, schema string, opts SQLiteOptions) (DBManager, error) {
 	if err := opts.validate(); err != nil {
 		return nil, err
@@ -67,13 +45,12 @@ func NewSQLiteDBManagerWithOptions(ctx context.Context, path string, schema stri
 	}
 
 	if schema != "" {
-		// Execute one statement at a time so an ALTER TABLE failing because a column
-		// already exists (upgraded DB) skips only that statement; later migrations still run.
+		// One statement at a time so an already-applied ALTER TABLE skips only itself.
 		for _, stmt := range splitSQLStatements(schema) {
 			if _, err = db.ExecContext(ctx, stmt); err != nil {
 				msg := err.Error()
 				if strings.Contains(msg, "duplicate column name") || strings.Contains(msg, "already exists") {
-					continue // idempotent: column was added by a previous run
+					continue
 				}
 				_ = db.Close()
 				return nil, fmt.Errorf("failed to initialize sqlite schema (stmt: %q): %w", stmt, translateSQLiteError(err))

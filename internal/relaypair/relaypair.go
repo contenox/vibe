@@ -24,12 +24,10 @@ import (
 // EndpointEnv overrides the relay to pair with.
 const EndpointEnv = "CONTENOX_RELAY_ENDPOINT"
 
-// DefaultEndpoint is the hosted relay, shipped in the binary; a self-hosted
-// relay overrides it and is verified against its own key.
+// DefaultEndpoint is the hosted relay, shipped in the binary.
 const DefaultEndpoint = "https://relay.contenox.com"
 
-// DefaultAppEndpoint is where a human signs in to the hosted service: the
-// app's canonical hostname.
+// DefaultAppEndpoint is where a human signs in to the hosted service.
 const DefaultAppEndpoint = "https://app.contenox.com"
 
 // PinnedRelayPublicKey is the hosted relay's Ed25519 identity key, base64,
@@ -59,15 +57,9 @@ func Endpoint(explicit string) string {
 	return DefaultEndpoint
 }
 
-// AppOrigin reduces a relay endpoint to the origin (scheme://host) a human
-// opens in a browser: the hosted relay maps to [DefaultAppEndpoint], and a
-// self-hosted relay serves its own app at its own origin. Any path the
-// endpoint was configured with is dropped, because the app's routes hang off
-// the root.
-//
-// It lives here rather than beside a caller because both the session surface
-// and the CLI print app links, and two derivations of the same origin is one
-// more place for them to disagree.
+// AppOrigin reduces a relay endpoint to the origin (scheme://host) a human opens
+// in a browser: the hosted relay maps to [DefaultAppEndpoint], a self-hosted
+// relay to its own origin. Any configured path is dropped.
 func AppOrigin(endpoint string) (string, error) {
 	if endpoint == DefaultEndpoint {
 		endpoint = DefaultAppEndpoint
@@ -83,7 +75,7 @@ const httpTimeout = 30 * time.Second
 
 // Failures a caller distinguishes.
 var (
-	// ErrNoEndpoint reports no relay configured: a setup fault, not a bad key.
+	// ErrNoEndpoint reports no relay configured.
 	ErrNoEndpoint = errors.New("relaypair: no relay endpoint configured")
 	// ErrKeyRejected reports the relay refused the key, wrapping its message.
 	ErrKeyRejected = errors.New("relaypair: the relay refused the pairing key")
@@ -159,7 +151,6 @@ func Redeem(ctx context.Context, client *http.Client, endpoint, key, instanceNam
 		return zero, fmt.Errorf("%w: it returned no public key, so this machine "+
 			"would have no way to tell that relay from any other", ErrRelayUnusable)
 	}
-	// Parsed here, not on first dial, so an unusable key fails while a human is present.
 	if _, err := librelay.ParsePublicKey(out.RelayPublicKey); err != nil {
 		return zero, fmt.Errorf("%w: its public key is unusable: %v", ErrRelayUnusable, err)
 	}

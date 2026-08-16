@@ -78,7 +78,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	o.EffectiveDB = dbPath
 	o.EffectiveSkipBackendCycle, _ = cmd.Flags().GetBool("skip-cycle")
 
-	// Built directly (instead of via ComputeReadiness) so the synced runtime state is readable for the vision summary without a second backend cycle.
+	// Built directly rather than via ComputeReadiness so the synced runtime state
+	// is readable without a second backend cycle.
 	engine, err := BuildEngine(ctx, db, o)
 	if err != nil {
 		return fmt.Errorf("failed to build engine: %w", err)
@@ -89,14 +90,12 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	vision := visionSummaryFromState(engine.State.Get(ctx), res.DefaultModel)
 	engine.Stop()
 
-	// Written to stderr on the --json path so stdout stays a single parseable
-	// payload.
+	// stderr on the --json path so stdout stays a single parseable payload.
 	bundleW := cmd.OutOrStdout()
 
 	jsonOut, _ := cmd.Flags().GetBool("json")
 	if jsonOut {
-		// No sweep on the JSON path: the payload has no field to report the
-		// count in, and a mutation a diagnostic cannot mention stays silent.
+		// No sweep on the JSON path: the payload has no field to report it in.
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(res); err != nil {
@@ -111,7 +110,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	printWorkspaceShadowNote(cmd.OutOrStdout(), contenoxDir, triggerShadowNames(o.EffectiveOptInBeta, contenoxDir))
 	printVisionSummary(cmd.OutOrStdout(), vision)
 	if o.EffectiveOptInBeta {
-		fmt.Fprintln(cmd.OutOrStdout(), "Beta features enabled (opt-in-beta): shell_session, agent roster, event triggers")
+		fmt.Fprintln(cmd.OutOrStdout(), "Beta features enabled (opt-in-beta): agent roster, event triggers")
 		printLoadedTriggers(ctx, cmd.OutOrStdout(), contenoxDir)
 		printFiringTrouble(ctx, cmd.OutOrStdout(), db.WithoutTransaction(), ResolveWorkspaceID(contenoxDir))
 	}
@@ -220,8 +219,7 @@ func printWorkspaceShadowNote(w io.Writer, contenoxDir string, extra []string) {
 		}
 		homePath := filepath.Join(home, name)
 		if _, err := os.Stat(homePath); err != nil {
-			// Shipped chains live under system/; a workspace copy shadows
-			// those too, and not saying so would hide a real override.
+			// Shipped chains live under system/; a workspace copy shadows those too.
 			homePath = filepath.Join(systemDir(home), name)
 			if _, err := os.Stat(homePath); err != nil {
 				continue
@@ -258,8 +256,7 @@ func doctorVerdict(res setupcheck.Result) (ready bool, reason, next string) {
 			reason = iss.Message
 		}
 		if iss.CLICommand != "" {
-			// The highest-ranked issue that names its own fix wins the "Next"
-			// line even when a blocker above it had none.
+			// The highest-ranked issue that names its own fix wins the "Next" line.
 			next = iss.CLICommand
 			break
 		}
@@ -270,7 +267,7 @@ func doctorVerdict(res setupcheck.Result) (ready bool, reason, next string) {
 func printDoctorVerdict(w io.Writer, res setupcheck.Result) {
 	ready, reason, next := doctorVerdict(res)
 	if ready {
-		fmt.Fprintln(w, "Ready: yes — chat now with `contenox \"your prompt\"`.")
+		fmt.Fprintln(w, "Ready: yes — point an ACP client at `contenox acp`, or fire an agent with `contenox mission fire`.")
 		fmt.Fprintln(w, "")
 		return
 	}

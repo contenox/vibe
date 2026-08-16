@@ -36,10 +36,9 @@ func permissionRequestFor(askID string) libacp.RequestPermissionRequest {
 }
 
 // TestUnit_AttachAskRecovery_CarriesDeadlineAndRecoveryCommand pins what a
-// parked permission card needs to stay actionable: the ask's own deadline (so
-// a client can count down), the verdict that lands at it, and the command that
-// answers it from any other process. The existing approvalflow envelope must
-// survive the merge — clients parse one object, not two.
+// parked permission card needs to stay actionable: the ask's own deadline (so a
+// client can count down), the verdict that lands at it, and the command that
+// answers it from any other process.
 func TestUnit_AttachAskRecovery_CarriesDeadlineAndRecoveryCommand(t *testing.T) {
 	tr, db := newRecoveryTestTransport(t)
 	expires := time.Now().UTC().Add(42 * time.Minute).Truncate(time.Second)

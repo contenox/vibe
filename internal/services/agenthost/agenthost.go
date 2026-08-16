@@ -1,7 +1,5 @@
 // Package agenthost is the runtime's client/host-role primitive for driving
-// another ACP agent over stdio, the way an editor spawns an agent binary and
-// drives it as a client. The harness (the libacp.Client callback surface) is
-// always supplied by the caller and never assembled inside this package.
+// another ACP agent over stdio. The harness is always supplied by the caller.
 package agenthost
 
 import (

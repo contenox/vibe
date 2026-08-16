@@ -30,7 +30,7 @@ widerrufbar.
   einer Config auf der Platte.
 - **Der Agent sieht, was du gewährst — nicht, was du hast.** Jede
   agent-erreichbare Shell bekommt eine
-  [bereinigte Least-Privilege-Umgebung](/docs/guide/environment-scrubbing/),
+  [bereinigte Least-Privilege-Umgebung](/docs/guide/confinement/environment/),
   Tools sind pro Aufruf allowlistet, und Sessions laufen nur in den
   Workspace-Roots, die du konfiguriert hast — dem Startverzeichnis, den per
   `contenox workspace add` freigegebenen Roots und den für den jeweiligen Lauf

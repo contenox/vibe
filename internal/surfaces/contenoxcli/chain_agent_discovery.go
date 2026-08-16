@@ -17,31 +17,22 @@ import (
 )
 
 // discoverChainAgents runs one chain-agent discovery pass over the workspace
-// .contenox/ and ~/.contenox/, declaring chain-agent-* chains (and the shipped
-// chains by id) as fleet-dispatchable agents. Best effort: a failed pass leaves
-// the registry as it was, and the outcome is reported via tracker (not
-// stderr) since this runs unattended. A nil tracker degrades to Noop.
-// Markdown declarations are transpiled first into a generated directory that is
-// then discovered as an ordinary chain root, ordered last so a hand-written
-// chain of the same name wins.
+// .contenox/ and ~/.contenox/. Best effort: a failed pass leaves the registry as
+// it was, and the outcome is reported via tracker. A nil tracker degrades to Noop.
 func discoverChainAgents(ctx context.Context, agents agentregistryservice.Service, contenoxDir string, tracker libtracker.ActivityTracker, deps DiscoverDeps) {
 	discoverChainAgentsReporting(ctx, agents, contenoxDir, tracker, deps)
 }
 
 // DiscoverDeps carries what registering a declaration's own tool sources needs.
-// Both fields are optional and degrade in a defined way: without a Store the
-// pass reads declarations and writes chains but registers nothing, and without
-// a Bus the rows are written while worker startup waits for a host that has
-// one. A command that only inspects the roster supplies neither.
+// Without a Store the pass registers nothing; without a Bus the rows are written
+// while worker startup waits for a host that has one.
 type DiscoverDeps struct {
 	Store runtimetypes.Store
 	Bus   libbus.Messenger
 }
 
 // discoverChainAgentsReporting is discoverChainAgents plus the sync results a
-// caller may want to show a human. The tracker records everything; this returns
-// only what an operator has to act on — a declaration that was refused, and
-// configuration that named something which does not exist.
+// caller may want to show a human.
 func discoverChainAgentsReporting(ctx context.Context, agents agentregistryservice.Service, contenoxDir string, tracker libtracker.ActivityTracker, deps DiscoverDeps) []agentdecl.SyncResult {
 	if tracker == nil {
 		tracker = libtracker.NoopTracker{}
@@ -50,8 +41,7 @@ func discoverChainAgentsReporting(ctx context.Context, agents agentregistryservi
 	roots := []string{contenoxDir}
 	homeDir, homeErr := globalContenoxDir()
 	if homeErr == nil {
-		// The shipped chains live under system/ and are scanned last of the
-		// two, so an operator copy at the top level still claims the name.
+		// system/ is scanned last, so an operator copy at the top level wins.
 		roots = append(roots, homeDir, systemDir(homeDir))
 	}
 
@@ -59,8 +49,7 @@ func discoverChainAgentsReporting(ctx context.Context, agents agentregistryservi
 	if generated != "" {
 		roots = append(roots, generated)
 	}
-	// Registered before discovery: the emitted chain names these toolsets, so
-	// they must exist by the time the agent it belongs to can be dispatched.
+	// Registered before discovery: the emitted chain names these toolsets.
 	if deps.Store != nil {
 		results = append(results, reconcileDeclaredTools(ctx, deps.Store, deps.Bus, results)...)
 	}
@@ -80,7 +69,7 @@ func discoverChainAgentsReporting(ctx context.Context, agents agentregistryservi
 		return notable
 	}
 	if len(res.Created) > 0 || len(res.Updated) > 0 || len(res.Disabled) > 0 || len(res.Skipped) > 0 {
-		// reportChange only fires when the registry actually changed.
+
 		reportChange(contenoxDir, map[string]any{
 			"created":            res.Created,
 			"updated":            res.Updated,
@@ -92,8 +81,7 @@ func discoverChainAgentsReporting(ctx context.Context, agents agentregistryservi
 	return notable
 }
 
-// printSyncProblems shows what a discovery pass could not act on. Written to
-// stderr so it never contaminates a roster someone is parsing.
+// printSyncProblems shows what a discovery pass could not act on, on stderr.
 func printSyncProblems(w io.Writer, results []agentdecl.SyncResult) {
 	for _, r := range results {
 		switch r.Action {
@@ -110,7 +98,7 @@ func printSyncProblems(w io.Writer, results []agentdecl.SyncResult) {
 
 // syncDeclaredAgents transpiles every Markdown declaration into
 // contenoxDir/generated and returns that directory, empty when there is nothing
-// to discover. An untranspilable source is reported and skipped.
+// to discover.
 func syncDeclaredAgents(ctx context.Context, contenoxDir, homeDir string, tracker libtracker.ActivityTracker) (string, []agentdecl.SyncResult) {
 	reportErr, reportChange, end := tracker.Start(ctx, "sync", "declared_agents")
 	defer end()
@@ -119,9 +107,7 @@ func syncDeclaredAgents(ctx context.Context, contenoxDir, homeDir string, tracke
 	if homeDir != "" {
 		contenoxDirs = append(contenoxDirs, homeDir)
 	}
-	// The home directory is a root like any other: Claude Code reads both
-	// .claude/agents/ (project) and ~/.claude/agents/ (user), and an agent kept
-	// in the second one is still "read where it is".
+	// The home directory is a root like any other.
 	roots := workspaceRootsForSync(contenoxDir)
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		roots = append(roots, home)
@@ -140,10 +126,8 @@ func syncDeclaredAgents(ctx context.Context, contenoxDir, homeDir string, tracke
 		return "", nil
 	}
 
-	// Skills live beside the agents that use them, in the same roots, with the
-	// same nearest-wins precedence.
-	// Relative to the project root, because that is where the agent's file tool
-	// is rooted; a skill it cannot address is left out.
+	// Skills live beside the agents that use them, with the same nearest-wins
+	// precedence, resolved relative to the project root.
 	var workspaceRoot string
 	if roots := workspaceRootsForSync(contenoxDir); len(roots) > 0 {
 		workspaceRoot = roots[0]

@@ -1,8 +1,6 @@
-// Package chainagents seeds the declared-agent registry from the runtime's
-// own task chains, so a reviewed chain can be fired as a fleet unit without
-// a second registration step. Eligibility is by convention (shipped
-// agent-shaped chains by id, or files named "chain-agent-*.json"); discovery
-// upserts rows it owns (Source "discovered") and never writes to any other row.
+// Package chainagents seeds the declared-agent registry from the runtime's own
+// task chains. Eligibility is by convention, and discovery upserts only rows it
+// owns (Source "discovered").
 package chainagents
 
 import (
@@ -25,16 +23,11 @@ import (
 // AgentChainFilePrefix: a chain file whose basename starts with it is an agent template.
 const AgentChainFilePrefix = "chain-agent-"
 
-// shippedAgentChains are the ids of the runtime's own agent-shaped (not utility) chains.
 var shippedAgentChains = map[string]bool{
 	"chain-acp":  true, // the ACP agent surface (chain-agent-acp.json)
 	"chain-acpx": true, // the headless/untrusted-driver ACP agent (chain-agent-acpx.json)
 }
 
-// shippedPlannerAgent is the shipped default-mission planner's chain id and
-// agent name (seeded as chain-planner-default.json), eligible by id so the
-// planner role needs no chain-agent-* filename. The name is the chain id, so
-// `mission fire agent-planner` is stable across file renames.
 const shippedPlannerAgent = "agent-planner"
 
 // StableAgentName reports whether a discovered-agent name is visible without
@@ -65,10 +58,8 @@ func DiscoverWithTracker(ctx context.Context, agents agentregistryservice.Servic
 	return DiscoverKept(ctx, agents, tracker, nil, roots...)
 }
 
-// DiscoverKept is DiscoverWithTracker restricted to agent names keep allows.
-// A name keep refuses is outside the pass entirely: neither registered nor
-// reconciled — its existing row, if any, is left exactly as it stands. A nil
-// keep keeps every candidate.
+// DiscoverKept is DiscoverWithTracker restricted to agent names keep allows. A
+// name keep refuses is outside the pass entirely; a nil keep keeps everything.
 func DiscoverKept(ctx context.Context, agents agentregistryservice.Service, tracker libtracker.ActivityTracker, keep func(string) bool, roots ...string) (Result, error) {
 	var result Result
 	if agents == nil {
@@ -113,14 +104,12 @@ func DiscoverKept(ctx context.Context, agents agentregistryservice.Service, trac
 	return result, nil
 }
 
-// candidate is one eligible chain: the agent name it seeds, and its file.
 type candidate struct {
 	name    string
 	path    string
 	chainID string
 }
 
-// scan walks each root with the same chain walker the rest of the runtime uses.
 func scan(ctx context.Context, tracker libtracker.ActivityTracker, roots []string) ([]candidate, error) {
 	var out []candidate
 	claimed := map[string]bool{}
@@ -183,8 +172,6 @@ func scan(ctx context.Context, tracker libtracker.ActivityTracker, roots []strin
 	return out, nil
 }
 
-// eligible applies the two conventions: shipped agent-shaped chain by id
-// (incl. the planner), or the chain-agent-* filename.
 func eligible(base, chainID string) bool {
 	if shippedAgentChains[chainID] || chainID == shippedPlannerAgent {
 		return true
@@ -192,7 +179,6 @@ func eligible(base, chainID string) bool {
 	return strings.HasPrefix(strings.ToLower(base), AgentChainFilePrefix)
 }
 
-// agentName derives the registry name from the chain id, verbatim.
 func agentName(chainID string) string { return strings.TrimSpace(chainID) }
 
 type action int
@@ -242,9 +228,6 @@ func upsert(ctx context.Context, agents agentregistryservice.Service, c candidat
 	return actionUpdated, nil
 }
 
-// disableVanished disables every discovered agent with no matching chain file.
-// An agent keep refuses was never scanned for, so its absence proves nothing;
-// it is skipped, not disabled.
 func disableVanished(ctx context.Context, agents agentregistryservice.Service, tracker libtracker.ActivityTracker, found map[string]bool, keep func(string) bool) ([]string, error) {
 	all, err := agents.List(ctx, nil, runtimetypes.MAXLIMIT)
 	if err != nil {

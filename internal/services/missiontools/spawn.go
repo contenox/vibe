@@ -11,10 +11,8 @@ import (
 	"github.com/contenox/contenox/internal/services/missionservice"
 )
 
-// ToolNameStartMission is the supervisor's other half: mission_list reads the
-// subagents a session already has, this one starts a new one. Together they are
-// what lets a session plan work and then run each step as a subagent, without a
-// slash command in the loop.
+// ToolNameStartMission starts a subagent, where mission_list reads the ones a
+// session already has.
 const ToolNameStartMission = "mission_start"
 
 // SubagentSpec is one dispatch request, in this package's own vocabulary.
@@ -80,8 +78,6 @@ func WithSubagentTimeout(d time.Duration) Option {
 	}
 }
 
-// canSpawn reports whether mission_start can run: a fleet to dispatch through
-// and a store to watch. Never advertise what cannot work.
 func (p *provider) canSpawn() bool {
 	return p.spawner != nil && p.watcher != nil
 }
@@ -126,9 +122,8 @@ func (p *provider) execStartMission(ctx context.Context, parentSessionID string,
 	if intent == "" {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: %s requires an 'intent' — the self-contained instruction the subagent runs", ToolNameStartMission)
 	}
-	// An intent is one line by contract (missionservice.validate); collapsing it
-	// here turns a model's multi-line paste into a valid intent instead of a
-	// validation error it cannot see the reason for.
+	// An intent is one line by contract, so a model's multi-line paste is
+	// collapsed rather than refused.
 	intent = strings.Join(strings.Fields(intent), " ")
 
 	agentName := strings.TrimSpace(argString(input, call, "agent"))
@@ -172,8 +167,7 @@ func (p *provider) execStartMission(ctx context.Context, parentSessionID string,
 		}
 	}
 	if waitErr != nil {
-		// Not an error result: the subagent is real and still running, and the
-		// caller can read it later. Saying so beats failing the tool call.
+		// Not an error: the subagent is real and still running.
 		out["status"] = "running"
 		out["note"] = fmt.Sprintf("still running after %s; it keeps its record — read it later with %s", p.timeout(), ToolNameListMissions)
 	}
@@ -193,8 +187,6 @@ func (p *provider) timeout() time.Duration {
 	return defaultSubagentTimeout
 }
 
-// waitForRest polls one subagent's record until it is terminal, the deadline
-// passes, or the caller's turn is cancelled.
 func (p *provider) waitForRest(ctx context.Context, missionID string) (*missionservice.Mission, error) {
 	deadline := time.Now().Add(p.timeout())
 	ticker := time.NewTicker(subagentPollInterval)
@@ -215,8 +207,6 @@ func (p *provider) waitForRest(ctx context.Context, missionID string) (*missions
 	}
 }
 
-// reportSummaries renders what the subagent reported, oldest first, so the
-// caller reads it in the order the subagent found it.
 func (p *provider) reportSummaries(ctx context.Context, missionID string) []map[string]any {
 	reports, err := p.watcher.ListReports(ctx, missionID, startedReportLimit)
 	if err != nil {

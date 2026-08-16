@@ -28,8 +28,8 @@ var hitlPolicyACPX string
 //go:embed hitl-policy-oracle.json
 var hitlPolicyOracle string
 
-// HITLPolicyPresets lists the names and content of all embedded HITL policy presets
-// in the order they should be written to disk.
+// HITLPolicyPresets lists the embedded HITL policy presets in the order they
+// should be written to disk.
 var HITLPolicyPresets = []struct {
 	Name    string
 	Content string
@@ -100,7 +100,7 @@ func upgradeEmbeddedHITLPolicies(contenoxDir string, overwrite bool) (stale []st
 					continue
 				}
 				if recorded, ok := state[p.Name]; !ok || recorded != current {
-					// Hand-edited or unrecorded: the operator's file wins and is left alone.
+					// Hand-edited or unrecorded: the operator's file wins.
 					stale = append(stale, p.Name)
 					continue
 				}

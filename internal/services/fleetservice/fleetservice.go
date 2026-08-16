@@ -1,7 +1,6 @@
 // Package fleetservice is the fleet lifecycle-policy layer between the
-// agent-instance kernel (agentinstance, policy-free) and its consumers: it
-// decides whether an instance should be brought up, rolled back, or torn
-// down. Every dispatch is a mission.
+// agent-instance kernel and its consumers: it decides whether an instance should
+// be brought up, rolled back, or torn down. Every dispatch is a mission.
 package fleetservice
 
 import (
@@ -154,8 +153,7 @@ func (s *service) Dispatch(ctx context.Context, req DispatchRequest) (DispatchRe
 		return DispatchResult{}, err
 	}
 
-	// Refuse a disabled agent before bringing anything up; the kernel
-	// itself has no concept of Enabled.
+	// The kernel itself has no concept of Enabled.
 	agent, err := agentregistryservice.ResolveForSpawn(ctx, s.agents, req.AgentName)
 	if err != nil {
 		if errors.Is(err, agentregistryservice.ErrAgentDisabled) {
@@ -209,8 +207,7 @@ func (s *service) Dispatch(ctx context.Context, req DispatchRequest) (DispatchRe
 	}
 	result.MissionID = m.ID
 
-	// The mission's turns run detached; context.WithoutCancel keeps
-	// request-scoped values while surviving the caller's return.
+	// WithoutCancel keeps request-scoped values while surviving the caller's return.
 	recordDispatch()
 
 	detached := context.WithoutCancel(ctx)
@@ -225,8 +222,6 @@ func (s *service) Dispatch(ctx context.Context, req DispatchRequest) (DispatchRe
 	return result, nil
 }
 
-// missionRun is the fully-resolved input to the detached goroutine that
-// shepherds a dispatched unit's turns.
 type missionRun struct {
 	instanceID string
 	sessionID  libacp.SessionID
@@ -452,14 +447,10 @@ Do the work with your other tools. Decide what you can from the intent you were 
 
 var missionNudge = fmt.Sprintf(`Your last turn ended without reaching outside this session, and no human is reading this chat. To reach your operator now, call %s (progress, a finding, a blocker, or a result); if you are blocked on a decision you may not make alone, call %s and wait for the reply; to end the mission, call %s. If you are not done, keep working with your other tools and report when you have something. Do not answer in prose alone — it will not be seen.`, toolReport, toolAsk, toolFinish)
 
-// guidanceReader is the optional adjudication half of hitlservice; a host that
-// wired no adjudicator satisfies it with nothing to report.
 type guidanceReader interface {
 	AgentGuidanceFor(ctx context.Context, missionID string) ([]hitlservice.GuidanceNote, error)
 }
 
-// nudgeText prefixes the nudge with why the unit's calls were refused. A
-// refusal it never saw a reason for is the thing that leaves it circling.
 func (s *service) nudgeText(ctx context.Context, missionID string) string {
 	if s.guidance == nil {
 		return missionNudge

@@ -13,10 +13,9 @@ type ChainExecutor interface {
 	Execute(ctx context.Context, chain *taskengine.TaskChainDefinition, input any, inputType taskengine.DataType) (any, taskengine.DataType, []taskengine.CapturedStateUnit, error)
 }
 
-// CompactHistory summarizes the older portion of a conversation into a
-// single <compact-summary> user message. Leading system messages and the
-// last keep messages are preserved verbatim; the caller must set the
-// chain's template vars on ctx via taskengine.WithTemplateVars first.
+// CompactHistory summarizes the older portion of a conversation into a single
+// <compact-summary> user message. The caller must set the chain's template vars
+// on ctx first.
 func CompactHistory(ctx context.Context, exec ChainExecutor, chain *taskengine.TaskChainDefinition, history []taskengine.Message, keep int) ([]taskengine.Message, error) {
 	sysEnd := 0
 	for sysEnd < len(history) && history[sysEnd].Role == "system" {

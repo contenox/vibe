@@ -13,7 +13,7 @@ import (
 )
 
 type chatOpts struct {
-	// EffectiveTracker, when non-nil, overrides the engine's tracker (Noop, or the log tracker under --trace).
+	// EffectiveTracker, when non-nil, overrides the engine's tracker.
 	EffectiveTracker             libtracker.ActivityTracker
 	EffectiveDB                  string
 	EffectiveChain               string
@@ -33,31 +33,30 @@ type chatOpts struct {
 	EffectiveHITL                bool
 	EffectiveRaw                 bool
 	EffectiveThink               string
-	// EffectiveOptInBeta gates beta feature registration: off leaves goja unregistered and the agent-* discovery convention narrowed to the shipped planner.
+	// EffectiveOptInBeta gates beta feature registration.
 	EffectiveOptInBeta bool
 	HistoryTrim        int
 	LastN              int
 	InputValue         string
 	InputFlagPassed    bool
-	// AttachPaths are --attach image files; they ride the turn's user message
-	// as ImageParts and route the request to a CanVision provider.
+	// AttachPaths are --attach image files, riding the turn's user message.
 	AttachPaths []string
 	ContenoxDir string
-	// EffectiveSkipBackendCycle skips state.RunBackendCycle (e.g. contenox-runtime doctor --skip-cycle).
+	// EffectiveSkipBackendCycle skips state.RunBackendCycle.
 	EffectiveSkipBackendCycle bool
-	// EffectiveAskApproval lets editor integrations reuse BuildEngine while
-	// supplying their own HITL UI instead of the CLI tty prompt.
+	// EffectiveAskApproval lets editor integrations supply their own HITL UI.
 	EffectiveAskApproval localtools.AskApproval
-	// EffectiveHITLService is the hitlservice.Service BuildEngine gates this engine through instead of minting its own; nil mints one, and it is ignored when EffectiveHITL is false.
+	// EffectiveHITLService overrides the hitlservice.Service BuildEngine would
+	// mint; ignored when EffectiveHITL is false.
 	EffectiveHITLService hitlservice.Service
-	// EffectiveTaskEventSink lets editor integrations receive task events
-	// directly without subscribing to the engine bus.
+	// EffectiveTaskEventSink receives task events without a bus subscription.
 	EffectiveTaskEventSink taskengine.TaskEventSink
-	// EffectiveExtraTools are host-scoped tool providers merged into this engine's toolset and nowhere else.
+	// EffectiveExtraTools are host-scoped tool providers merged into this engine's
+	// toolset and nowhere else.
 	EffectiveExtraTools map[string]taskengine.ToolsRepo
-	// WarnW is where engine construction prints messages the operator must act on; nil means silence.
+	// WarnW is where engine construction prints operator warnings; nil silences.
 	WarnW io.Writer
-	// EffectiveStreamOutput renders assistant prose to stdout as it arrives instead of only at the end.
+	// EffectiveStreamOutput renders assistant prose to stdout as it arrives.
 	EffectiveStreamOutput bool
 }
 
@@ -172,8 +171,7 @@ func buildRunOpts(cmd *cobra.Command, db libdbexec.DBManager, contenoxDir string
 		EffectiveThink:               effectiveThink,
 		EffectiveOptInBeta:           betaEnabled(ctx, store),
 		ContenoxDir:                  contenoxDir,
-		// Shared by `run` and `beam`: both are invoked by a person, so engine
-		// construction has somewhere to address an operator warning.
+
 		WarnW: cmd.ErrOrStderr(),
 	}, nil
 }

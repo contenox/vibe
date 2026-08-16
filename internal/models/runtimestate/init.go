@@ -150,9 +150,6 @@ func initChatgroup(ctx context.Context, config *Config, tx libdb.Exec, created b
 	return group, nil
 }
 
-// initOrUpdateModel is a generic helper that handles the creation or update of a model.
-// It ensures a model is created if it doesn't exist or updated with a new capability if it does.
-// It returns an error if an existing model has a conflicting context length.
 func initOrUpdateModel(ctx context.Context, tx libdb.Exec, tenantID, modelName string, contextLength int, capability modelCapability) (*runtimetypes.Model, error) {
 	if modelName == "" {
 		return nil, errors.New("model name cannot be empty")
@@ -192,9 +189,8 @@ func initOrUpdateModel(ctx context.Context, tx libdb.Exec, tenantID, modelName s
 		return nil, fmt.Errorf("failed to get model '%s': %w", modelName, err)
 	}
 
-	// Case 3: model exists. Update capabilities only — never overwrite context_length.
-	// Context length is set once at creation, then owned by the backend cycle or
-	// by an explicit user action ('contenox model set-context').
+	// Update capabilities only: context_length is set once at creation, then
+	// owned by the backend cycle or an explicit user action.
 	needsUpdate := false
 	switch capability {
 	case canEmbed:

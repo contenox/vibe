@@ -14,20 +14,24 @@ type isolationPlan struct {
 	Args []string `json:"args"`
 	// Workspace is the one read-write root: the agent's cwd, absolute.
 	Workspace string `json:"workspace"`
-	// Home is the scoped HOME, absolute (the anchor "~" in carve-out paths resolves against); not itself granted any access unless named as its own carve-out.
+	// Home is the scoped HOME, absolute, and what "~" in a carve-out path
+	// resolves against. It is not itself granted any access.
 	Home string `json:"home"`
 	// FS are the filesystem carve-outs with "~" already resolved against Home
 	// to absolute paths, each with its access mode (ModeRO/ModeRW).
 	FS []planCarveout `json:"fs"`
-	// Net are the network carve-outs from Spec.Net, carried for the egress path; the fresh netns is routeless, so a carve-out alone reaches nothing yet.
+	// Net are the network carve-outs from Spec.Net, carried for the egress path.
 	Net []NetCarveout `json:"net"`
 	// Loopback asks the shim to raise "lo" inside the fresh netns (which starts down); set only when the network wall is applied.
 	Loopback bool `json:"loopback"`
-	// Egress asks the shim to create a TUN and hand its fd to the parent's allow-listing userspace stack, making only the Net hosts reachable; set only when Net carve-outs are declared.
+	// Egress asks the shim to create a TUN and hand its fd to the parent's
+	// allow-listing userspace stack; set only when Net carve-outs are declared.
 	Egress bool `json:"egress,omitempty"`
 	// EgressSockFD is the inherited unix socket fd the shim uses to send the TUN fd to the parent (SCM_RIGHTS) and read its readiness ack; meaningful only when Egress is set.
 	EgressSockFD int `json:"egress_sock_fd,omitempty"`
-	// Tap asks the shim to install a seccomp user-notify telemetry tap that reports execve/execveat and always responds CONTINUE — telemetry, never enforcement; set only when Spec.SyscallTap is on.
+	// Tap asks the shim to install a seccomp user-notify telemetry tap that
+	// reports execve/execveat and always responds CONTINUE. Telemetry, never
+	// enforcement.
 	Tap bool `json:"tap,omitempty"`
 	// TapSockFD mirrors EgressSockFD for the seccomp notify fd; meaningful
 	// only when Tap is set.
@@ -64,7 +68,6 @@ func buildPlan(spec Spec, execPath string, args []string) (isolationPlan, error)
 		fs = append(fs, planCarveout{Path: canonicalizeTopLevel(p), Mode: c.Mode})
 	}
 
-	// Copy so the plan owns the slice rather than aliasing the caller's Spec.
 	net := append([]NetCarveout(nil), spec.Net...)
 
 	return isolationPlan{
@@ -78,13 +81,9 @@ func buildPlan(spec Spec, execPath string, args []string) (isolationPlan, error)
 	}, nil
 }
 
-// canonicalizeTopLevel resolves symlinks in an absolute top-level path (the
-// workspace, or a "~"-resolved carve-out), pinning the real target in the
-// trusted parent so the Landlock rule can't be redirected by a symlink swapped
-// in at the top-level path (symlinks planted inside an already-granted
-// directory are re-checked by Landlock at access time; only the anchor needs
-// this). Best-effort: falls back to a lexical Clean if the path can't be
-// resolved. EvalSymlinks preserves absoluteness.
+// canonicalizeTopLevel resolves symlinks in an absolute top-level path, pinning
+// the real target so a Landlock rule cannot be redirected by a symlink swapped
+// in at the anchor. It falls back to a lexical Clean if unresolvable.
 func canonicalizeTopLevel(p string) string {
 	if resolved, err := filepath.EvalSymlinks(p); err == nil {
 		return resolved
@@ -92,9 +91,8 @@ func canonicalizeTopLevel(p string) string {
 	return filepath.Clean(p)
 }
 
-// resolveTilde expands a leading "~" against the scoped home (see Spec.Home).
-// Only "~" and "~/…" are special-cased; "~user" and other paths pass through
-// unchanged.
+// resolveTilde expands a leading "~" against the scoped home. Only "~" and
+// "~/…" are special-cased.
 func resolveTilde(p, home string) string {
 	if p == "~" {
 		return home

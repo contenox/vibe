@@ -18,8 +18,7 @@ type natsSubscription struct {
 }
 
 // maxHandlerConcurrency caps how many Serve handlers may run at once per
-// subscription. High enough that normal request/reply traffic never queues,
-// low enough that a stuck handler cannot exhaust the process.
+// subscription.
 const maxHandlerConcurrency = 256
 
 type Config struct {
@@ -42,9 +41,8 @@ func NewPubSub(ctx context.Context, cfg *Config) (Messenger, error) {
 		nats.ReconnectHandler(func(nc *nats.Conn) {
 			log.Printf("NATS reconnected to %s", nc.ConnectedUrl())
 		}),
-		// Without this, async errors — above all nats.ErrSlowConsumer, reported when
-		// a subscriber's buffer overflows and messages are discarded — are
-		// swallowed by the client, making data loss invisible.
+		// Without this the client swallows async errors, above all
+		// nats.ErrSlowConsumer, making data loss invisible.
 		nats.ErrorHandler(func(_ *nats.Conn, sub *nats.Subscription, err error) {
 			subject := "<unknown>"
 			if sub != nil {
@@ -166,8 +164,6 @@ func (p *ps) Request(ctx context.Context, subject string, data []byte) ([]byte, 
 		case errors.Is(err, nats.ErrConnectionClosed):
 			return nil, ErrConnectionClosed
 		case errors.Is(err, nats.ErrNoResponders):
-			// "No responders" can race with a timeout; with a deadline set, prefer
-			// reporting the timeout since that was the caller's intent.
 			if _, hasDeadline := ctx.Deadline(); hasDeadline {
 				return nil, ErrRequestTimeout
 			}
@@ -184,10 +180,8 @@ func (p *ps) Serve(ctx context.Context, subject string, handler Handler) (Subscr
 		return nil, ErrConnectionClosed
 	}
 
-	// Bounds in-flight handlers so a burst or a blocked downstream dependency
-	// can't grow goroutines without limit. Acquiring the slot inside the NATS
-	// callback applies backpressure to the subscription: at the cap, dispatch
-	// stalls and the client reports a slow consumer via natsOpts' ErrorHandler.
+	// Acquiring the slot inside the NATS callback applies backpressure to the
+	// subscription rather than growing goroutines without limit.
 	sem := make(chan struct{}, maxHandlerConcurrency)
 
 	sub, err := p.nc.QueueSubscribe(subject, subject, func(msg *nats.Msg) {

@@ -1,21 +1,7 @@
-// Package mcpoauth implements the MCP OAuth 2.1 Authorization Code + PKCE
-// flow for CLI clients.
-//
-// It covers three responsibilities the golang.org/x/oauth2 package does not:
-//
-//  1. Server metadata discovery (RFC 8414):
-//     fetches /.well-known/oauth-authorization-server to locate the
-//     authorization and token endpoints.
-//
-//  2. Dynamic client registration (RFC 7591):
-//     registers a new OAuth client with the authorization server on first use.
-//
-//  3. Local callback server:
-//     starts a temporary localhost HTTP server to receive the authorization
-//     code redirect, then shuts it down.
-//
-// golang.org/x/oauth2 handles PKCE, token exchange, token refresh, and the
-// Transport RoundTripper.
+// Package mcpoauth implements the MCP OAuth 2.1 Authorization Code + PKCE flow
+// for CLI clients: server metadata discovery (RFC 8414), dynamic client
+// registration (RFC 7591), and the local callback server. golang.org/x/oauth2
+// handles PKCE, token exchange, refresh, and the Transport RoundTripper.
 package mcpoauth
 
 import (
@@ -56,11 +42,9 @@ func (m *ServerMetadata) SupportsS256() bool {
 	return false
 }
 
-// DiscoverAuthServer fetches the OAuth 2.0 Authorization Server Metadata
-// (RFC 8414) for the given MCP server URL.
-//
-// It first tries the well-known URL derived from the server's base origin,
-// then falls back to conventional endpoint paths if the server returns 404.
+// DiscoverAuthServer fetches the OAuth 2.0 Authorization Server Metadata (RFC
+// 8414) for the given MCP server URL, falling back to conventional endpoint
+// paths on a 404.
 func DiscoverAuthServer(ctx context.Context, mcpServerURL string) (*ServerMetadata, error) {
 	u, err := url.Parse(mcpServerURL)
 	if err != nil {
@@ -90,11 +74,9 @@ type ClientRegistration struct {
 	ClientSecret string `json:"client_secret,omitempty"` // absent for public clients
 }
 
-// RegisterClient performs RFC 7591 Dynamic Client Registration against the
-// given endpoint. It registers a public client (no secret) suitable for a
-// native CLI application.
-//
-// If registrationEndpoint is empty the caller must supply a clientID directly.
+// RegisterClient performs RFC 7591 Dynamic Client Registration against the given
+// endpoint, registering a public client. If registrationEndpoint is empty the
+// caller must supply a clientID directly.
 func RegisterClient(ctx context.Context, registrationEndpoint, clientName, redirectURI string) (*ClientRegistration, error) {
 	if registrationEndpoint == "" {
 		return nil, fmt.Errorf("mcpoauth: no registration endpoint — supply --oauth-client-id manually")
@@ -125,12 +107,9 @@ type CallbackResult struct {
 	ErrorDescription string
 }
 
-// StartCallbackServer binds a local HTTP listener on the given port (or a
-// random port if port == 0) and returns the listener, its redirect URI, and a
-// channel that will receive exactly one CallbackResult when the browser
-// redirects to it.
-//
-// The caller is responsible for closing the listener when done.
+// StartCallbackServer binds a local HTTP listener on the given port (random if
+// 0) and returns the listener, its redirect URI, and a channel receiving exactly
+// one CallbackResult. The caller closes the listener.
 func StartCallbackServer(port int) (net.Listener, string, <-chan CallbackResult, error) {
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	ln, err := net.Listen("tcp", addr)

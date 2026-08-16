@@ -20,30 +20,10 @@ const rulesCode = `{
   "attention": { "allowAgentAnswers": false }
 }`;
 
-const routeCode = `{
-  "id": "classify_request",
-  "handler": "route",
-  "system_instruction": "Classify the user's latest message. Use 'coding_change'
-    for requests to create, edit, refactor, fix, test or otherwise change
-    code/files. Use 'general' for questions, explanations, setup help. Use
-    'review_change' for requests to review, audit or assess code that already
-    exists, where nothing is to be modified...",
-  "execute_config": { "model": "{{var:alt_model|var:model}}", "tools": [] },
-  "transition": {
-    "on_failure": "acp_chat",
-    "branches": [
-      { "operator": "equals",  "when": "coding_change", "goto": "coding_chat" },
-      { "operator": "equals",  "when": "general",       "goto": "acp_chat" },
-      { "operator": "equals",  "when": "review_change", "goto": "review_chat" },
-      { "operator": "default", "when": "",              "goto": "acp_chat" }
-    ]
-  }
-}`;
-
 const t: LandingStrings = {
   h1a: "Ein Agenten-Server.",
   h1b: "Jedes KI-Produkt betreibt einen. Ausgeliefert bekommst du keinen.",
-  lede: "contenox ist genau diese Schicht als Server, den du selbst betreibst — auf deiner Maschine, mit jedem Modell. Jede Aktion wird vor der Ausführung gegen deine Regeln geprüft.",
+  lede: "Vor Apache hieß „eine Website ausliefern“: schreib dir deinen eigenen Server. Wer heute einen Agenten baut, schreibt sich sein eigenes Harness. contenox macht dieses Harness zur Infrastruktur: Du installierst es, und der Agent wird das, was du schreibst.",
   declareH2: "Du baust keinen Agenten. Du deklarierst einen.",
   declareTree: [
     [".contenox/", ""],
@@ -55,7 +35,7 @@ const t: LandingStrings = {
     [".claude/agents/               ", "# schon Agenten? werden dort gelesen, wo sie liegen"],
   ],
   declareNote:
-    "Markdown mit YAML-Frontmatter — dieselbe Datei, die Claude Code liest. Reinlegen genügt, der nächste Lauf nimmt sie auf: kein Build-Schritt, keine Plugin-API, nichts zu konvertieren.",
+    "Markdown mit YAML-Frontmatter — dieselbe Datei, die Claude Code liest, und dieselbe, die Copilot, Cursor, OpenCode und Antigravity führen. Reinlegen genügt, der nächste Lauf nimmt sie auf: kein Build-Schritt, keine Plugin-API, nichts zu konvertieren.",
   ctaRecipe: "Rezept ausführen",
   copyLabel: "Kopieren",
   installTabPosix: "macOS / Linux",
@@ -70,83 +50,68 @@ const t: LandingStrings = {
     "deine Regeln in einer Datei, die du lesen kannst",
   ],
 
-  missionEyebrow: "Die Mission, live",
-  missionH2: "Dreißig Sekunden, von Anfang bis Ende.",
-  missionLede:
-    "Ein Kommando feuert einen deklarierten Agenten auf eine Aufgabe ab, begrenzt durch eine Policy, die du geschrieben hast. Was passiert, nachdem du weggegangen bist, ist der Punkt.",
-  missionLines: [
-    ["note", "# Mission unter strengem Envelope abfeuern"],
+  apacheEyebrow: "Das Argument",
+  apacheH2: "Apache machte Ausliefern zu etwas, das man installiert. HTML wurde zu etwas, das man schreibt.",
+  apacheP1:
+    "1994 hat man keine Website ausgeliefert, man hat einen Server geschrieben: Request parsen, Verbindung halten, entscheiden, was rausgeht — alles verschweißt mit genau dem Inhalt, für den es da war. Dann wurde der Server zu etwas, das man installiert, und beides fiel auseinander. HTML schrieben Leute, die nie einen Socket angefasst haben — und das Web danach haben sie gebaut.",
+  apacheP2:
+    "Wer heute Agenten baut, steht wieder auf der falschen Seite dieser Linie und zimmert dieselbe Maschine von Hand: die Schleife, das Tool-Gate, den Freigabe-Fluss, die Sitzungspersistenz — verschweißt mit einem Prompt, im nächsten Unternehmen neu geschrieben. contenox macht diese Maschine zur Infrastruktur und die Deklaration zum Artefakt. Die Maschine ist nicht das Interessante. Wer ihre Kontrollen hält, schon.",
+  apacheThenLabel: "Apache, 1995",
+  apacheNowLabel: "contenox, heute",
+  apacheRows: [
+    ["Du installierst den Server.", "Du installierst die Runtime."],
     [
-      "cmd",
-      'contenox mission fire reviewer "review the payment-retry PR for regressions" --wait',
-    ],
-    ["out", "Mission gestartet · Envelope hitl-policy-strict.json"],
-    [
-      "out",
-      "Die Unit liest den Diff, führt die Tests aus — erlaubte Regeln laufen still durch",
-    ],
-    [
-      "out",
-      "⏸ Der Agent fragt: zwei Regressionen gefunden, Patch entworfen — auf den Branch anwenden?",
+      "Du schreibst HTML. Der Server schreibt dir nie eine Seite.",
+      "Du deklarierst Agenten in Markdown. Der Server liefert keinen deiner Agenten mit.",
     ],
     [
-      "out",
-      "keine Antwort: Run checkpointet, Ask gespeichert, Prozess freigegeben",
+      "Module erweitern ihn. Apache lieferte keine Websites.",
+      "MCP-Server und die Fähigkeiten deines Editors liefern die Tools. Du bringst die mit, die du brauchst.",
     ],
     [
-      "note",
-      "# Laptop zu. Tage vergehen. Dann, aus jedem Terminal, das deine Modelle erreicht:",
+      "Er lieferte das HTML aus, das du schon hattest.",
+      "Es liest die Deklarationen, die du schon führst — Claude Code, Copilot, Cursor, OpenCode, Antigravity.",
     ],
-    ["cmd", "contenox approvals list"],
-    ["out", "Ask 8f3c · Patch anwenden? · Mission 01jm…"],
-    ["cmd", 'contenox approvals respond 8f3c --answer "ja, anwenden"'],
-    ["out", "Checkpoint fortgesetzt — genau einmal. Mission gelandet."],
-    ["cmd", "contenox inbox list"],
     [
-      "out",
-      "Report · reviewer: Befunde, Patch angewendet, Testergebnisse — warten auf dich",
+      "Verbindungsverwaltung ist Infrastruktur. Niemand schreibt sie sich selbst.",
+      "Der dauerhafte Ask ist Infrastruktur: Ein Lauf hält an, checkpointet, überlebt einen Neustart, läuft weiter, wenn ein Mensch antwortet.",
     ],
   ],
-  missionOutro:
-    "Kein Babysitten am Terminal, keine abgelaufenen Freigaben, keine stillen Änderungen. Der Envelope hat entschieden, was unbeaufsichtigt laufen darf, der Agent, den du deklariert hast, nichts darüber hinaus, und eine Antwort hat den Run genau einmal fortgesetzt.",
-  missionCta: [
-    "Wie Missionen, Freigaben und die Inbox funktionieren",
-    "/docs/reference/contenox-cli/#contenox-mission",
-  ],
+  apacheOutro:
+    "Fünf Agenten liegen bei. Sie sind die Standardseite, nicht das Produkt — ein Beispiel für das Artefakt, dazu da, durch deines ersetzt zu werden.",
 
-  panelEyebrow: "Der Teil, den du nicht herunterladen kannst",
-  panelH2:
-    "Diese Maschine hast du längst benutzt. Nur die Kontrollen hattest du nie.",
-  panelP1:
-    "Wenn dir ein Assistent seine „Denkschritte“ zeigt, siehst du eine Orchestrierungs-Schleife: planen, Tool aufrufen, Ergebnis prüfen, Budget prüfen, neu entscheiden. Jedes große KI-Produkt läuft auf so einer Schicht — ereignisgetriebene Agenten-Choreografie unter Governance. Diese Schicht entscheidet, was das Modell darf, wann es pausiert und was es kostet. Der Anbieter konfiguriert sie. Du siehst sie nie — und ändern kannst du sie nicht.",
-  panelP2:
-    "Contenox ist diese Schicht, ausgeliefert als Produkt — mit dem Schaltpult in der Hand des Operators. Der Agent ist eine Datei, die du deklarierst. Die Grenzen sind ein Envelope, den du geschrieben hast. Die Schleife, die daraus entsteht, ist JSON, das du lesen kannst — und selbst schreiben, wenn du musst. Der Zustand liegt auf deiner Platte. Der Unterschied ist nicht, die Maschine erfunden zu haben — sondern wer die Kontrollen hält.",
-
-  routeEyebrow: "Route → Workflow → Agenten-Schleife",
-  routeH2: "Ein Satz rein. Die Schleife, die dieser Satz verdient.",
-  routeLede:
-    "Hinter einem Agenten steht eine Chain, und die interaktiven beginnen nicht mit einer einzigen Schleife. Sie beginnen mit einem route-Task, der die Anfrage liest, sie labelt und an die Schleife übergibt, die für dieses Label gebaut ist — mit eigener Instruktion, eigenem Tool-Umfang, eigenem Budget, eigenem Weg aus dem Fehlerfall. Die Chains, die mit contenox kommen, sortieren jede Nachricht in coding_change, general oder review_change, bevor sonst irgendetwas läuft.",
-  routeCode,
-  routeOutro:
-    "Gekürzt aus der mitgelieferten chain-agent-acp.json. Der Klassifikator hat keine Tools, kann also nicht auf einer Anfrage handeln, die er noch nicht verstanden hat — und er darf auf einem günstigeren Modell laufen als die Schleifen, die er speist. Ein unbekanntes Label fällt in den default-Zweig: auf die schwächste Schleife, nie auf die stärkste. Welcher Zweig lief, steht im Run-Log — eine enttäuschende Antwort ist damit eine Frage, die eine Antwort hat.",
-  routeDomains: [
-    "Ein Spezialist ist Konfiguration, keine Formulierung: Die Review-Schleife entzieht per hide_tools jedes schreibende Tool — durchgesetzt dort, wo Aufrufe ausgeführt werden, nicht dadurch, dass man sie dem Modell nur nicht anbietet.",
-    "Ein Support-Assistent leitet Abrechnungsfragen an eine lesende Schleife mit der Billing-API und Kontoänderungen an eine, die schreiben darf, aber für einen Menschen pausiert.",
-    "Ein Daten-Workflow leitet „fasse das zusammen“ und „extrahiere diese Felder“ an Schleifen mit unterschiedlichen Ausgabe-Kontrakten — der Aufrufer bekommt parsebare Ausgabe, ohne jedes Mal darum zu bitten.",
-    "Eine regulierte Installation leitet alles, was regulierte Daten berührt, an eine Schleife unter strengerer Policy — unabhängig davon, wie die Anfrage formuliert war.",
+  treeEyebrow: "Das Artefakt",
+  treeH2: "Ein Agent ist eine Datei. Ein Workflow ist ein Verzeichnis.",
+  treeLede:
+    "Eine Deklaration ist Markdown mit YAML-Frontmatter: ein Name, die Tools, die sie aufrufen darf, das Modell — und ein Rumpf, der zum System-Prompt wird. Leg Deklarationen in ein Verzeichnis, und das Verzeichnis ist der Workflow: Die agent.md an der Spitze liest die Anfrage, antwortet mit einem Label, und der Zweig dieses Namens übernimmt — mit eigener Instruktion, eigenen Tools, eigenem Budget.",
+  treeListing: [
+    [".contenox/agents/", ""],
+    ["  triage/", ""],
+    ["    agent.md              ", "# liest die Anfrage, antwortet mit einem Label"],
+    ["    code/", ""],
+    ["      agent.md            ", "# der Zweig, auf den dieses Label zeigt"],
+    ["      recovery.md         ", "# sein zweiter Versuch, wenn der erste steckenbleibt"],
+    ["    docs/", ""],
+    ["      agent.md            ", "# tools: Read, Glob, Grep — schreiben kann er nicht"],
+    ["    failure.md            ", "# was es sagt, wenn jeder Zweig aufgegeben hat"],
   ],
-  routeCtas: [
+  treeOutro:
+    "default: im Frontmatter des Routers benennt den Zweig, in den ein unbekanntes Label fällt — den engsten, nie den mächtigsten. contenox kompiliert das Verzeichnis beim nächsten Lauf in die Chain, die es ausführt, und die Policy, unter der sie läuft — nach .generated/. Beide sind JSON-Schema-validiert, beide darfst du lesen, keine musst du pflegen.",
+  treePoints: [
+    "Ein Zweig ist Spezialist durch das, was er hält, nicht durch seine Formulierung: Benenne seine Tools, und jedes andere wird dort entzogen, wo Aufrufe ausgeführt werden — nicht dadurch, dass man es dem Modell bloß nicht anbietet.",
+    "Ein Support-Desk schickt Abrechnungsfragen an einen lesenden Zweig mit der Billing-API und Kontoänderungen an einen, der schreiben darf, aber für einen Menschen anhält.",
+    "Ein Backoffice schickt „fasse das zusammen“ und „extrahiere diese Felder“ an Zweige mit unterschiedlichen Ausgabe-Kontrakten — der Aufrufer bekommt parsebare Ausgabe, ohne jedes Mal darum zu bitten.",
+    "Eine regulierte Installation schickt alles, was regulierte Daten berührt, an einen Zweig unter strengerem Envelope — unabhängig davon, wie die Anfrage formuliert war.",
+  ],
+  treeCtas: [
+    ["Agenten deklarieren", "/docs/guide/agents/"],
     ["Wie Request-Routing funktioniert", "/docs/guide/request-routing/"],
-    [
-      "Die Geschichte: ein Review-Zweig, ohne schreibende Tools",
-      "/docs/use-cases/review-specialist/",
-    ],
   ],
 
   rulesEyebrow: "Du schreibst die Regeln",
   rulesH2: "Wie viel Agency? Das entscheidest du — schriftlich.",
   rulesLede:
-    "Jeder Run ist durch einen Envelope begrenzt: eine JSON-Policy, die benennt, was still durchläuft, was für einen Menschen pausiert und was verweigert wird — plus harte Obergrenzen für Tool-Aufrufe und Tokens und eine Festlegung, welche Modelle und Backends die Unit nutzen darf. Kein versteckter Prompt entscheidet für dich. Die Datei liegt in deinem Repo und wird reviewt wie jede andere Änderung.",
+    "Jeder Lauf ist durch einen Envelope begrenzt: eine JSON-Policy, die benennt, was still durchläuft, was für einen Menschen pausiert und was verweigert wird — plus harte Obergrenzen für Tool-Aufrufe und Tokens und eine Festlegung, welche Modelle und Backends der Lauf nutzen darf. Kein versteckter Prompt entscheidet für dich. Die Datei liegt in deinem Repo und wird reviewt wie jede andere Änderung.",
   rulesCode,
   rulesOutro:
     "Gekürzt aus dem mitgelieferten Default-Preset. Was keine Regel trifft, schlägt geschlossen fehl — es fragt einen Menschen. Sechs Presets kommen mit contenox init, und contenox vet prüft deine Policy, bevor irgendetwas unter ihr läuft.",
@@ -154,50 +119,78 @@ const t: LandingStrings = {
   hitlDemoAlt:
     "Terminal-Demo: Ein destruktives rm-Kommando stoppt vor der Ausführung an einem Freigabe-Gate",
 
-  craftEyebrow: "Agentic Engineering",
-  craftH2: "Vibecoding findet die Schleife. Loop Engineering behält sie.",
-  craftP1:
-    "Vibecoding ist echte Entdeckung — mit einem Agenten improvisieren, bis die Schleife funktioniert. Wir haben so Features gebaut und ehrlich aufgeschrieben, was es gekostet hat. Aber eine Schleife, die morgen laufen muss, in der CI, unbeaufsichtigt, ist kein Vibe mehr. Sie ist ein Artefakt.",
-  craftP2:
-    "Das ist Agentic Engineering: Die Schleife wird geschrieben, reviewt, versioniert und begrenzt — und welche Schleife läuft, wird ebenfalls geschrieben. Jede Stufe in einer contenox-Chain entstand aus einem benannten Fehlermodus, unter einer Disziplin: Verwirrung darf nie unbeaufsichtigt in Mutation kippen.",
-
-  everyEyebrow: "Ein Harness, überall",
-  everyH2: "Einmal schreiben. Laufen lassen, wo die Arbeit ist.",
-  everyLede:
-    "Derselbe agentische Workflow, derselbe Envelope, derselbe Sitzungszustand hinter jeder Oberfläche — was du im Editor freigegeben hast, ist das, was aus dem Cron läuft.",
-  surfaces: [
+  missionEyebrow: "Der dauerhafte Ask",
+  missionH2: "Der Lauf hält an. Der Prozess endet. Tage später setzt eine Antwort ihn fort.",
+  missionLede:
+    "Jedes Harness kann für einen Menschen pausieren, solange es die Verbindung offen hält. Die Verbindung zu halten ist nicht der schwere Teil — das Warten zu überleben schon. Ein contenox-Lauf checkpointet an der Stelle, an der er anhielt, gibt den Prozess frei und nimmt genau dort wieder auf, sobald jemand antwortet — von überall.",
+  missionLines: [
+    ["note", "# deklarierten Agenten unter strengem Envelope abfeuern"],
     [
-      "Dein Terminal",
-      'contenox "deine Aufgabe" ist ein Chat mit Sitzungsgedächtnis: Der Verlauf bleibt über Aufrufe hinweg erhalten, zustandsbehaftete Tools behalten ihren Zustand über die Turns, und ein regulierter Aufruf hält vor der Ausführung für deine Freigabe an.',
+      "cmd",
+      'contenox mission fire billing "reconcile the vendor invoices flagged this week"',
+    ],
+    ["out", "Mission gestartet · Envelope hitl-policy-strict.json"],
+    [
+      "out",
+      "Der Agent zieht Buchungen und Rechnungen — erlaubte Regeln laufen still durch",
     ],
     [
-      "Dein Editor",
-      "Der komplette Agent in Zed, JetBrains, AionUi oder OpenClaw — Freigaben laufen über die Oberfläche des Editors, und der Agent bleibt in deinen Dateien, nicht im Plugin.",
+      "out",
+      "⏸ Der Agent fragt: drei Rechnungen strittig, Gutschriften entworfen — verschicken?",
     ],
+    ["out", "keine Antwort: Lauf checkpointet, Ask gespeichert, Prozess freigegeben"],
+    ["note", "# Laptop zu. Rechner neu starten. Tage vergehen. Dann, von überall:"],
+    ["cmd", "contenox approvals list"],
+    ["out", "Ask 8f3c · entworfene Gutschriften verschicken? · Mission 01jm…"],
+    ["cmd", 'contenox approvals respond 8f3c --answer "ja, verschicken"'],
+    ["out", "Checkpoint fortgesetzt — genau einmal. Mission gelandet."],
+    ["cmd", "contenox inbox list"],
     [
-      "Deine Skripte und Pipelines",
-      "contenox run führt eine Chain nicht-interaktiv aus — aus Cron, CI oder einem Shell-Skript. Tool-lastige Jobs sind das Heimspiel: Release-Evidenzpakete, Request-Processing-Chains, schmale API-Wrapper mit Freigabe für jeden schreibenden Aufruf.",
-    ],
-    [
-      "Nicht vertraute Treiber",
-      "Eine headless acpx-Session bekommt das gehärtete Profil: Shell, Writes und Netzwerk werden verweigert — statt zur Freigabe angeboten.",
+      "out",
+      "Report · billing: drei Streitfälle, Gutschriften verschickt — warten auf dich",
     ],
   ],
-  protocols: [
+  missionOutro:
+    "Kein Babysitten am Terminal, keine Freigabe, die verfällt, weil du geschlafen hast, keine stille Änderung, während du weg warst. Der Envelope hat entschieden, was unbeaufsichtigt laufen darf, die Deklaration nichts darüber hinaus, und eine Antwort hat den Lauf genau einmal fortgesetzt.",
+  missionCta: [
+    "Wie Missionen, Freigaben und die Inbox funktionieren",
+    "/docs/guide/missions/",
+  ],
+
+  toolsEyebrow: "Tools",
+  toolsH2: "Bring die Tools mit, die du brauchst. Sonst nichts.",
+  toolsLede:
+    "Apache lieferte Module, keine Websites. contenox besitzt die Tool-Grenze — was auf der anderen Seite steht, entscheidest du. Jedes Tool, das du nicht brauchst, sind Tokens auf jedem Turn und eine Sache mehr zu regeln. Tools überqueren diese Grenze auf zwei Wegen — und beide wählst du.",
+  toolsWays: [
     [
-      "Editoren sprechen mit dem kompletten Agenten über stdio — ohne Plugin-Lock-in.",
-      "Agent Client Protocol",
-      "https://agentclientprotocol.com",
+      "Vom Client",
+      "Ein ACP-Client — dein Editor — handelt fs/* und terminal/* als Capabilities aus. contenox reicht den Aufruf weiter, der Client führt ihn aus, in dem Workspace, den du ohnehin offen hast. local_fs sind fünf Tools: read_file, write_file, edit_file, sed, read_file_range. Auflisten und Suchen laufen über die Shell — auf der Client-Seite der Grenze.",
     ],
     [
-      "Jeder MCP-Server — stdio, SSE oder HTTP — registriert sich einmal; seine Tools werden policy-begrenzte Chain-Tools.",
-      "Model Context Protocol",
-      "https://modelcontextprotocol.io",
+      "Vom Operator",
+      "Häng jeden MCP-Server an — stdio, SSE oder HTTP — oder jeden HTTP-Dienst mit OpenAPI-Spec. Er registriert sich einmal, und seine Tools werden policy-begrenzte Tools, die ein Agent benennt wie jedes andere. Eine Deklaration darf auch eigene mitbringen: für keinen anderen Agenten erreichbar, stillgelegt, sobald du die Datei löschst.",
+    ],
+  ],
+  toolsNote:
+    "Von welcher Seite ein Aufruf auch kommt: Er überquert eine Grenze und wird gegen einen Envelope geprüft, bevor er läuft.",
+  toolsCtas: [
+    ["MCP-Server anbinden", "/docs/integrations/tools/mcp/"],
+    ["HTTP-API als Tool einbinden", "/docs/integrations/tools/remote/"],
+    ["Agent Client Protocol", "https://agentclientprotocol.com"],
+  ],
+
+  shapesEyebrow: "Zwei Formen",
+  shapesH2: "Ein Subprozess in deinem Editor — oder ein Host auf einer Maschine.",
+  shapesLede:
+    "Dieselbe Runtime, dieselben Deklarationen, derselbe Envelope, derselbe Sitzungszustand. Was du im Editor freigegeben hast, ist das, was aus dem Cron läuft.",
+  shapes: [
+    [
+      "Vom Editor gestartet",
+      "Zed, JetBrains, AionUi oder OpenClaw startet contenox als ACP-Subprozess über stdio — kein Plugin-Lock-in, und Freigaben laufen über die Oberfläche des Editors. Mit /pair wird diese Session aus der App erreichbar: Ein Ask, der eintrifft, nachdem du den Deckel zugeklappt hast, bekommt trotzdem eine Antwort.",
     ],
     [
-      "Jeder HTTP-Dienst mit Spec wird ein aufrufbares, allowlistbares Tool.",
-      "OpenAPI-Tools-Anleitung",
-      "/docs/integrations/tools/remote/",
+      "contenox serve",
+      "Ein Host: dieselbe Runtime, ohne Editor davor. Er hält die Relay-Verbindung offen und bleibt oben, bis du ihn stoppst — eine Maschine ohne Bildschirm, die Missionen annimmt und die MCP-Server erreicht, die du angehängt hast. Eine headless acpx-Session bekommt das gehärtete Profil: Writes und Netzwerk werden verweigert statt zur Freigabe angeboten.",
     ],
   ],
   guides: [
@@ -206,25 +199,15 @@ const t: LandingStrings = {
     ["AionUi-Anleitung lesen", "/docs/integrations/editors/aionui/"],
     ["OpenClaw-Anleitung lesen", "/docs/integrations/editors/openclaw/"],
   ],
-  tuiShotAlt:
-    "contenox im Terminal: eine Aufgabe in natürlicher Sprache, contenox liest das Repo und antwortet in derselben Session",
-
-  seatEyebrow: "Derselbe Platz, zwei Besetzungen",
-  seatH2:
-    "Copilot hilft dir beim Tippen. Contenox fährt die Schicht, während du weg bist.",
-  seatP1:
-    "Die KI, die bei der Arbeit für dich arbeitet, ist ein Platz — und es gibt zwei Arten, ihn zu besetzen. Der Agent des Anbieters läuft auf deiner Arbeit: Verhalten wird in Redmond entschieden, Regeln, die du nicht lesen kannst, gesteuert vom Tenant-Admin, deine Nutzung fließt in fremde Telemetrie.",
-  seatP2:
-    "Contenox ist der andere Weg: dein Agent unter deinem Envelope — Regeln, die du geschrieben hast, Zustand auf deiner Platte, Modelle, die du gewählt hast. Keine zwei Kategorien. Eine Kategorie, von zwei Enden her besetzt.",
 
   yoursEyebrow: "Standardmäßig deins",
   yoursH2: "Dein Rechner, dein Zustand, deine Modelle.",
   yoursPoints: [
     "Sessions, Konfiguration, Run-Logs und erfasster Ausführungszustand liegen auf deinem Rechner. Kein Konto, kein contenox-Dienst dazwischen — außer du pairst mit dem optionalen Relay unten. Telemetrie ist opt-in und standardmäßig aus.",
     "Inferenz ist Konfiguration: lokales Ollama oder vLLM, wenn nichts dein Netzwerk verlassen darf — oder OpenAI, Anthropic, Gemini, Bedrock und Vertex mit deinen eigenen Schlüsseln, gepinnt auf eine Region deiner Wahl. Ein späterer Wechsel ist eine Konfigurationsänderung, kein Umbau.",
-    "Secrets werden zur Anfragezeit aus deiner Umgebung aufgelöst und landen nie in einer Config auf der Platte; Agent-erreichbare Shells bekommen eine bereinigte Umgebung mit genau dem, was die Aufgabe braucht.",
+    "Secrets werden zur Anfragezeit aus deiner Umgebung aufgelöst und landen nie in einer Config auf der Platte. Jeder Envelope verweigert .ssh, .aws und .kube unter jeder Berechtigungsstufe, auch der lockersten.",
   ],
-  yoursCta: ["AI-Souveränität & KI-Verordnung", "/de/ki-souveraenitaet/"],
+  yoursCta: ["KI-Souveränität & KI-Verordnung", "/de/ki-souveraenitaet/"],
 
   relayEyebrow: "Optional: das gehostete Relay",
   relayH2: "Deine Session, auf deinem Handy.",
@@ -234,14 +217,16 @@ const t: LandingStrings = {
     "Wie Pairing funktioniert — und wie man es zurücknimmt",
     "/docs/guide/pairing/",
   ],
-  relayNote: [
-    "Wir können contenox-Agenten auch für dich provisionieren und betreiben — managed, zu deinen Bedingungen — und suchen dafür frühe Design-Partner:",
-    "sprich mit uns",
-    "mailto:hello@contenox.com",
-  ],
+  invite: {
+    lead: "Wir provisionieren und betreiben contenox-Agenten auch für dich — managed, zu deinen Bedingungen. Sag uns, worum es geht, und wir richten es ein:",
+    contactLabel: "sprich mit uns",
+    contactHref: "mailto:hello@contenox.com",
+    appLabel: "die gehostete App ansehen",
+    appHref: "https://app.contenox.com",
+  },
 
   bottomEyebrow: "Loslegen",
-  bottomH2: "Feuere deine erste Mission ab.",
+  bottomH2: "Deklariere einen Agenten. Feuere deine erste Mission ab.",
   bottomCta: "Quickstart lesen",
   bottomContact:
     'Fragen? <a href="mailto:hello@contenox.com" class="underline hover:text-black dark:hover:text-white">hello@contenox.com</a> · Issues und PRs auf <a href="https://github.com/contenox/contenox" class="underline hover:text-black dark:hover:text-white">GitHub</a>',
@@ -259,7 +244,7 @@ const t: LandingStrings = {
 
 <Base
   title="Contenox — Ein Agenten-Server. Jedes KI-Produkt betreibt einen. Ausgeliefert bekommst du keinen."
-  description="Ein Agenten-Server. KI Agenten die einfach laufen ohne custom Code;Agenten, Werkzeuge und Modelle in Dateien deklariert; jede Aktion wird vor der Ausführung gegen deine Regeln geprüft. Quelloffen, auf deiner Maschine, mit jedem Modell."
+  description="Ein Agenten-Server. Apache machte Ausliefern zu etwas, das man installiert, und HTML zu etwas, das man schreibt — contenox tut das für Agenten. Deklariere einen Agenten als eine Markdown-Datei; jede Aktion wird vor der Ausführung gegen deine Regeln geprüft. Quelloffen, auf deiner Maschine, mit jedem Modell."
   lang="de"
   alternates={{ en: "/", de: "/de/" }}
 >

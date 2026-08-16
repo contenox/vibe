@@ -35,7 +35,7 @@ type Engine = enginesvc.Engine
 func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*Engine, error) {
 	var tracker libtracker.ActivityTracker = libtracker.NoopTracker{}
 	if opts.EffectiveTracing {
-		// nil logger = the process default handler; keeps this file out of the log/slog import graph.
+		// nil logger = the process default handler.
 		tracker = libtracker.NewLogActivityTracker(nil)
 	}
 	if opts.EffectiveTracker != nil {
@@ -45,7 +45,7 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	reportErr, reportChange, end := tracker.Start(ctx, "build", "engine")
 	defer end()
 
-	// One bus for this process: the mission tools below must publish on the same bus the engine runs on, or a resumed unit's report/mission_finish reaches nothing.
+	// The mission tools below must publish on the same bus the engine runs on.
 	bus := libbus.NewSQLite(db.WithoutTransaction())
 
 	engineBuilt := false
@@ -55,7 +55,7 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		}
 	}()
 
-	// Process-global and consulted by every vfs.Contain call; must be registered before any file tool exists so an agent can never reach the config, database, or policies that govern it.
+	// Process-global; must be registered before any file tool exists.
 	if err := vfs.SetControlPlaneDenied(controlPlaneDirs(opts.ContenoxDir)...); err != nil {
 		reportErr(err)
 		return nil, fmt.Errorf("register control-plane denylist: %w", err)
@@ -63,7 +63,8 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 
 	workspaceID := ResolveWorkspaceID(opts.ContenoxDir)
 
-	// Built here and injected rather than minted internally: the resume-on-verdict hook can only be registered once the engine exists.
+	// Injected rather than minted internally: the resume-on-verdict hook can only
+	// be registered once the engine exists.
 	var hitlSvc hitlservice.Service
 	if opts.EffectiveHITL {
 		hitlSvc = opts.EffectiveHITLService
@@ -72,7 +73,8 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		}
 	}
 
-	// Both the publisher and the attention asker matter on the resume path: without them, a resumed run's remaining questions silently downgrade to a self-answered blocker nobody is notified of.
+	// Both matter on the resume path: without them a resumed run's remaining
+	// questions downgrade to a self-answered blocker.
 	trigHook := eventlog.NewTriggerHolder()
 	missionPub := missionEventPublisher(ctx, db, bus, workspaceID, tracker, trigHook)
 	missions := missionservice.New(db, missionservice.WithEventPublisher(missionPub))
@@ -115,7 +117,7 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		reportErr(err)
 		return nil, err
 	}
-	// Same ordering for local_fs's audio seam: read_file on an audio file transcribes through the engine's chat path from here on.
+	// Same ordering for local_fs's audio seam.
 	trigHook.Set(buildInProcessTriggerHook(ctx, db, opts.ContenoxDir, workspaceID, engine, opts, os.Stderr))
 	if hitlSvc != nil {
 		hitlservice.SetResumeHook(hitlSvc, agentservice.ResumeHook(agentservice.Deps{
@@ -128,7 +130,8 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	engineBuilt = true
 	oldStop := engine.Stop
 	engine.Stop = func() {
-		// Draining before teardown keeps at-least-once true: a firing claims its row before running, so an exit mid-firing would strand the claim otherwise.
+		// Draining before teardown keeps at-least-once true: a firing claims its
+		// row before running.
 		trigHook.Drain(eventlog.DefaultDrainTimeout)
 		oldStop()
 		// Ours to close: enginesvc closes only a bus it minted itself.
@@ -139,7 +142,8 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 
 func localToolset(opts chatOpts, db libdbexec.DBManager, tracker libtracker.ActivityTracker, missions missionservice.Service, missionOpts ...missiontools.Option) map[string]taskengine.ToolsRepo {
 	tools := map[string]taskengine.ToolsRepo{
-		// Wired, not durable-only: this engine resumes suspended mission chains, and a resumed unit asks its remaining questions here.
+		// This engine resumes suspended mission chains, and a resumed unit asks its
+		// remaining questions here.
 		missiontools.ToolsProviderName: missiontools.New(missions, missionOpts...),
 	}
 	// Host-scoped providers last, never overriding a standard registration.
@@ -164,9 +168,8 @@ func readinessDefaults(opts chatOpts) (model, provider string) {
 	return model, provider
 }
 
-// hitlPolicySource loads envelopes over policyDirs, so what a unit actually
-// loads is what /mission offers and what `contenox vet` lints — including the
-// envelopes rendered from agent declarations.
+// hitlPolicySource loads envelopes over policyDirs, including the envelopes
+// rendered from agent declarations.
 func hitlPolicySource(primaryDir string) hitlservice.PolicySource {
 	return hitlservice.NewFSPolicySource(policyDirs(primaryDir)...)
 }

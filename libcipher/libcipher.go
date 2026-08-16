@@ -1,42 +1,12 @@
-// Package libcipher provides a collection of cryptographic utilities for encryption,
-// decryption, integrity verification, and secure key generation. It includes implementations
-// for AES-GCM (authenticated encryption) and AES-CBC combined with HMAC (for encryption with
-// integrity verification), as well as functions for sealed HMAC hash creation and constant-time
-// comparison.
-//
-// The package offers the following functionalities:
-//   - AES-GCM based encryption/decryption, which provides both confidentiality and authenticity.
-//   - AES-CBC with HMAC for scenarios where nonce collisions are a concern, especially in high-volume
-//     or distributed environments. This mode encrypts data using AES-CBC (with PKCS#7 padding) and
-//     ensures integrity via an HMAC over the encrypted payload and additional data.
-//   - Sealed HMAC hash creation and comparison, where a unique salt is automatically added and the
-//     resulting JSON-encoded object encapsulates both the computed HMAC digest and the salt.
-//   - Cryptographically secure key generation.
-//   - Ed25519 signing keys: generation, seed and public-key parsing/formatting, signing and
-//     verification. These live here rather than at the call site so that one encoding and one
-//     set of length checks serve every component that handles a key.
-//
-// Security Considerations:
-//   - The encryption key and integrity key must be kept secret and must be distinct. Reusing keys
-//     for different purposes can compromise security.
-//   - An Ed25519 keypair is an identity, not a transport secret: what it signs is defined by the
-//     protocol using it, and that definition belongs in that protocol's package. This package
-//     signs the bytes it is given and nothing more.
-//   - When using AES-CBC with HMAC, ensure that the entire ciphertext fits in memory as the HMAC is
-//     computed over the complete message. For high-volume systems, AES-GCM may be preferred.
+// Package libcipher provides cryptographic utilities for encryption, decryption,
+// integrity verification, and key generation: AES-GCM, AES-CBC with HMAC, sealed
+// HMAC hashes, and Ed25519 signing keys. The encryption key and integrity key
+// must be kept secret and must be distinct.
 package libcipher
 
 import "crypto/sha256"
 
-// CheckHash verifies the shouldBe string against the hash.
-// params:
-// - signingKey (string) - the signing key for the hash
-// - salt (string) - the salt used for the hash
-// - password (string) - the password to verify
-// - hash ([]byte) - the stored hash to compare against
-// returns: (bool, error) - whether the password matches the hash and an error if any
-//
-// Note: Think twice, maybe bycrypt is what you need.
+// CheckHash reports whether shouldBe hashes to hash under signingKey and salt.
 func CheckHash(signingKey string, salt string, shouldBe string, hash []byte) (bool, error) {
 	sealed, err := NewHash(GenerateHashArgs{
 		Payload:    []byte(shouldBe),

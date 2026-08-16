@@ -13,10 +13,9 @@ import (
 	"github.com/contenox/contenox/libacp"
 )
 
-// RecordingHarness is the minimal libacp.Client harness for observing a
-// turn: it records every session/update and rejects request-shaped
-// callbacks (permission, fs/*, terminal/*). Use DenyingHarness when a
-// permission ask must be answered. Safe for concurrent use.
+// RecordingHarness is the minimal libacp.Client harness for observing a turn: it
+// records every session/update and rejects request-shaped callbacks. Use
+// DenyingHarness when a permission ask must be answered. Safe for concurrent use.
 type RecordingHarness struct {
 	libacp.UnimplementedClient
 
@@ -154,10 +153,9 @@ type TurnResult struct {
 	DroppedMcpServers   []string
 }
 
-// DriveTurn connects to the external ACP agent agent describes and drives
-// one initialize → session/new → session/prompt turn with harness, tearing
-// the connection down before returning. A nil error means the agent reached
-// a terminal stopReason and teardown closed cleanly.
+// DriveTurn connects to the external ACP agent and drives one initialize,
+// session/new, session/prompt turn with harness, tearing the connection down
+// before returning.
 func DriveTurn(ctx context.Context, agent *runtimetypes.Agent, harness libacp.Client, req TurnRequest) (*TurnResult, error) {
 	if req.Cwd == "" {
 		return nil, fmt.Errorf("agenthost: TurnRequest.Cwd is required (ACP session/new needs a working directory)")
@@ -181,8 +179,8 @@ func DriveTurn(ctx context.Context, agent *runtimetypes.Agent, harness libacp.Cl
 	if err != nil {
 		return nil, err
 	}
-	// Close is idempotent: the deferred call cleans up the error paths, the
-	// explicit one at the end makes teardown failures part of the result.
+	// Close is idempotent; the explicit call at the end makes teardown failures
+	// part of the result.
 	defer handle.Close()
 
 	clientInfo := &libacp.Implementation{Name: "contenox-agenthost"}

@@ -65,8 +65,7 @@ func InvalidParams(msg string) *Error { return NewError(ErrInvalidParams, msg) }
 func InternalError(msg string) *Error { return NewError(ErrInternalError, msg) }
 
 // AsError converts a handler error into the JSON-RPC error that goes on the
-// wire, retaining err as cause and promoting a deadline to ErrRequestTimeout
-// so a remote caller can tell "too slow, retry" from "broken, give up".
+// wire, retaining err as cause and promoting a deadline to ErrRequestTimeout.
 func AsError(err error) *Error {
 	if err == nil {
 		return nil
@@ -81,12 +80,10 @@ func AsError(err error) *Error {
 	return &Error{Code: code, Message: err.Error(), cause: err}
 }
 
-// HandlerDrainTimeout bounds how long Run waits, after shutdown cancels
-// everything, for in-flight handler goroutines to return; a backstop for a
-// handler that ignores its cancelled context, which should never fire normally.
+// HandlerDrainTimeout bounds how long Run waits, after shutdown, for in-flight
+// handler goroutines to return.
 const HandlerDrainTimeout = 10 * time.Second
 
-// ErrHandlerDrainTimeout reports that Run gave up waiting for handler
-// goroutines to return (see HandlerDrainTimeout), so the caller's teardown of
-// shared state may be unsafe.
+// ErrHandlerDrainTimeout reports that Run gave up waiting for handler goroutines
+// to return, so tearing down shared state may be unsafe.
 var ErrHandlerDrainTimeout = errors.New("libacp: timed out waiting for handler goroutines to return")

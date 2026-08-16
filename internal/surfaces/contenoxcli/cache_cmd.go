@@ -1,5 +1,3 @@
-// cache_cmd.go implements `contenox cache` — managing data Contenox caches
-// between runs (currently the per-backend model-list cache).
 package contenoxcli
 
 import (
@@ -45,8 +43,7 @@ all of them at once.`,
 		}
 		defer db.Close()
 
-		// NewSQLiteManager wraps db without taking ownership; do NOT Close it
-		// (its Close closes the shared db, which the defer above already handles).
+		// NewSQLiteManager wraps db without taking ownership; do not Close it.
 		n, err := runtimestate.ClearModelCache(ctx, libkvstore.NewSQLiteManager(db))
 		if err != nil {
 			return fmt.Errorf("failed to clear model cache: %w", err)

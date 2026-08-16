@@ -13,24 +13,14 @@ import (
 	"testing"
 )
 
-// guardedRoots covers this project's own logic; libacp is a published library
-// with its own rules, and tools/examples aren't the product. libbus, libdbexec,
-// and libkvstore now live under internal/ (already walked). liblease was only
-// ever consumed by modeld's device-lease code, which now lives entirely in the
-// separate modeld repo, so it has no importers left here and was removed;
-// libtracker still sits beside internal/ rather than inside it so it stays
-// importable from outside the module, but it is still this project's logic,
-// so the guard keeps walking it.
+// guardedRoots covers this project's own logic. libacp is a published library
+// with its own rules, and tools/examples are not the product.
 var guardedRoots = []string{"internal", "cmd", "libtracker"}
 
 // slogSinkAllowlist is the closed set of files permitted to import log/slog,
 // keyed by module-root-relative slash path (trailing "/" = directory prefix,
-// else an exact file). The rule distinguishes configuring the sink from
-// calling a logger: libtracker's ActivityTracker is the only instrumentation
-// seam and redacts by field name before writing, so a direct slog call
-// bypasses redaction, not just style. Entries are individual files, never
-// packages, outside libtracker itself — a package-wide exemption would
-// license every future slog call added beside it.
+// else an exact file). A direct slog call bypasses libtracker's redaction, so
+// entries are individual files, never packages.
 var slogSinkAllowlist = map[string]string{
 	// The sink adapter itself: builds a tracker over an *slog.Logger, stamps
 	// request/trace/span IDs, and redacts on the way out.

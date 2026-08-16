@@ -9,15 +9,9 @@ import (
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
-// DefaultDrainTimeout bounds TriggerHolder.Drain at a host's teardown. The
-// drain is not the durability mechanism — a firing whose host dies mid-run is
-// recovered by the stale-claim takeover in BeginEventFiring
-// (runtimetypes.StaleEventFiringClaim). It closes only the common window, where
-// a firing has already produced its outcome and needs nothing but the store
-// write, so the budget is a database-write budget rather than a model one: it
-// stays inside the couple of seconds the dispatcher's own backstop poll already
-// treats as prompt, and a teardown never hangs waiting out a chain the reclaim
-// would rescue anyway.
+// DefaultDrainTimeout bounds TriggerHolder.Drain at a host's teardown. It is a
+// database-write budget, not a model one: durability comes from the stale-claim
+// takeover in BeginEventFiring, not from the drain.
 const DefaultDrainTimeout = 5 * time.Second
 
 // Trigger receives every event after its durable append.
@@ -35,15 +29,9 @@ func (NoopTrigger) HandleEvent(context.Context, ...*runtimetypes.Event) {}
 
 var _ Trigger = NoopTrigger{}
 
-// TriggerHolder is a late-bound Trigger: hosts that construct publishers
-// before their engine exists wire the holder at construction and Set the real
-// handler once the engine is up. Unset, it is a NoopTrigger.
-//
-// It is also the drain seam: fireTrigger registers every firing it dispatches
-// through a holder, so a host can Drain before tearing down the engine, bus,
-// and database those firings still need. A host that mounts a handler directly
-// instead of through a holder has no drain and relies solely on the stale-claim
-// reclaim.
+// TriggerHolder is a late-bound Trigger: hosts that construct publishers before
+// their engine exists wire the holder at construction and Set the real handler
+// once the engine is up. Unset, it is a NoopTrigger. It is also the drain seam.
 type TriggerHolder struct {
 	t    atomic.Value // Trigger
 	gate firingGate
@@ -67,16 +55,8 @@ func (h *TriggerHolder) HandleEvent(ctx context.Context, events ...*runtimetypes
 
 // Drain blocks until every firing already dispatched through this holder has
 // returned, or timeout elapses; it reports whether the drain completed. A
-// non-positive timeout waits indefinitely.
-//
-// Hosts call it before teardown. Without it, a firing that claimed its
-// event_firings row and started a chain is killed when the process tears the
-// engine, bus, and database down under it: nothing records an outcome, the row
-// stays 'running', and every later claim of that (trigger, event) pair is
-// refused until StaleEventFiringClaim elapses.
-//
-// Only firings outstanding when Drain is called are waited on — one dispatched
-// afterwards is not, which is the teardown semantics: appends are over by then.
+// non-positive timeout waits indefinitely. Only firings outstanding when Drain
+// is called are waited on.
 func (h *TriggerHolder) Drain(timeout time.Duration) bool {
 	drained := h.gate.outstanding()
 	if drained == nil {
@@ -98,11 +78,6 @@ func (h *TriggerHolder) Drain(timeout time.Duration) bool {
 
 var _ Trigger = (*TriggerHolder)(nil)
 
-// firingGate counts firings dispatched but not yet returned and hands a waiter
-// a channel closed when that count reaches zero. Not a sync.WaitGroup: a fired
-// chain appends events of its own, so Add races Wait during a teardown drain —
-// documented WaitGroup misuse, and a runtime panic when the counter round-trips
-// through zero while a waiter is parked.
 type firingGate struct {
 	mu sync.Mutex
 	n  int
@@ -134,21 +109,13 @@ func (g *firingGate) end() {
 	}
 }
 
-// outstanding returns the channel closed once the currently outstanding firings
-// have all returned, or nil when there are none.
 func (g *firingGate) outstanding() <-chan struct{} {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.drained
 }
 
-// fireTrigger dispatches event to trigger asynchronously — the in-process
-// firing must never delay or abort the append (bob2's onError contract), and
-// WithoutCancel keeps a firing alive past the appending request's own end. A
-// holder's firing is registered BEFORE its goroutine starts: registering inside
-// HandleEvent would leave the window between `go` and the delegate's first
-// statement invisible to a concurrent Drain, and that window is exactly the one
-// a teardown races.
+// The firing is registered before its goroutine starts, so a concurrent Drain cannot miss it.
 func fireTrigger(ctx context.Context, trigger Trigger, event *runtimetypes.Event) {
 	if trigger == nil {
 		return

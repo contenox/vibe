@@ -1,16 +1,8 @@
 // Package liblease implements a cooperative, time-bounded file lease: a
-// single-holder lock backed by an ordinary file, not an OS primitive. The file
-// records who holds the lease and until when; a challenger may take over only
-// once the lease has expired.
-//
-// It is intentionally OS-agnostic — just a JSON file with atomic writes — so it
-// behaves identically on Linux, macOS, and Windows.
-//
-// A lease gives liveness, not safety, on its own. The holder MUST renew before
-// expiry and MUST stop touching protected state if it cannot (see Expired): a
-// process paused longer than the TTL can be taken over while it still believes
-// it holds the lease. Protect critical operations by also checking the holder's
-// InstanceID (a fencing token) so a revived stale holder cannot act.
+// single-holder lock backed by an ordinary JSON file that records who holds the
+// lease and until when. A challenger may take over only once the lease has
+// expired. A lease gives liveness, not safety: fence critical operations on the
+// holder's InstanceID.
 package liblease
 
 import (
@@ -26,26 +18,19 @@ import (
 	"github.com/google/uuid"
 )
 
-// ErrHeld is returned by Acquire when a live (unexpired) lease is held by a
-// different instance.
+// ErrHeld is returned by Acquire when a live lease is held by a different instance.
 var ErrHeld = errors.New("liblease: lease is held by another instance")
 
-// ErrLost is returned by Renew when the lease has been taken over by another
-// instance — the caller is no longer the holder.
+// ErrLost is returned by Renew when the lease has been taken over by another instance.
 var ErrLost = errors.New("liblease: lease was taken over by another instance")
 
 // ErrAcquireTimeout is returned when the wait for the internal acquisition lock
-// exceeds its bound (or the caller's context expires) before this instance got
-// a chance to evaluate the lease. It says nothing about who holds the lease —
-// only that the filesystem did not let us find out in time. A stalled NFS mount
-// or a wedged peer must surface as this error rather than as an unbounded hang.
+// exceeds its bound before this instance could evaluate the lease. It says
+// nothing about who holds the lease.
 var ErrAcquireTimeout = errors.New("liblease: timed out waiting for the acquisition lock")
 
-// Record is the on-disk lease state. PID and Host are informational (the lease
-// is enforced by TTL, not by process checks); InstanceID is the fencing token.
-// Meta carries optional holder-supplied discovery data — e.g. the endpoint a
-// serving owner advertises to followers — so "who and where" stays one atomic
-// read.
+// Record is the on-disk lease state. PID and Host are informational, InstanceID
+// is the fencing token, and Meta carries optional holder-supplied discovery data.
 type Record struct {
 	InstanceID string            `json:"instance_id"`
 	PID        int               `json:"pid"`
@@ -70,40 +55,23 @@ func (r Record) ExpiresAt() time.Time { return r.RenewedAt.Add(r.TTL) }
 
 func (r Record) expired(now time.Time) bool { return now.After(r.ExpiresAt()) }
 
-// Lease is a held lease handle. It is safe for concurrent use: the renewal
-// loop and a shutdown path routinely live in different goroutines (a
-// supervisor renews from its own goroutine while a caller's Stop releases), so
-// the handle guards its own mutable state rather than making every consumer
-// invent the same mutex.
-//
-// Note that this is mutex safety over one handle's bookkeeping only. It does
-// not upgrade the lease's cross-process guarantee, which remains liveness, not
-// safety — see the package doc on fencing with InstanceID.
+// Lease is a held lease handle. It is safe for concurrent use.
 type Lease struct {
 	mu   sync.Mutex
 	path string
 	rec  Record
 }
 
-// Acquire claims the lease at path for ttl using context.Background.
-//
-// Prefer AcquireContext: without a context the wait for the internal
-// acquisition lock is bounded only by leaseLockMaxWait, and a caller that is
-// already shutting down cannot cut it short. This form is kept because the
-// lease is claimed from plain constructors and tests across the tree that have
-// no context to hand.
+// Acquire claims the lease at path for ttl using context.Background. Prefer
+// AcquireContext where a context is available.
 func Acquire(path string, ttl time.Duration, opts ...Option) (*Lease, error) {
 	return AcquireContext(context.Background(), path, ttl, opts...)
 }
 
 // AcquireContext claims the lease at path for ttl. It succeeds when the lease is
 // free, expired, or unreadable, and fails with ErrHeld when a different instance
-// holds a still-valid lease. On success the caller must Renew before ttl
-// elapses and Release on shutdown.
-//
-// ctx bounds the wait for the internal acquisition lock, which is where a
-// stalled filesystem strands a caller. Cancelling ctx does not undo an
-// acquisition that already completed.
+// holds a still-valid lease; on success the caller must Renew before ttl elapses
+// and Release on shutdown.
 func AcquireContext(ctx context.Context, path string, ttl time.Duration, opts ...Option) (*Lease, error) {
 	if ttl <= 0 {
 		return nil, errors.New("liblease: ttl must be positive")
@@ -114,9 +82,6 @@ func AcquireContext(ctx context.Context, path string, ttl time.Duration, opts ..
 	}
 	defer unlock()
 
-	// Sampled after the acquisition lock is held, so it already accounts for
-	// however long the wait took: a holder that renewed while we queued is
-	// visible in the read below and judged against a current clock.
 	now := time.Now()
 	host, _ := os.Hostname()
 	rec := Record{
@@ -133,9 +98,6 @@ func AcquireContext(ctx context.Context, path string, ttl time.Duration, opts ..
 		}
 	}
 
-	// Fast path: create the lease exclusively. os.Link fails if the file
-	// already exists, so when the lease is free this is a race-free,
-	// single-winner acquisition with no readback needed.
 	won, err := tryCreate(path, rec)
 	if err != nil {
 		return nil, err
@@ -144,18 +106,12 @@ func AcquireContext(ctx context.Context, path string, ttl time.Duration, opts ..
 		return &Lease{path: path, rec: rec}, nil
 	}
 
-	// A lease file exists: refuse unless it has expired (a corrupt/unreadable
-	// file is treated as stale). One read suffices — the acquisition lock is
-	// held for the whole function, so no writer can slip in behind this check,
-	// and `now` was sampled after the wait for that lock.
+	// A corrupt or unreadable lease file is treated as stale.
 	if cur, rerr := readRecord(path); rerr == nil && !cur.expired(now) {
 		return nil, fmt.Errorf("%w: instance %s (pid %d) until %s",
 			ErrHeld, cur.InstanceID, cur.PID, cur.ExpiresAt().Format(time.RFC3339))
 	}
 
-	// Expired or released: take over with an atomic overwrite. The takeover lock
-	// makes this a single-winner path; the readback remains a corruption/FS sanity
-	// check rather than the concurrency primitive.
 	if err := writeRecord(path, rec); err != nil {
 		return nil, err
 	}
@@ -171,19 +127,9 @@ func AcquireContext(ctx context.Context, path string, ttl time.Duration, opts ..
 
 const leaseLockStaleAfter = 5 * time.Second
 
-// leaseLockMaxWait bounds the wait for the acquisition lock when the caller
-// supplies no deadline of its own. A lock left behind by a dead process is
-// reclaimed after staleAfter (at most leaseLockStaleAfter), so any healthy
-// system makes progress well inside this budget; exceeding it means the
-// filesystem itself is not cooperating, and reporting that is more useful than
-// spinning forever.
 const leaseLockMaxWait = 30 * time.Second
 
-// leaseLockPollInterval is how often a waiter retries. It stays deliberately
-// tight and un-backed-off: the lock is held only for a handful of file
-// operations, and under heavy contention any backoff leaves the lock sitting
-// free while every waiter sleeps — measurably slower for no benefit, since the
-// retry is a single cheap mkdir.
+// Deliberately tight and un-backed-off; see reshape-rationale-salvage.md.
 const leaseLockPollInterval = time.Millisecond
 
 func acquireLeaseLock(ctx context.Context, path string, ttl time.Duration) (func(), error) {
@@ -193,8 +139,6 @@ func acquireLeaseLock(ctx context.Context, path string, ttl time.Duration) (func
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrAcquireTimeout, err)
 	}
-	// Bound the wait even when the caller's context has no deadline, so a
-	// stalled filesystem can never strand the caller indefinitely.
 	ctx, cancel := context.WithTimeout(ctx, leaseLockMaxWait)
 	defer cancel()
 
@@ -207,8 +151,6 @@ func acquireLeaseLock(ctx context.Context, path string, ttl time.Duration) (func
 		staleAfter = 100 * time.Millisecond
 	}
 
-	// Go 1.23+ timer semantics: Reset on an unfired timer cannot deliver a
-	// stale tick, so one poll timer can be reused for the whole wait.
 	timer := time.NewTimer(leaseLockPollInterval)
 	defer timer.Stop()
 
@@ -239,9 +181,8 @@ func acquireLeaseLock(ctx context.Context, path string, ttl time.Duration) (func
 	}
 }
 
-// tryCreate atomically creates the lease file only if it does not already
-// exist, via a temp file + hardlink (link fails with EEXIST when the target is
-// present). It returns (false, nil) when the file already exists.
+// tryCreate creates the lease file only if absent, via temp file + hardlink. It
+// returns (false, nil) when the file already exists.
 func tryCreate(path string, rec Record) (bool, error) {
 	tmpName, err := writeTemp(path, rec)
 	if err != nil {
@@ -258,17 +199,12 @@ func tryCreate(path string, rec Record) (bool, error) {
 }
 
 // Renew extends the lease by another TTL from now, using context.Background.
-// Prefer RenewContext from anything that has a context — a renewal that cannot
-// be abandoned is exactly what keeps a shutting-down supervisor alive.
+// Prefer RenewContext where a context is available.
 func (l *Lease) Renew() error { return l.RenewContext(context.Background()) }
 
 // RenewContext extends the lease by another TTL from now. It returns ErrLost if
-// the lease has expired locally or has since been taken over by another
-// instance, which the caller must treat as losing ownership.
-//
-// A context error surfaces as ErrAcquireTimeout, deliberately NOT as ErrLost:
-// "we could not check" is not "we lost it", and callers that fence on ErrLost
-// must not be tricked into standing down by a cancelled shutdown context.
+// the lease expired locally or was taken over by another instance; a context
+// error surfaces as ErrAcquireTimeout, never as ErrLost.
 func (l *Lease) RenewContext(ctx context.Context) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -323,8 +259,7 @@ func (l *Lease) ReleaseContext(ctx context.Context) error {
 }
 
 // Expired reports whether this holder's lease has lapsed based on its last
-// successful Renew. A holder should use it to self-fence: if Expired is true,
-// stop touching protected state — a takeover may have happened.
+// successful Renew. A holder should use it to self-fence.
 func (l *Lease) Expired() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -352,9 +287,7 @@ func Inspect(path string) (Record, error) {
 }
 
 // InspectContext reads the current lease at path without acquiring it. It takes
-// no acquisition lock, so it never waits on a peer; ctx is honoured for
-// symmetry and so a future implementation (a networked lease store, say) can
-// block here without changing this signature.
+// no acquisition lock, so it never waits on a peer.
 func InspectContext(ctx context.Context, path string) (Record, error) {
 	if err := ctx.Err(); err != nil {
 		return Record{}, err
@@ -374,8 +307,7 @@ func readRecord(path string) (Record, error) {
 	return rec, nil
 }
 
-// writeRecord writes rec atomically (temp file + rename) so a reader never sees
-// a half-written lease and a crash mid-write cannot corrupt it.
+// writeRecord writes rec atomically via temp file + rename.
 func writeRecord(path string, rec Record) error {
 	tmpName, err := writeTemp(path, rec)
 	if err != nil {
@@ -385,9 +317,7 @@ func writeRecord(path string, rec Record) error {
 	return os.Rename(tmpName, path)
 }
 
-// writeTemp marshals rec to a fresh temp file next to path and returns its
-// name. The caller publishes it via rename (overwrite) or link (exclusive
-// create), then removes the temp name.
+// writeTemp marshals rec to a fresh temp file next to path and returns its name.
 func writeTemp(path string, rec Record) (string, error) {
 	b, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
