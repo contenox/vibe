@@ -68,9 +68,29 @@ provider = "{{var:provider}}"
 pin_model = false
 
 # Per-toolset knobs. A declaration has no word for these.
+#
+# The allowlist is a HARD outer bound: no approval can cross it, which is why
+# the refusal says so. Approval is a separate layer inside it — the HITL policy
+# still inspects every command that gets this far, including whether a redirect
+# turns a reader into a writer.
+#
+# ⚠ It is therefore sized to be LEGIBLE, not to be a sandbox. python3, node,
+# make, git and cargo are on it, and each of them can create a directory, delete
+# a tree or rewrite a file. Leaving `mkdir` off next to them removed no
+# capability whatsoever — it only cost the agent turns and pushed the same work
+# through `python3 -c "import os; os.makedirs(...)"`, which is strictly harder
+# to read in an approval prompt and in an audit log. Every entry added below is
+# weaker than something already here.
+#
+# What stays off, and why: no `sh`, `bash` or `zsh`. Each entry naming a real
+# program is the only thing this list still buys once the interpreters are on
+# it, and a shell entry would end that.
 [tools_policies.local_shell]
-_allowed_commands = "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,make,cargo,curl,wget,jq"
-_denied_commands = "sudo,su,dd,mkfs,fdisk,parted,shred"
+_allowed_commands = "ls,cat,head,tail,wc,sort,uniq,cut,tr,diff,echo,printf,pwd,which,find,grep,sed,awk,stat,file,basename,dirname,realpath,du,date,env,xargs,tee,mktemp,mkdir,touch,cp,mv,rm,ln,chmod,tar,gzip,gunzip,zip,unzip,patch,git,go,python3,node,npm,make,cargo,curl,wget,jq"
+# Checked BEFORE the allowlist, so it is the gate that still holds when a
+# deployment clears the allowlist entirely. Machine-level verbs belong here
+# whether or not anything above would have admitted them.
+_denied_commands = "sudo,su,dd,mkfs,fdisk,parted,shred,mount,umount,chown,systemctl,reboot,shutdown,halt,poweroff,useradd,usermod,passwd,iptables"
 
 [tools_policies.local_fs]
 _allowed_dir = "."

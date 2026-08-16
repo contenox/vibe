@@ -14,117 +14,201 @@ import (
 // validates them the way it does the shipped ones.
 const ChainSchemaURL = "https://contenox.com/schema/task-chain.schema.json"
 
-// EmitChain renders an agent as a task chain, parameterizing the shipped
+// EmitChain renders one agent as a task chain, parameterizing the shipped
 // chain-run topology so a declared agent rides the same tool loop, retry
-// behaviour and test coverage as a native one. No declaration format can
-// express branching, a per-step model or a recovery path, so none is invented.
+// behaviour and test coverage as a native one.
+//
+// A single declaration states one prompt and one tool list, so this emits one
+// loop and nothing else. BRANCHING IS COMPOSITION, not a field: see EmitTree,
+// where a directory of declarations becomes a router over several of these.
 func EmitChain(ir *AgentIR, cfg Config) (*taskengine.TaskChainDefinition, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	if ir.Posture == PostureUnsafe {
-		return nil, fmt.Errorf("agentdecl: %s asks for permissionMode: bypassPermissions — to skip every approval. "+
-			"contenox will not run an agent that way. Use acceptEdits and grant what it actually needs "+
-			"under [policy.postures] or [[policy.always_allow]] in agents.toml, where the grant is written down", ir.Name)
+	if err := refuseUnsafe(ir); err != nil {
+		return nil, err
 	}
 
 	id := ir.ScopedName(cfg.Naming.ScopeWithDialect)
-	agent := id + "-agent"
-	tools := id + "-tools"
-	recovery := id + "-recovery"
-	recoveryTools := id + "-recovery-tools"
 	summarise := id + "-summarise"
-
-	exec := execConfig(ir, cfg, id, true)
-	toolExec := execConfig(ir, cfg, id, false)
-	prompt := systemInstruction(ir)
+	tasks := leafLoop(ir, ir, cfg, id, summarise)
+	tasks = append(tasks, terminalTask(summarise, cfg, id+"-recovery"))
 
 	return &taskengine.TaskChainDefinition{
 		ID:          id,
 		Description: ir.Description,
 		TokenLimit:  cfg.Chain.TokenLimit,
-		Tasks: []taskengine.TaskDefinition{
-			{
-				ID:                agent,
-				Description:       "Imported agent turn. Calls tools or answers directly.",
-				Handler:           taskengine.HandleChatCompletion,
-				SystemInstruction: prompt,
-				ExecuteConfig:     exec,
-				RetryOnFailure:    cfg.Chain.RetryOnFailure,
-				Transition: taskengine.TaskTransition{
-					OnFailure: recovery,
-					Branches: []taskengine.TransitionBranch{
-						{
-							Operator: taskengine.OpEdgeTraversedAtLeast,
-							Edge:     agent + "->" + tools,
-							When:     strconv.Itoa(cfg.Chain.MainRounds),
-							Goto:     recovery,
-						},
-						{Operator: taskengine.OpEquals, When: "tool_call", Goto: tools},
-						{Operator: taskengine.OpDefault, When: "", Goto: taskengine.TermEnd},
+		Tasks:       tasks,
+	}, nil
+}
+
+// Loop macros a declaration may use. They exist because the two things a
+// recovery prompt wants to say — how many rounds have gone, how many there are
+// — are both known only to the emitter: the first is an engine macro keyed by
+// TASK IDS the author never sees, and the second lives in agents.toml.
+//
+// Written literally into a prompt, both go wrong. The shipped chains hardcoded
+// "12 main rounds" while enforcing 60, and a converted declaration that spelled
+// out its own task ids would break the moment its directory was renamed.
+const (
+	MacroRoundsUsed         = "{{rounds_used}}"
+	MacroRecoveryRoundsUsed = "{{recovery_rounds_used}}"
+	MacroMainRounds         = "{{main_rounds}}"
+	MacroRecoveryRounds     = "{{recovery_rounds}}"
+)
+
+// expandLoopMacros resolves the loop macros for the leaf emitted under id.
+//
+// The round COUNTERS become engine macros over this leaf's own edges, so the
+// author never names a task; the BUDGETS become the configured numbers, so a
+// prompt cannot claim a budget the chain does not enforce.
+func expandLoopMacros(prompt, id string, cfg Config) string {
+	if prompt == "" {
+		return prompt
+	}
+	r := strings.NewReplacer(
+		MacroRoundsUsed, "{{edge_count:"+id+"-agent->"+id+"-tools}}",
+		MacroRecoveryRoundsUsed, "{{edge_count:"+id+"-recovery->"+id+"-recovery-tools}}",
+		MacroMainRounds, strconv.Itoa(cfg.Chain.MainRounds),
+		MacroRecoveryRounds, strconv.Itoa(cfg.Chain.RecoveryRounds),
+	)
+	return r.Replace(prompt)
+}
+
+// refuseUnsafe rejects a declaration that asks to skip every approval.
+func refuseUnsafe(ir *AgentIR) error {
+	if ir.Posture != PostureUnsafe {
+		return nil
+	}
+	return fmt.Errorf("agentdecl: %s asks for permissionMode: bypassPermissions — to skip every approval. "+
+		"contenox will not run an agent that way. Use acceptEdits and grant what it actually needs "+
+		"under [policy.postures] or [[policy.always_allow]] in agents.toml, where the grant is written down", ir.Name)
+}
+
+// leafLoop is one agent's tool loop: a turn, its tools, and — when recoveryIR
+// is non-nil — a bounded second attempt with its own prompt. Exhaustion and
+// failure both land on terminalID, which the caller owns so a tree of leaves
+// can share one.
+//
+// recoveryIR is separate from ir because a recovery prompt is a DIFFERENT
+// prompt: it is written for an agent that has already failed once. Passing the
+// same IR twice reproduces the single-agent behaviour.
+func leafLoop(ir, recoveryIR *AgentIR, cfg Config, id, terminalID string) []taskengine.TaskDefinition {
+	agent := id + "-agent"
+	tools := id + "-tools"
+	recovery := id + "-recovery"
+
+	exec := execConfig(ir, cfg, id, true)
+	toolExec := execConfig(ir, cfg, id, false)
+	prompt := expandLoopMacros(systemInstruction(ir), id, cfg)
+
+	// With no recovery declaration there is no second attempt: an exhausted or
+	// failed turn goes straight to the terminal, which is what the shipped
+	// review branch does.
+	exhausted := recovery
+	if recoveryIR == nil {
+		exhausted = terminalID
+	}
+
+	out := []taskengine.TaskDefinition{
+		{
+			ID:                agent,
+			Description:       "Imported agent turn. Calls tools or answers directly.",
+			Handler:           taskengine.HandleChatCompletion,
+			SystemInstruction: prompt,
+			ExecuteConfig:     exec,
+			RetryOnFailure:    cfg.Chain.RetryOnFailure,
+			Transition: taskengine.TaskTransition{
+				OnFailure: exhausted,
+				Branches: []taskengine.TransitionBranch{
+					{
+						Operator: taskengine.OpEdgeTraversedAtLeast,
+						Edge:     agent + "->" + tools,
+						When:     strconv.Itoa(cfg.Chain.MainRounds),
+						Goto:     exhausted,
 					},
-				},
-			},
-			{
-				ID:            tools,
-				Description:   "Runs the tool calls the agent turn requested.",
-				Handler:       taskengine.HandleExecuteToolCalls,
-				ExecuteConfig: toolExec,
-				InputVar:      agent,
-				Transition: taskengine.TaskTransition{
-					Branches: []taskengine.TransitionBranch{
-						{Operator: taskengine.OpDefault, When: "", Goto: agent},
-					},
-				},
-			},
-			{
-				ID:                recovery,
-				Description:       "Bounded second attempt after the main stage exhausted its rounds or failed.",
-				Handler:           taskengine.HandleChatCompletion,
-				SystemInstruction: prompt,
-				ExecuteConfig:     exec,
-				InputVar:          agent,
-				Transition: taskengine.TaskTransition{
-					OnFailure: summarise,
-					Branches: []taskengine.TransitionBranch{
-						{
-							Operator: taskengine.OpEdgeTraversedAtLeast,
-							Edge:     recovery + "->" + recoveryTools,
-							When:     strconv.Itoa(cfg.Chain.RecoveryRounds),
-							Goto:     summarise,
-						},
-						{Operator: taskengine.OpEquals, When: "tool_call", Goto: recoveryTools},
-						{Operator: taskengine.OpDefault, When: "", Goto: taskengine.TermEnd},
-					},
-				},
-			},
-			{
-				ID:            recoveryTools,
-				Description:   "Runs the tool calls the recovery turn requested.",
-				Handler:       taskengine.HandleExecuteToolCalls,
-				ExecuteConfig: toolExec,
-				InputVar:      recovery,
-				Transition: taskengine.TaskTransition{
-					Branches: []taskengine.TransitionBranch{
-						{Operator: taskengine.OpDefault, When: "", Goto: recovery},
-					},
-				},
-			},
-			{
-				ID:                summarise,
-				Description:       "States what was attempted and why it stopped.",
-				Handler:           taskengine.HandleChatCompletion,
-				SystemInstruction: "Report what was attempted and why it could not be completed. Be specific and brief; do not retry.",
-				ExecuteConfig:     summariseConfig(cfg),
-				InputVar:          recovery,
-				Transition: taskengine.TaskTransition{
-					Branches: []taskengine.TransitionBranch{
-						{Operator: taskengine.OpDefault, When: "", Goto: taskengine.TermEnd},
-					},
+					{Operator: taskengine.OpEquals, When: "tool_call", Goto: tools},
+					{Operator: taskengine.OpDefault, When: "", Goto: taskengine.TermEnd},
 				},
 			},
 		},
-	}, nil
+		{
+			ID:            tools,
+			Description:   "Runs the tool calls the agent turn requested.",
+			Handler:       taskengine.HandleExecuteToolCalls,
+			ExecuteConfig: toolExec,
+			InputVar:      agent,
+			Transition: taskengine.TaskTransition{
+				Branches: []taskengine.TransitionBranch{
+					{Operator: taskengine.OpDefault, When: "", Goto: agent},
+				},
+			},
+		},
+	}
+	if recoveryIR == nil {
+		return out
+	}
+	return append(out, recoveryPair(recoveryIR, cfg, id, terminalID)...)
+}
+
+// recoveryPair is the bounded second attempt and its tools.
+func recoveryPair(ir *AgentIR, cfg Config, id, terminalID string) []taskengine.TaskDefinition {
+	agent := id + "-agent"
+	recovery := id + "-recovery"
+	recoveryTools := id + "-recovery-tools"
+	return []taskengine.TaskDefinition{
+		{
+			ID:                recovery,
+			Description:       "Bounded second attempt after the main stage exhausted its rounds or failed.",
+			Handler:           taskengine.HandleChatCompletion,
+			SystemInstruction: expandLoopMacros(systemInstruction(ir), id, cfg),
+			ExecuteConfig:     execConfig(ir, cfg, id, true),
+			InputVar:          agent,
+			Transition: taskengine.TaskTransition{
+				OnFailure: terminalID,
+				Branches: []taskengine.TransitionBranch{
+					{
+						Operator: taskengine.OpEdgeTraversedAtLeast,
+						Edge:     recovery + "->" + recoveryTools,
+						When:     strconv.Itoa(cfg.Chain.RecoveryRounds),
+						Goto:     terminalID,
+					},
+					{Operator: taskengine.OpEquals, When: "tool_call", Goto: recoveryTools},
+					{Operator: taskengine.OpDefault, When: "", Goto: taskengine.TermEnd},
+				},
+			},
+		},
+		{
+			ID:            recoveryTools,
+			Description:   "Runs the tool calls the recovery turn requested.",
+			Handler:       taskengine.HandleExecuteToolCalls,
+			ExecuteConfig: execConfig(ir, cfg, id, false),
+			InputVar:      recovery,
+			Transition: taskengine.TaskTransition{
+				Branches: []taskengine.TransitionBranch{
+					{Operator: taskengine.OpDefault, When: "", Goto: recovery},
+				},
+			},
+		},
+	}
+}
+
+// terminalTask states what was attempted and why it stopped. One per chain,
+// however many loops feed it.
+func terminalTask(id string, cfg Config, inputVar string) taskengine.TaskDefinition {
+	return taskengine.TaskDefinition{
+		ID:                id,
+		Description:       "States what was attempted and why it stopped.",
+		Handler:           taskengine.HandleChatCompletion,
+		SystemInstruction: "Report what was attempted and why it could not be completed. Be specific and brief; do not retry.",
+		ExecuteConfig:     summariseConfig(cfg),
+		InputVar:          inputVar,
+		Transition: taskengine.TaskTransition{
+			Branches: []taskengine.TransitionBranch{
+				{Operator: taskengine.OpDefault, When: "", Goto: taskengine.TermEnd},
+			},
+		},
+	}
 }
 
 func execConfig(ir *AgentIR, cfg Config, agentID string, withPrompt bool) *taskengine.LLMExecutionConfig {

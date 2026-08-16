@@ -226,17 +226,24 @@ func seedBeamChainIfMissing(contenoxDir string) error {
 	return os.WriteFile(dst, []byte(initBeamChain), 0644)
 }
 
+// initChainFiles are the chains still shipped as JSON.
+//
+// ⚠ contenox, run, acp, acpx and beam are NOT here: they are declarations under
+// agents/, seeded by agentdecl.Preseed and transpiled into .generated on every
+// discovery pass. Shipping both would be two sources for one agent, and the
+// JSON would be the one nobody edits — which is what made the recommended
+// authoring format look optional.
+//
+// The four that remain are the ones the declaration format does not describe:
+// compact and fim are single-task chains with no tool loop, and planner and
+// oracle carry stages (a settle check, an early exit) with no counterpart in a
+// declaration. Converting them would mean inventing behaviour, so they stay.
 var initChainFiles = []struct {
 	Name    string
 	Content string
 }{
-	{chainAgentContenoxFilename, initChain},
-	{chainAgentRunFilename, initRunChain},
 	{chainCompactDefaultFilename, initCompactChain},
-	{chainAgentACPFilename, initACPChain},
 	{chainFIMDefaultFilename, initFIMChain},
-	{chainAgentACPXFilename, initACPXChain},
-	{chainAgentBeamFilename, initBeamChain},
 	{chainPlannerDefaultFilename, initPlannerChain},
 	{chainOracleDefaultFilename, initOracleDefaultChain},
 }
@@ -364,6 +371,9 @@ func RunGlobalInit(out io.Writer) error {
 	if _, err := agentdecl.Preseed(homeDir); err != nil {
 		return err
 	}
+	// Same reason as RunInit: the seeded declarations ARE the shipped agents, so
+	// they have to be chains before anything looks one up.
+	transpileSeededAgents(io.Discard, homeDir)
 	return nil
 }
 
@@ -446,6 +456,9 @@ func RunLocalInit(out io.Writer, force, update bool, contenoxDir, projectName st
 	seeded, err := agentdecl.Preseed(contenoxDir)
 	if err != nil {
 		return err
+	}
+	if problems := transpileSeededAgents(out, contenoxDir); problems != nil {
+		printSyncProblems(out, problems)
 	}
 	for _, path := range seeded {
 		fmt.Fprintf(out, "  Created %s\n", path)
@@ -568,6 +581,13 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 	}
 	if _, err := agentdecl.Preseed(homeDir); err != nil {
 		return err
+	}
+	// The seeded declarations become chains here rather than at first use, so a
+	// fresh install has a working contenox/acp/beam/run before anything asks for
+	// one. Reported, not fatal: a declaration that will not transpile is worth
+	// naming, and the rest of init still stands.
+	if problems := transpileSeededAgents(out, homeDir); problems != nil {
+		printSyncProblems(out, problems)
 	}
 
 	fmt.Fprintln(out, "Done.")
@@ -718,4 +738,38 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 	fmt.Fprintln(out, "")
 	fmt.Fprintln(out, "  Run 'contenox --help' for full usage.")
 	return nil
+}
+
+// transpileSeededAgents turns the declarations under contenoxDir/agents into
+// chains in .generated, and returns whatever refused.
+func transpileSeededAgents(out io.Writer, contenoxDir string) []agentdecl.SyncResult {
+	cfg, err := agentdecl.Load(contenoxDir)
+	if err != nil {
+		fmt.Fprintf(out, "  note: could not read %s (%v); declared agents were not transpiled\n",
+			agentdecl.ConfigFilename, err)
+		return nil
+	}
+	dirs := agentdecl.DiscoverSourceDirs([]string{contenoxDir}, nil)
+	if len(dirs) == 0 {
+		return nil
+	}
+	generated := filepath.Join(contenoxDir, agentdecl.GeneratedDirName)
+	results, err := agentdecl.Sync(dirs, generated, cfg)
+	if err != nil {
+		fmt.Fprintf(out, "  note: transpiling declared agents failed (%v)\n", err)
+		return nil
+	}
+	made := 0
+	var problems []agentdecl.SyncResult
+	for _, r := range results {
+		if r.Action == agentdecl.ActionRefused {
+			problems = append(problems, r)
+			continue
+		}
+		made++
+	}
+	if made > 0 {
+		fmt.Fprintf(out, "  Transpiled %d declared agent(s) into %s%c\n", made, generated, filepath.Separator)
+	}
+	return problems
 }

@@ -56,6 +56,12 @@ type RoutingDefaults struct {
 	// PinModel emits the source's own model instead of the templates, when the
 	// registry could resolve it.
 	PinModel bool `toml:"pin_model"`
+	// RouterModel and RouterProvider run a tree's classifier nodes. Choosing a
+	// branch is a one-word answer, so it does not need the model the branch
+	// itself will use — the shipped chains already route on the alt model.
+	// Empty falls back to Model/Provider.
+	RouterModel    string `toml:"router_model"`
+	RouterProvider string `toml:"router_provider"`
 }
 
 // PolicyDefaults describe the emitted human-in-the-loop policy.

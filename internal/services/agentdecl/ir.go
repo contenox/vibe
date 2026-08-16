@@ -128,10 +128,13 @@ type AgentIR struct {
 	Posture        Posture              `json:"posture"`
 	// Think maps onto execute_config.think; the source and contenox
 	// vocabularies for reasoning effort coincide.
-	Think       string     `json:"think,omitempty"`
-	Temperature *float32   `json:"temperature,omitempty"`
-	Budgets     Budgets    `json:"budgets"`
-	Unmapped    []Unmapped `json:"unmapped,omitempty"`
+	Think string `json:"think,omitempty"`
+	// DefaultBranch names the child a ROUTER falls back to. Meaningful only on
+	// a directory that has children; see AgentTree.
+	DefaultBranch string     `json:"default_branch,omitempty"`
+	Temperature   *float32   `json:"temperature,omitempty"`
+	Budgets       Budgets    `json:"budgets"`
+	Unmapped      []Unmapped `json:"unmapped,omitempty"`
 }
 
 // DeclaredToolsetNames are the registered names of the sources this agent

@@ -135,12 +135,10 @@ func TestUnit_RunLocalInit_SeedsOnlyConventionNames(t *testing.T) {
 	var out bytes.Buffer
 	require.NoError(t, RunLocalInit(&out, false, false, workspace, ""))
 
+	// contenox, run, acp, acpx and beam are no longer seeded as JSON: they are
+	// declarations under agents/, transpiled into .generated. What remains is
+	// the set a declaration cannot describe.
 	wantChains := []string{
-		"chain-agent-contenox.json",
-		"chain-agent-run.json",
-		"chain-agent-acp.json",
-		"chain-agent-acpx.json",
-		"chain-agent-beam.json",
 		"chain-fim-default.json",
 		"chain-compact-default.json",
 		"chain-planner-default.json",
@@ -181,7 +179,21 @@ func TestUnit_InitChainFiles_MatchConventionAndGlobalParity(t *testing.T) {
 	for _, f := range initChainFiles {
 		require.Contains(t, systemNames, f.Name)
 	}
+	// A legacy rename target only has to be a seeded file when that agent is
+	// still shipped as JSON. The five that became declarations are renamed on
+	// disk for an operator who customised them, then read as an ordinary
+	// operator copy — they are simply no longer written by init.
+	declared := map[string]bool{
+		chainAgentContenoxFilename: true,
+		chainAgentRunFilename:      true,
+		chainAgentACPFilename:      true,
+		chainAgentACPXFilename:     true,
+		chainAgentBeamFilename:     true,
+	}
 	for _, newName := range legacyChainRenames {
+		if declared[newName] {
+			continue
+		}
 		require.Truef(t, seen[newName], "rename target %s must be a seeded file", newName)
 	}
 }

@@ -69,15 +69,15 @@ func TestUnit_LookupSystemFile_PrefersAnOperatorCopyOverTheShippedOne(t *testing
 	require.NoError(t, RunGlobalInit(&out))
 	contenoxDir := filepath.Join(home, ".contenox")
 
-	shipped, err := lookupSystemFile("", chainAgentRunFilename)
+	shipped, err := lookupSystemFile("", chainPlannerDefaultFilename)
 	require.NoError(t, err)
-	require.Equal(t, filepath.Join(contenoxDir, SystemDirName, chainAgentRunFilename), shipped)
+	require.Equal(t, filepath.Join(contenoxDir, SystemDirName, chainPlannerDefaultFilename), shipped)
 
 	// Copying one up a level is how you take ownership of it.
-	owned := filepath.Join(contenoxDir, chainAgentRunFilename)
-	require.NoError(t, os.WriteFile(owned, []byte(`{"id":"chain-run","tasks":[]}`), 0o644))
+	owned := filepath.Join(contenoxDir, chainPlannerDefaultFilename)
+	require.NoError(t, os.WriteFile(owned, []byte(`{"id":"chain-planner","tasks":[]}`), 0o644))
 
-	got, err := lookupSystemFile("", chainAgentRunFilename)
+	got, err := lookupSystemFile("", chainPlannerDefaultFilename)
 	require.NoError(t, err)
 	require.Equal(t, owned, got, "an operator copy at the top level wins")
 }
@@ -110,19 +110,19 @@ func TestUnit_GlobalInit_LeavesACustomisedChainOwningItsName(t *testing.T) {
 	contenoxDir := filepath.Join(home, ".contenox")
 	require.NoError(t, os.MkdirAll(contenoxDir, 0o750))
 
-	mine := filepath.Join(contenoxDir, chainAgentRunFilename)
-	require.NoError(t, os.WriteFile(mine, []byte(`{"id":"chain-run","tasks":[]}`), 0o644))
+	mine := filepath.Join(contenoxDir, chainPlannerDefaultFilename)
+	require.NoError(t, os.WriteFile(mine, []byte(`{"id":"chain-planner","tasks":[]}`), 0o644))
 
 	var out bytes.Buffer
 	require.NoError(t, RunGlobalInit(&out))
 
 	body, err := os.ReadFile(mine)
 	require.NoError(t, err)
-	require.Equal(t, `{"id":"chain-run","tasks":[]}`, string(body), "init must not overwrite a customised chain")
-	require.NoFileExists(t, filepath.Join(contenoxDir, SystemDirName, chainAgentRunFilename),
+	require.Equal(t, `{"id":"chain-planner","tasks":[]}`, string(body), "init must not overwrite a customised chain")
+	require.NoFileExists(t, filepath.Join(contenoxDir, SystemDirName, chainPlannerDefaultFilename),
 		"no shipped copy is written under a name the operator already owns")
 
-	resolved, err := lookupSystemFile("", chainAgentRunFilename)
+	resolved, err := lookupSystemFile("", chainPlannerDefaultFilename)
 	require.NoError(t, err)
 	require.Equal(t, mine, resolved)
 }

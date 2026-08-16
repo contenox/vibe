@@ -22,13 +22,14 @@ const (
 // ReservedNames are the shipped agents a declaration may not take the id of.
 // The workspace directory is the first root chainagents scans, so a declaration
 // claiming one would shadow the shipped agent rather than error.
+//
+// ⚠ chain-contenox, chain-acp, chain-acpx, chain-beam and chain-run are NOT
+// here any more. They stopped being shipped JSON and became the seeded
+// declarations under agents/, so reserving their names would refuse the very
+// files init writes. They are ordinary declarations now, and a workspace copy
+// shadowing one is the same "your copy wins" rule every chain already follows.
 var ReservedNames = map[string]bool{
-	"chain-contenox": true,
-	"chain-acp":      true,
-	"chain-acpx":     true,
-	"chain-beam":     true,
-	"chain-run":      true,
-	"agent-planner":  true,
+	"agent-planner": true,
 }
 
 // marshalWithSchema splices the $schema key in ahead of the marshalled body so
