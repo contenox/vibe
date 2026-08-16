@@ -2,10 +2,12 @@ package libbus
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"time"
 
+	natsclient "github.com/nats-io/nats.go"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/nats"
 )
@@ -40,6 +42,25 @@ func SetupNatsInstance(ctx context.Context) (string, testcontainers.Container, f
 	cons, err := natsContainer.ConnectionString(ctx)
 	if err != nil {
 		return "", nil, cleanup, err
+	}
+	// The nats module's readiness wait can return before the server accepts
+	// connections (observed as a first-connect EOF under host load), so probe
+	// the URL here rather than leaking that race into every caller.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		probe, cerr := natsclient.Connect(cons)
+		if cerr == nil {
+			probe.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			return "", nil, cleanup, fmt.Errorf("nats at %s never accepted a connection: %w", cons, cerr)
+		}
+		select {
+		case <-ctx.Done():
+			return "", nil, cleanup, ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
 	}
 	return cons, natsContainer, cleanup, nil
 }

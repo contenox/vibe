@@ -32,8 +32,7 @@ func TestUnit_ACPToolset_CarriesTheSharedToolsets(t *testing.T) {
 	cases := []struct {
 		provider string
 		tool     string
-	}{
-	}
+	}{}
 	for _, tc := range cases {
 		repo, ok := tools[tc.provider]
 		require.Truef(t, ok, "ACP toolset must register provider %q", tc.provider)

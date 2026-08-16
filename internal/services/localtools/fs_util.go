@@ -64,7 +64,6 @@ func sniffPrefix(content []byte) []byte {
 	return content
 }
 
-
 func sniffBinarySample(sample []byte) bool {
 	return isBinarySample(sample)
 }

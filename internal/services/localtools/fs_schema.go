@@ -268,7 +268,6 @@ func (h *LocalFSTools) GetToolsForToolsByName(ctx context.Context, name string) 
 			"start_line": fsProp("integer", "Starting line number (1-based, default 1)"),
 			"end_line":   fsProp("integer", "Ending line number, inclusive (optional)"),
 		}, "path"),
-
 	}
 
 	if name == h.name {
