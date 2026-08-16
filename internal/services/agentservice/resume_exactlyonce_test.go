@@ -91,8 +91,6 @@ func newSEInstance(t *testing.T, dbPath, effectPath string, withHook bool) *seIn
 	sink := &recordingSink{}
 	wrapper := localtools.NewHITLWrapper(&sideEffectTools{path: effectPath}, awayAsk,
 		approveAllPolicy{ApprovalRecorder: recorder, Service: hitl}, libtracker.NoopTracker{}, sink)
-	// short enough that the ask parks and the run checkpoints within the test
-	wrapper.SetParkWindow(20 * time.Millisecond)
 
 	cctx := taskengine.WithTaskEventSink(ctx, sink)
 	exec, err := taskengine.NewExec(cctx, stubModelRepo{}, wrapper, libtracker.NoopTracker{})

@@ -28,7 +28,7 @@ func newAskerInstance(t *testing.T, dbPath string) *attentionInstance {
 	hitl := hitlservice.NewWithDefaultPolicy(hitlservice.NewFSPolicySource(t.TempDir()), "blind-tenant", store, libtracker.NoopTracker{}, "")
 	missions := missionservice.New(db)
 
-	tools := missiontools.New(missions, missiontools.WithAttentionAsker(hitlAttentionAsker{hitl: hitl}), missiontools.WithAttentionParkWindow(20*time.Millisecond))
+	tools := missiontools.New(missions, missiontools.WithAttentionAsker(hitlAttentionAsker{hitl: hitl}))
 
 	exec, err := taskengine.NewExec(ctx, stubModelRepo{}, tools, libtracker.NoopTracker{})
 	require.NoError(t, err)
@@ -74,7 +74,6 @@ func suspendOnFirstAsk(t *testing.T, inst *attentionInstance, missionID string) 
 	require.ErrorIs(t, err, libdb.ErrNotFound, "the second question has not been asked yet")
 }
 
-// TestSystem_Resume_SecondQuestionOnTheResumePathEngine_ReachesAHuman pins that a resumed unit's second question, on an engine that registers a real attention asker, parks and becomes an answerable ask rather than a self-answered blocker report.
 func TestSystem_Resume_SecondQuestionOnTheResumePathEngine_ReachesAHuman(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "blind.db")
 	ctx := context.Background()

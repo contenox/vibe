@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -78,6 +79,10 @@ type stubAgent struct {
 
 	useTerminal    bool
 	clientTerminal atomic.Bool
+
+	useFS         bool
+	clientFSRead  atomic.Bool
+	clientFSWrite atomic.Bool
 }
 
 func newStubAgent(c *libacp.AgentSideConnection) *stubAgent {
@@ -90,6 +95,7 @@ func newStubAgent(c *libacp.AgentSideConnection) *stubAgent {
 		advertiseModes:                 os.Getenv("ACP_STUB_ADVERTISE_MODES") == "1",
 		advertiseModels:                os.Getenv("ACP_STUB_ADVERTISE_MODELS") == "1",
 		useTerminal:                    os.Getenv("ACP_STUB_USE_TERMINAL") == "1",
+		useFS:                          os.Getenv("ACP_STUB_USE_FS") == "1",
 	}
 }
 
@@ -149,6 +155,8 @@ func negotiateProtocolVersion(client int) int {
 
 func (a *stubAgent) Initialize(_ context.Context, req libacp.InitializeRequest) (libacp.InitializeResponse, error) {
 	a.clientTerminal.Store(req.ClientCapabilities.Terminal)
+	a.clientFSRead.Store(req.ClientCapabilities.FS.ReadTextFile)
+	a.clientFSWrite.Store(req.ClientCapabilities.FS.WriteTextFile)
 	return libacp.InitializeResponse{
 		ProtocolVersion: negotiateProtocolVersion(req.ProtocolVersion),
 		AgentInfo: &libacp.Implementation{
@@ -364,11 +372,77 @@ func (a *stubAgent) Prompt(ctx context.Context, req libacp.PromptRequest) (libac
 		return a.promptCallbacks(ctx, req)
 	case strings.Contains(text, gatedActionTrigger):
 		return a.promptGatedAction(ctx, req)
+	case strings.Contains(text, promptKindsTrigger):
+		return a.promptKinds(req)
+	case a.useFS:
+		return a.promptFS(ctx, req)
 	case a.useTerminal:
 		return a.promptTerminal(ctx, req)
 	default:
 		return a.promptPlain(ctx, req)
 	}
+}
+
+const promptKindsTrigger = "prompt_kinds"
+
+func (a *stubAgent) promptKinds(req libacp.PromptRequest) (libacp.PromptResponse, error) {
+	kinds := make([]string, 0, len(req.Prompt))
+	for _, block := range req.Prompt {
+		kinds = append(kinds, block.Type)
+	}
+	if err := a.conn.SessionUpdate(libacp.SessionNotification{
+		SessionID: req.SessionID,
+		Update:    libacp.NewAgentMessageChunk("kinds=" + strings.Join(kinds, ",")),
+	}); err != nil {
+		return libacp.PromptResponse{}, err
+	}
+	return libacp.PromptResponse{StopReason: libacp.StopReasonEndTurn}, nil
+}
+
+const stubFSFileName = "stub-fs.txt"
+
+const stubFSMarker = "stub-fs-42"
+
+func (a *stubAgent) promptFS(ctx context.Context, req libacp.PromptRequest) (libacp.PromptResponse, error) {
+	report := fmt.Sprintf("fscap=%v/%v", a.clientFSRead.Load(), a.clientFSWrite.Load())
+	if !a.clientFSRead.Load() || !a.clientFSWrite.Load() {
+		return a.fsReport(req, report)
+	}
+
+	a.mu.Lock()
+	sess := a.sessions[req.SessionID]
+	a.mu.Unlock()
+	path := stubFSFileName
+	if sess != nil && sess.cwd != "" {
+		path = filepath.Join(sess.cwd, stubFSFileName)
+	}
+
+	if _, err := a.conn.WriteTextFile(ctx, libacp.WriteTextFileRequest{
+		SessionID: req.SessionID,
+		Path:      path,
+		Content:   stubFSMarker,
+	}); err != nil {
+		return a.fsReport(req, report+" write-error="+err.Error())
+	}
+
+	read, err := a.conn.ReadTextFile(ctx, libacp.ReadTextFileRequest{
+		SessionID: req.SessionID,
+		Path:      path,
+	})
+	if err != nil {
+		return a.fsReport(req, report+" read-error="+err.Error())
+	}
+	return a.fsReport(req, fmt.Sprintf("%s path=%q content=%q", report, path, read.Content))
+}
+
+func (a *stubAgent) fsReport(req libacp.PromptRequest, msg string) (libacp.PromptResponse, error) {
+	if err := a.conn.SessionUpdate(libacp.SessionNotification{
+		SessionID: req.SessionID,
+		Update:    libacp.NewAgentMessageChunk("fs-scenario " + msg),
+	}); err != nil {
+		return libacp.PromptResponse{}, err
+	}
+	return libacp.PromptResponse{StopReason: libacp.StopReasonEndTurn}, nil
 }
 
 func (a *stubAgent) promptTerminal(ctx context.Context, req libacp.PromptRequest) (libacp.PromptResponse, error) {

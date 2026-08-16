@@ -451,7 +451,7 @@ Answering a mission's pending question or permission gate is not a mission verb 
 
 ### `contenox approvals`
 
-The durable ask inbox: list pending approvals and questions, and answer them. A gated tool call or a mission's question parks for a short window, then checkpoints the run and releases its process; the ask stays a durable row any process can answer later.
+The durable ask inbox: list pending approvals and questions, and answer them. A gated tool call or a mission's question becomes a durable ask the moment it is raised, and the run checkpoints and releases its process rather than waiting; the ask is a row any process can answer later.
 
 ```bash
 contenox approvals list

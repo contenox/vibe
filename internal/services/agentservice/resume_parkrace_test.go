@@ -27,16 +27,14 @@ type raceAnswerAsker struct {
 
 func (a *raceAnswerAsker) RaiseAttention(ctx context.Context, ask missiontools.AttentionAsk) (string, error) {
 	answer, err := a.hitl.RequestAttention(ctx, hitlservice.AttentionRequest{
-		Summary:    ask.Summary,
-		Detail:     ask.Detail,
-		MissionID:  ask.MissionID,
-		AskID:      ask.AskID,
-		ParkWindow: ask.ParkWindow,
+		Summary:   ask.Summary,
+		Detail:    ask.Detail,
+		MissionID: ask.MissionID,
+		AskID:     ask.AskID,
 	}, taskengine.NoopTaskEventSink{})
 	var pending *hitlservice.AttentionPendingError
 	if err != nil && errors.As(err, &pending) {
 		if text, ok := a.raceOn[ask.Summary]; ok {
-			// THE WINDOW: the waiter is already gone (RequestAttention's deferred delete) and the checkpoint can't exist yet (this call hasn't returned), so the resume hook finds nothing
 			if answerErr := a.hitl.Answer(ctx, pending.AskID, text); answerErr == nil {
 				a.mu.Lock()
 				a.raced = append(a.raced, pending.AskID)
@@ -81,12 +79,11 @@ func toolResultsFor(t *testing.T, db libdb.DBManager, sessionID, callID string) 
 	return out
 }
 
-// TestSystem_AttentionParkRace_AnswerInsideTheWindowStillResumesTheOriginalPrompt pins that an answer landing in the park-window/checkpoint gap still resumes the run once the checkpoint is durable, without needing the stranded-checkpoint sweep.
-func TestSystem_AttentionParkRace_AnswerInsideTheWindowStillResumesTheOriginalPrompt(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "park-race-prompt.db")
+func TestSystem_AttentionReleaseRace_AnswerInsideTheGapStillResumesTheOriginalPrompt(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "release-race-prompt.db")
 	ctx := context.Background()
 	const callID = "call-race-1"
-	const sessionID = "sess-park-race"
+	const sessionID = "sess-release-race"
 
 	asker := &raceAnswerAsker{raceOn: map[string]string{"which project did you mean?": "the contenox runtime repo"}}
 	inst := newAttentionInstanceWithAsker(t, dbPath, func(h hitlservice.Service) missiontools.AttentionAsker {
@@ -106,7 +103,7 @@ func TestSystem_AttentionParkRace_AnswerInsideTheWindowStillResumesTheOriginalPr
 		ChainRef:   "attention-chain.json",
 	})
 	require.NoError(t, err)
-	require.Equal(t, []string{callID}, asker.racedAsks(), "the test must actually have hit the window")
+	require.Equal(t, []string{callID}, asker.racedAsks(), "the test must actually have hit the gap")
 
 	require.NotEqual(t, agentservice.StopSuspended, resp.StopReason,
 		"an answered ask must not leave the run reported as suspended")
@@ -123,12 +120,11 @@ func TestSystem_AttentionParkRace_AnswerInsideTheWindowStillResumesTheOriginalPr
 	require.Empty(t, stranded, "nothing may be left for the stranded-checkpoint sweep to find")
 }
 
-// TestSystem_AttentionParkRace_AnswerInsideTheWindowResumesARESUMEDRun pins the same park-window race one level deeper, where the suspension is raised by ResumeFromCheckpoint and the second question's answer lands inside the gap.
-func TestSystem_AttentionParkRace_AnswerInsideTheWindowResumesARESUMEDRun(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "park-race-resume.db")
+func TestSystem_AttentionReleaseRace_AnswerInsideTheGapResumesARESUMEDRun(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "release-race-resume.db")
 	ctx := context.Background()
 	const callA, callB = "call-race-a", "call-race-b"
-	const sessionID = "sess-park-race-resume"
+	const sessionID = "sess-release-race-resume"
 
 	asker := &raceAnswerAsker{raceOn: map[string]string{"second question": "answer to the second"}}
 	inst := newAttentionInstanceWithAsker(t, dbPath, func(h hitlservice.Service) missiontools.AttentionAsker {
@@ -148,13 +144,12 @@ func TestSystem_AttentionParkRace_AnswerInsideTheWindowResumesARESUMEDRun(t *tes
 		ChainRef:   "attention-chain.json",
 	})
 	require.NoError(t, err)
-	require.Equal(t, agentservice.StopSuspended, resp.StopReason, "the first question parks unanswered")
+	require.Equal(t, agentservice.StopSuspended, resp.StopReason, "the first question is released unanswered")
 	require.Equal(t, callA, resp.SuspendedApprovalID)
-	require.Empty(t, asker.racedAsks(), "only the second question races the window")
+	require.Empty(t, asker.racedAsks(), "only the second question races the gap")
 
-	// answering the first question resumes the run, which re-enters the batch and raises the second question, whose answer lands inside the window
 	require.NoError(t, inst.hitl.Answer(ctx, callA, "answer to the first"))
-	require.Equal(t, []string{callB}, asker.racedAsks(), "the resumed run's ask must have hit the window")
+	require.Equal(t, []string{callB}, asker.racedAsks(), "the resumed run's ask must have hit the gap")
 
 	rowB, err := inst.store.GetHITLApproval(ctx, callB)
 	require.NoError(t, err)
@@ -162,7 +157,7 @@ func TestSystem_AttentionParkRace_AnswerInsideTheWindowResumesARESUMEDRun(t *tes
 
 	_, err = inst.store.GetChainCheckpoint(ctx, callB)
 	require.ErrorIs(t, err, libdb.ErrNotFound,
-		"an answered ask whose answer landed in the park window must not leave its checkpoint stranded")
+		"an answered ask whose answer landed in the gap must not leave its checkpoint stranded")
 
 	stranded, err := agentservice.StrandedCheckpoints(ctx, inst.store, 10)
 	require.NoError(t, err)

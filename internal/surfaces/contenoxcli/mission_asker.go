@@ -28,12 +28,11 @@ func (a missionAttentionAsker) RaiseAttention(ctx context.Context, ask missionto
 		}
 	}
 	answer, err := a.hitl.RequestAttention(ctx, hitlservice.AttentionRequest{
-		Summary:    summary,
-		Detail:     detail,
-		MissionID:  missionID,
-		AgentName:  agentName,
-		AskID:      ask.AskID,
-		ParkWindow: ask.ParkWindow,
+		Summary:   summary,
+		Detail:    detail,
+		MissionID: missionID,
+		AgentName: agentName,
+		AskID:     ask.AskID,
 		OnRaised: func(askID string) {
 			a.publishAsked(ctx, missionservice.AttentionAskedEvent{
 				MissionID:       missionID,

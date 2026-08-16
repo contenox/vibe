@@ -42,22 +42,15 @@ type AttentionRequest struct {
 	// before the wait begins; runs inline, so keep it cheap and non-blocking.
 	OnRaised func(askID string)
 
-	// AskID, when set, is the durable row's ID; empty generates a fresh uuid.
 	AskID string
-
-	// ParkWindow, when > 0, bounds how long RequestAttention blocks before
-	// returning *AttentionPendingError with the row left pending.
-	ParkWindow time.Duration
 }
 
-// AttentionPendingError reports an attention ask's park window elapsed
-// unanswered; the row is still pending, and the caller should checkpoint.
 type AttentionPendingError struct {
 	AskID string
 }
 
 func (e *AttentionPendingError) Error() string {
-	return fmt.Sprintf("hitlservice: attention ask %s is pending past its park window; suspend and resume on answer", e.AskID)
+	return fmt.Sprintf("hitlservice: attention ask %s is pending; suspend and resume on answer", e.AskID)
 }
 
 // IsAttentionAsk reports whether row is an attention ask (expects data)
@@ -89,6 +82,7 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 	}
 
 	askID := req.AskID
+	releaseOnRecord := askID != ""
 	if askID == "" {
 		askID = uuid.NewString()
 	}
@@ -147,6 +141,10 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 	req.AskID = askID
 	s.offer(ctx, adjudicationFromAttentionRequest(askID, req))
 
+	if releaseOnRecord {
+		return "", &AttentionPendingError{AskID: askID}
+	}
+
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -154,23 +152,8 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 	poll := time.NewTicker(attentionPollInterval)
 	defer poll.Stop()
 
-	// A nil channel arm never fires: unset ParkWindow disables the typed-pending-error path below.
-	var park <-chan time.Time
-	if req.ParkWindow > 0 {
-		park = time.After(req.ParkWindow)
-	}
-
 	for {
 		select {
-		case <-park:
-			// One last read: an answer landed durably during the window wins over parking.
-			if row, err := s.approvals.GetHITLApproval(ctx, askID); err == nil && row.State != runtimetypes.HITLApprovalPending {
-				if text := AnswerOf(row); strings.TrimSpace(text) != "" {
-					return text, nil
-				}
-				return "", ErrAttentionUnanswered
-			}
-			return "", &AttentionPendingError{AskID: askID}
 		case ans := <-ch:
 			if !ans.approved || strings.TrimSpace(ans.text) == "" {
 				// Refusal or empty text: the fallback must treat this as still blocked.

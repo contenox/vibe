@@ -130,7 +130,7 @@ Four things can resolve either:
 
 See [who may answer a subagent](/docs/guide/hitl/#who-may-answer-a-subagent-attention) for the bounds.
 
-An ask does not hold a process hostage. After a short park window the run **checkpoints** and releases its process; the ask stays a durable row that any later process can answer, and answering it resumes the suspended run exactly once. That is why you can close the terminal that raised a question and answer it tomorrow from a different one.
+An ask does not hold a process hostage. The run **checkpoints** as soon as the ask is raised and releases its process; the ask stays a durable row that any later process can answer, and answering it resumes the suspended run exactly once. That is why you can close the terminal that raised a question and answer it tomorrow from a different one.
 
 
 ## Reclaim: what happens when the host dies

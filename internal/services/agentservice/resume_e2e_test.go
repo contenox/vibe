@@ -117,7 +117,7 @@ func awayAsk(ctx context.Context, _ hitlservice.ApprovalRequest) (bool, error) {
 	return false, ctx.Err()
 }
 
-func newE2EInstance(t *testing.T, dbPath string, parkWindow time.Duration, ask localtools.AskApproval) *e2eInstance {
+func newE2EInstance(t *testing.T, dbPath string, ask localtools.AskApproval) *e2eInstance {
 	t.Helper()
 	ctx := context.Background()
 	db, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
@@ -131,7 +131,6 @@ func newE2EInstance(t *testing.T, dbPath string, parkWindow time.Duration, ask l
 	sink := &recordingSink{}
 	inner := &e2eInnerTools{}
 	wrapper := localtools.NewHITLWrapper(inner, ask, approveAllPolicy{ApprovalRecorder: recorder, Service: hitl}, libtracker.NoopTracker{}, sink)
-	wrapper.SetParkWindow(parkWindow)
 
 	cctx := taskengine.WithTaskEventSink(ctx, sink)
 	exec, err := taskengine.NewExec(cctx, stubModelRepo{}, wrapper, libtracker.NoopTracker{})
@@ -204,7 +203,7 @@ func TestSystem_S6Gate_ApprovalOutlivesEngine_VerdictAfterRestartCompletesChain(
 	ctx := context.Background()
 	const sessionID = "sess-e2e"
 
-	a := newE2EInstance(t, dbPath, 20*time.Millisecond, awayAsk)
+	a := newE2EInstance(t, dbPath, awayAsk)
 	createSession(t, a.db, sessionID)
 	resp, err := a.agent.Prompt(ctx, agentservice.PromptRequest{
 		SessionID:  sessionID,
@@ -232,7 +231,7 @@ func TestSystem_S6Gate_ApprovalOutlivesEngine_VerdictAfterRestartCompletesChain(
 
 	a.close()
 
-	b := newE2EInstance(t, dbPath, 20*time.Millisecond, awayAsk)
+	b := newE2EInstance(t, dbPath, awayAsk)
 	defer b.close()
 
 	require.NoError(t, b.hitl.Respond(ctx, "call-w1", true),
@@ -277,7 +276,7 @@ func TestSystem_S6Gate_DenyAfterRestart_CompletesWithDenySemantics(t *testing.T)
 	ctx := context.Background()
 	const sessionID = "sess-deny"
 
-	a := newE2EInstance(t, dbPath, 20*time.Millisecond, awayAsk)
+	a := newE2EInstance(t, dbPath, awayAsk)
 	createSession(t, a.db, sessionID)
 	resp, err := a.agent.Prompt(ctx, agentservice.PromptRequest{
 		SessionID:  sessionID,
@@ -289,7 +288,7 @@ func TestSystem_S6Gate_DenyAfterRestart_CompletesWithDenySemantics(t *testing.T)
 	require.Equal(t, agentservice.StopSuspended, resp.StopReason)
 	a.close()
 
-	b := newE2EInstance(t, dbPath, 20*time.Millisecond, awayAsk)
+	b := newE2EInstance(t, dbPath, awayAsk)
 	defer b.close()
 	require.NoError(t, b.hitl.Respond(ctx, "call-w1", false))
 

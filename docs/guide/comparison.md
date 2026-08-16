@@ -47,7 +47,7 @@ A mission's envelope is a required argument, not a default it inherits — the d
 
 A coding agent asks in the session. The question lives in the process that asked it, and closing the terminal ends the question with the process.
 
-An `approve` verdict here parks the call for a short window in case you are sitting there — and when that window passes, the run **checkpoints and releases its process**. The ask stays behind as a durable row. Any process can answer it:
+An `approve` verdict here records the ask as a durable row and the run **checkpoints and releases its process** — whether or not you are sitting there. The ask stays behind. Any process can answer it:
 
 ```bash
 contenox approvals list

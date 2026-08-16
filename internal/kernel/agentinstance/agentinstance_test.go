@@ -164,6 +164,20 @@ func (v *mockViewer) permCount() int {
 	return v.permCalls
 }
 
+func (v *mockViewer) lastAgentText() string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	var last string
+	for _, n := range v.updates {
+		if n.Update.SessionUpdate == libacp.SessionUpdateAgentMessageChunk {
+			if c := n.Update.Content; c != nil {
+				last = c.Text
+			}
+		}
+	}
+	return last
+}
+
 func viewerReported(v *mockViewer, substr string) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -1145,6 +1159,249 @@ func TestManager_Terminal_CapabilityWithheld(t *testing.T) {
 	require.Equal(t, libacp.StopReasonEndTurn, reason)
 	require.Equal(t, 0, term.createCount(), "no terminal capability advertised → no terminal/create")
 	require.Contains(t, term.lastMessage(), "termcap=false")
+}
+
+type mockFileSystem struct {
+	caps libacp.FileSystemCapabilities
+
+	mu       sync.Mutex
+	files    map[string]string
+	sessions []libacp.SessionID
+	writes   int
+	reads    int
+}
+
+func newMockFileSystem() *mockFileSystem {
+	return &mockFileSystem{files: make(map[string]string), caps: fsCapableSpec}
+}
+
+func (f *mockFileSystem) FileSystemCapabilities() libacp.FileSystemCapabilities { return f.caps }
+
+func (f *mockFileSystem) ReadTextFile(_ context.Context, req libacp.ReadTextFileRequest) (libacp.ReadTextFileResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reads++
+	f.sessions = append(f.sessions, req.SessionID)
+	content, ok := f.files[req.Path]
+	if !ok {
+		return libacp.ReadTextFileResponse{}, libacp.NewError(libacp.ErrResourceNotFound, "no such file: "+req.Path)
+	}
+	return libacp.ReadTextFileResponse{Content: content}, nil
+}
+
+func (f *mockFileSystem) WriteTextFile(_ context.Context, req libacp.WriteTextFileRequest) (libacp.WriteTextFileResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.writes++
+	f.sessions = append(f.sessions, req.SessionID)
+	f.files[req.Path] = req.Content
+	return libacp.WriteTextFileResponse{}, nil
+}
+
+func (f *mockFileSystem) writeCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.writes
+}
+
+func (f *mockFileSystem) readCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.reads
+}
+
+func (f *mockFileSystem) seenSessions() []libacp.SessionID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]libacp.SessionID(nil), f.sessions...)
+}
+
+type mockFSViewer struct {
+	*mockViewer
+	*mockFileSystem
+}
+
+func newMockFSViewer(id string) *mockFSViewer {
+	return &mockFSViewer{mockViewer: newMockViewer(id), mockFileSystem: newMockFileSystem()}
+}
+
+var fsCapableSpec = libacp.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true}
+
+func openFSSession(t *testing.T, mgr Manager, id string, spec SessionSpec) libacp.SessionID {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	sid, err := mgr.OpenSession(ctx, id, spec)
+	require.NoError(t, err)
+	return sid
+}
+
+func TestManager_FS_RoutesToControllerFileSystemServer(t *testing.T) {
+	ctx, _, svc := setupRegistry(t)
+	stub := buildStubAgent(t)
+	registerExternalEnv(t, ctx, svc, "ext-agent", stub, map[string]string{"ACP_STUB_USE_FS": "1"})
+
+	mgr := New(svc)
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	id, err := mgr.Start(ctx, "ext-agent", t.TempDir())
+	require.NoError(t, err)
+
+	cwd := t.TempDir()
+	sid := openFSSession(t, mgr, id, SessionSpec{Cwd: cwd, FS: fsCapableSpec})
+
+	fsViewer := newMockFSViewer("controller")
+	granted, err := mgr.Attach(ctx, id, sid, fsViewer)
+	require.NoError(t, err)
+	require.True(t, granted)
+
+	reason := promptText(t, mgr, id, sid, "touch the filesystem")
+	require.Equal(t, libacp.StopReasonEndTurn, reason)
+	require.Equal(t, 1, fsViewer.writeCount(), "the controller's FileSystemServer serviced fs/write_text_file")
+	require.Equal(t, 1, fsViewer.readCount(), "the controller's FileSystemServer serviced fs/read_text_file")
+
+	report := fsViewer.mockViewer.lastAgentText()
+	require.Contains(t, report, "fscap=true/true")
+	require.Contains(t, report, "content=\"stub-fs-42\"", "the written bytes read back through the controller")
+
+	for _, seen := range fsViewer.seenSessions() {
+		require.Equal(t, sid, seen, "an fs request carries the downstream session id it was raised on")
+	}
+}
+
+func TestManager_FS_MethodNotFoundWithoutFileSystemServer(t *testing.T) {
+	ctx, _, svc := setupRegistry(t)
+	stub := buildStubAgent(t)
+	registerExternalEnv(t, ctx, svc, "ext-agent", stub, map[string]string{"ACP_STUB_USE_FS": "1"})
+
+	mgr := New(svc)
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	id, err := mgr.Start(ctx, "ext-agent", t.TempDir())
+	require.NoError(t, err)
+
+	sid := openFSSession(t, mgr, id, SessionSpec{Cwd: t.TempDir(), FS: fsCapableSpec})
+
+	viewer := newMockViewer("plain-controller")
+	_, err = mgr.Attach(ctx, id, sid, viewer)
+	require.NoError(t, err)
+
+	reason := promptText(t, mgr, id, sid, "touch the filesystem")
+	require.Equal(t, libacp.StopReasonEndTurn, reason)
+	require.True(t, viewerReported(viewer, "write-error"), "a controller without FileSystemServer gets an error")
+	require.True(t, viewerReported(viewer, libacp.MethodFSWriteTextFile), "and the error is MethodNotFound for fs/write_text_file")
+}
+
+func TestManager_FS_CapabilityWithheld(t *testing.T) {
+	ctx, _, svc := setupRegistry(t)
+	stub := buildStubAgent(t)
+	registerExternalEnv(t, ctx, svc, "ext-agent", stub, map[string]string{"ACP_STUB_USE_FS": "1"})
+
+	mgr := New(svc)
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	id, err := mgr.Start(ctx, "ext-agent", t.TempDir())
+	require.NoError(t, err)
+
+	sid := openSession(t, mgr, id)
+	fsViewer := newMockFSViewer("controller")
+	_, err = mgr.Attach(ctx, id, sid, fsViewer)
+	require.NoError(t, err)
+
+	reason := promptText(t, mgr, id, sid, "touch the filesystem")
+	require.Equal(t, libacp.StopReasonEndTurn, reason)
+	require.Equal(t, 0, fsViewer.writeCount(), "no fs capability advertised → no fs/write_text_file")
+	require.Equal(t, 0, fsViewer.readCount(), "no fs capability advertised → no fs/read_text_file")
+	require.Contains(t, fsViewer.mockViewer.lastAgentText(), "fscap=false/false")
+}
+
+func TestManager_FS_InstanceFilesystemServesViewerlessSession(t *testing.T) {
+	ctx, _, svc := setupRegistry(t)
+	stub := buildStubAgent(t)
+	registerExternalEnv(t, ctx, svc, "ext-agent", stub, map[string]string{"ACP_STUB_USE_FS": "1"})
+
+	fs := newMockFileSystem()
+	mgr := New(svc, WithFilesystem(fs))
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	id, err := mgr.Start(ctx, "ext-agent", t.TempDir())
+	require.NoError(t, err)
+
+	cwd := t.TempDir()
+	sid := openFSSession(t, mgr, id, SessionSpec{Cwd: cwd})
+
+	reason := promptText(t, mgr, id, sid, "touch the filesystem")
+	require.Equal(t, libacp.StopReasonEndTurn, reason)
+	require.Equal(t, 1, fs.writeCount(), "the instance filesystem serviced fs/write_text_file with no viewer at all")
+	require.Equal(t, 1, fs.readCount(), "and fs/read_text_file")
+
+	text, ok := instanceOf(t, mgr, id).agentText(sid)
+	require.True(t, ok)
+	require.Contains(t, text, "fscap=true/true")
+	require.Contains(t, text, "content=\"stub-fs-42\"")
+
+	for _, seen := range fs.seenSessions() {
+		require.Equal(t, sid, seen, "an fs request carries the downstream session id it was raised on")
+	}
+}
+
+func TestManager_FS_InstanceFilesystemWithNoCapabilitiesAdvertisesNothing(t *testing.T) {
+	ctx, _, svc := setupRegistry(t)
+	stub := buildStubAgent(t)
+	registerExternalEnv(t, ctx, svc, "ext-agent", stub, map[string]string{"ACP_STUB_USE_FS": "1"})
+
+	fs := newMockFileSystem()
+	fs.caps = libacp.FileSystemCapabilities{}
+	mgr := New(svc, WithFilesystem(fs))
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	id, err := mgr.Start(ctx, "ext-agent", t.TempDir())
+	require.NoError(t, err)
+
+	sid := openFSSession(t, mgr, id, SessionSpec{Cwd: t.TempDir()})
+
+	reason := promptText(t, mgr, id, sid, "touch the filesystem")
+	require.Equal(t, libacp.StopReasonEndTurn, reason)
+	require.Equal(t, 0, fs.writeCount(), "a filesystem that serves nothing must not be advertised")
+	require.Equal(t, 0, fs.readCount())
+
+	text, ok := instanceOf(t, mgr, id).agentText(sid)
+	require.True(t, ok)
+	require.Contains(t, text, "fscap=false/false")
+}
+
+func TestManager_Prompt_FiltersContentByDownstreamCapabilities(t *testing.T) {
+	ctx, _, svc := setupRegistry(t)
+	stub := buildStubAgent(t)
+	registerExternalEnv(t, ctx, svc, "ext-agent", stub, nil)
+
+	prompt := []libacp.ContentBlock{
+		libacp.NewTextContent("prompt_kinds"),
+		libacp.NewImageContent("Zm9v", "image/png"),
+		libacp.NewAudioContent("Zm9v", "audio/wav"),
+		libacp.NewResourceContent(libacp.EmbeddedResource{URI: "file:///x.md", Text: "x"}),
+	}
+
+	mgr := New(svc)
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	withoutFS, err := mgr.Start(ctx, "ext-agent", t.TempDir())
+	require.NoError(t, err)
+	sid := openFSSession(t, mgr, withoutFS, SessionSpec{Cwd: t.TempDir()})
+	_, err = mgr.Prompt(ctx, withoutFS, sid, prompt)
+	require.NoError(t, err)
+	text, ok := instanceOf(t, mgr, withoutFS).agentText(sid)
+	require.True(t, ok)
+	require.Contains(t, text, "kinds=text", "image, audio and the embedded resource are all unadvertised")
+
+	withFS, err := mgr.Start(ctx, "ext-agent", t.TempDir())
+	require.NoError(t, err)
+	sid = openFSSession(t, mgr, withFS, SessionSpec{Cwd: t.TempDir(), FS: fsCapableSpec})
+	_, err = mgr.Prompt(ctx, withFS, sid, prompt)
+	require.NoError(t, err)
+	text, ok = instanceOf(t, mgr, withFS).agentText(sid)
+	require.True(t, ok)
+	require.Contains(t, text, "kinds=text,resource", "embeddedContext is advertised, image and audio are not")
 }
 
 // TestManager_Cancel_UnblocksInFlightTurn pins that Cancel unblocks an

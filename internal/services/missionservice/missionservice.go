@@ -235,6 +235,8 @@ type Service interface {
 	// fleet unit brought up outside a dispatch).
 	GetByInstance(ctx context.Context, instanceID string) (*Mission, error)
 
+	GetBySession(ctx context.Context, sessionID string) (*Mission, error)
+
 	List(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*Mission, error)
 	Update(ctx context.Context, m *Mission) error
 	Delete(ctx context.Context, id string) error
@@ -358,6 +360,31 @@ func (s *service) GetByInstance(ctx context.Context, instanceID string) (*Missio
 			return nil, libdb.ErrNotFound
 		}
 		// Strictly-decreasing-cursor guard: defends against an identical-timestamp storm looping forever.
+		if cursor != nil && !next.Before(*cursor) {
+			return nil, libdb.ErrNotFound
+		}
+		cursor = next
+	}
+}
+
+func (s *service) GetBySession(ctx context.Context, sessionID string) (*Mission, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("sessionId is required")
+	}
+	var cursor *time.Time
+	for {
+		batch, next, err := s.listPage(ctx, cursor, scanPageSize)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range batch {
+			if m.SessionID == sessionID {
+				return m, nil
+			}
+		}
+		if len(batch) < scanPageSize || next == nil {
+			return nil, libdb.ErrNotFound
+		}
 		if cursor != nil && !next.Before(*cursor) {
 			return nil, libdb.ErrNotFound
 		}

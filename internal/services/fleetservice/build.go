@@ -65,6 +65,8 @@ type InProcessDeps struct {
 
 	// Stderr is where a dispatched unit's stderr lands; nil defaults to os.Stderr.
 	Stderr io.Writer
+
+	Filesystem agentinstance.InstanceFileSystem
 }
 
 // BuildInProcess embeds the fleet a host process dispatches missions through, returning the fleet Service, the agent registry, and one teardown func that stops the report router, closes the kernel, and reaps every dispatched child subprocess; the host must run it on shutdown.
@@ -88,6 +90,9 @@ func BuildInProcess(ctx context.Context, deps InProcessDeps) (Service, agentregi
 				Sink:     taskengine.NoopTaskEventSink{},
 				Tracker:  deps.Tracker,
 			})))
+	}
+	if deps.Filesystem != nil {
+		kernelOpts = append(kernelOpts, agentinstance.WithFilesystem(deps.Filesystem))
 	}
 	if deps.WorkspaceID != "" {
 		kernelOpts = append(kernelOpts, agentinstance.WithWorkspaceID(deps.WorkspaceID))

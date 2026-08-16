@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
@@ -61,6 +62,65 @@ func (a *acpFileIO) WriteFile(ctx context.Context, path string, data []byte) err
 		return mapACPNotExist(err)
 	}
 	return nil
+}
+
+type unitFileSystem struct {
+	transport     func() *Transport
+	parentSession func(ctx context.Context, unitSession libacp.SessionID) string
+}
+
+func NewUnitFileSystem(transport func() *Transport, parentSession func(ctx context.Context, unitSession libacp.SessionID) string) agentinstance.InstanceFileSystem {
+	return &unitFileSystem{transport: transport, parentSession: parentSession}
+}
+
+func (f *unitFileSystem) resolve() *Transport {
+	if f.transport == nil {
+		return nil
+	}
+	t := f.transport()
+	if t == nil || t.conn == nil {
+		return nil
+	}
+	return t
+}
+
+func (f *unitFileSystem) FileSystemCapabilities() libacp.FileSystemCapabilities {
+	t := f.resolve()
+	if t == nil {
+		return libacp.FileSystemCapabilities{}
+	}
+	up := t.getClientCaps().FS
+	return libacp.FileSystemCapabilities{ReadTextFile: up.ReadTextFile, WriteTextFile: up.WriteTextFile}
+}
+
+func (f *unitFileSystem) upstreamSessionID(ctx context.Context, t *Transport, unitSession libacp.SessionID) libacp.SessionID {
+	if f.parentSession == nil {
+		return ""
+	}
+	parent := f.parentSession(ctx, unitSession)
+	if parent == "" {
+		return ""
+	}
+	sid, _ := t.acpSessionForContenoxID(parent)
+	return sid
+}
+
+func (f *unitFileSystem) ReadTextFile(ctx context.Context, req libacp.ReadTextFileRequest) (libacp.ReadTextFileResponse, error) {
+	t := f.resolve()
+	if t == nil || !t.getClientCaps().FS.ReadTextFile {
+		return libacp.ReadTextFileResponse{}, libacp.NewError(libacp.ErrMethodNotFound, "no filesystem: this unit's client provides none")
+	}
+	req.SessionID = f.upstreamSessionID(ctx, t, req.SessionID)
+	return t.conn.ReadTextFile(ctx, req)
+}
+
+func (f *unitFileSystem) WriteTextFile(ctx context.Context, req libacp.WriteTextFileRequest) (libacp.WriteTextFileResponse, error) {
+	t := f.resolve()
+	if t == nil || !t.getClientCaps().FS.WriteTextFile {
+		return libacp.WriteTextFileResponse{}, libacp.NewError(libacp.ErrMethodNotFound, "no filesystem: this unit's client provides none")
+	}
+	req.SessionID = f.upstreamSessionID(ctx, t, req.SessionID)
+	return t.conn.WriteTextFile(ctx, req)
 }
 
 // mapACPNotExist maps a not-found *libacp.Error to os.ErrNotExist, and matches

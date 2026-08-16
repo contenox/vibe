@@ -24,11 +24,6 @@ const (
 	// may not make on its own — answered by a human, by the supervising
 	// session's agent, or by the oracle, whichever reaches it first.
 	ToolNameAskAttention = "mission_ask_attention"
-
-	// AttentionParkWindow is how long a suspendable mission_ask_attention
-	// blocks before checkpoint-and-release (localtools.ApprovalParkWindow's
-	// twin, same duration on purpose).
-	AttentionParkWindow = 30 * time.Second
 	// ToolNamePlan replaces the caller's mission plan with a full snapshot,
 	// routing to missionservice.SetPlan.
 	ToolNamePlan = "mission_plan"
@@ -68,19 +63,15 @@ type MissionStore interface {
 
 // AttentionAsker is the durable-ask channel mission_ask_attention runs on; unset, the tool files a blocker report instead.
 type AttentionAsker interface {
-	// RaiseAttention blocks until the question is answered and returns the answerer's words; a *taskengine.ApprovalPendingError means ask.ParkWindow elapsed and the caller must let the run suspend.
 	RaiseAttention(ctx context.Context, ask AttentionAsk) (string, error)
 }
 
-// AttentionAsk is one unit's question plus the identity and parking knobs the checkpoint-and-release path needs.
 type AttentionAsk struct {
 	MissionID string
 	Summary   string
 	Detail    string
 	// AskID is the durable row identity, the engine tool-call ID on the suspendable path.
 	AskID string
-	// ParkWindow, when > 0, bounds the block.
-	ParkWindow time.Duration
 }
 
 type provider struct {
@@ -88,7 +79,6 @@ type provider struct {
 	asker           AttentionAsker
 	supervisor      SupervisorStore
 	resolver        AttentionResolver
-	parkWindow      time.Duration
 	recordDowngrade func()
 
 	// The supervisor half: what a session that HAS subagents may start and watch.
@@ -105,16 +95,6 @@ type Option func(*provider)
 func WithAttentionAsker(asker AttentionAsker) Option {
 	return func(p *provider) {
 		p.asker = asker
-	}
-}
-
-// WithAttentionParkWindow overrides the park duration (AttentionParkWindow
-// by default) — tests shrink it so a suspension happens in milliseconds.
-func WithAttentionParkWindow(d time.Duration) Option {
-	return func(p *provider) {
-		if d > 0 {
-			p.parkWindow = d
-		}
 	}
 }
 
@@ -137,7 +117,7 @@ func New(missions MissionStore, opts ...Option) taskengine.ToolsRepo {
 	if missions == nil {
 		panic("missiontools: mission store is required")
 	}
-	p := &provider{missions: missions, recordDowngrade: func() {}, parkWindow: AttentionParkWindow}
+	p := &provider{missions: missions, recordDowngrade: func() {}}
 	for _, opt := range opts {
 		if opt == nil {
 			continue
@@ -272,10 +252,8 @@ func (p *provider) execAskAttention(ctx context.Context, missionID string, input
 	} else if p.asker != nil {
 		p.heartbeat(ctx, missionID)
 		ask := AttentionAsk{MissionID: missionID, Summary: summary, Detail: detail}
-		// Park-and-release only lands under model-batch execution with a checkpoint saver.
 		if callID != "" && taskengine.ToolCallSuspendable(ctx) && taskengine.HasCheckpointSaver(ctx) {
 			ask.AskID = callID
-			ask.ParkWindow = p.parkWindow
 		}
 		answer, err := p.asker.RaiseAttention(ctx, ask)
 		if err == nil {

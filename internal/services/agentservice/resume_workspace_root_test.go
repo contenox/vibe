@@ -29,7 +29,7 @@ type fsE2EInstance struct {
 	agent agentservice.Agent
 }
 
-func newFSE2EInstance(t *testing.T, dbPath string, parkWindow time.Duration, cwdResolver func(context.Context) string) *fsE2EInstance {
+func newFSE2EInstance(t *testing.T, dbPath string, cwdResolver func(context.Context) string) *fsE2EInstance {
 	t.Helper()
 	ctx := context.Background()
 	db, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
@@ -43,7 +43,6 @@ func newFSE2EInstance(t *testing.T, dbPath string, parkWindow time.Duration, cwd
 	// db=nil degrades the read-before-write guard to a no-op; irrelevant here since write_file targets a file that does not exist yet
 	inner := localtools.NewLocalFSToolsWith("", nil, hostFileIO{}, localtools.LocalFSToolsName, cwdResolver)
 	wrapper := localtools.NewHITLWrapper(inner, awayAsk, approveAllPolicy{ApprovalRecorder: recorder, Service: hitl}, libtracker.NoopTracker{})
-	wrapper.SetParkWindow(parkWindow)
 
 	cctx := ctx
 	exec, err := taskengine.NewExec(cctx, stubModelRepo{}, wrapper, libtracker.NoopTracker{})
@@ -92,7 +91,6 @@ func fsE2EInput(t *testing.T, relPath, content string) taskengine.ChatHistory {
 	}}
 }
 
-// TestSystem_S6Gate_ResumeAcrossProcesses_WritesUnderSessionWorkspaceNotResumerCwd verifies a write_file call gated past the fast window resumes in a different process yet still writes under the original session's workspace root, never the resumer's own cwd.
 func TestSystem_S6Gate_ResumeAcrossProcesses_WritesUnderSessionWorkspaceNotResumerCwd(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "fs-walkaway.db")
 	sessionWorkspace := t.TempDir()
@@ -101,7 +99,7 @@ func TestSystem_S6Gate_ResumeAcrossProcesses_WritesUnderSessionWorkspaceNotResum
 	const content = "hello from across the restart"
 	ctx := context.Background()
 
-	a := newFSE2EInstance(t, dbPath, 20*time.Millisecond, func(context.Context) string { return sessionWorkspace })
+	a := newFSE2EInstance(t, dbPath, func(context.Context) string { return sessionWorkspace })
 	promptCtx := vfs.WithSessionCwd(ctx, sessionWorkspace)
 	resp, err := a.agent.Prompt(promptCtx, agentservice.PromptRequest{
 		InputValue: fsE2EInput(t, relPath, content),
@@ -116,7 +114,7 @@ func TestSystem_S6Gate_ResumeAcrossProcesses_WritesUnderSessionWorkspaceNotResum
 	require.NoFileExists(t, filepath.Join(sessionWorkspace, relPath), "must not exist before the verdict lands")
 	a.close()
 
-	b := newFSE2EInstance(t, dbPath, 20*time.Millisecond, func(context.Context) string { return resumerWrongDir })
+	b := newFSE2EInstance(t, dbPath, func(context.Context) string { return resumerWrongDir })
 	defer b.close()
 
 	require.NoError(t, b.hitl.Respond(ctx, "call-fs1", true),

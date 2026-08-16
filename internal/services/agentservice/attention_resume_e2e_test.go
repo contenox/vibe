@@ -26,11 +26,10 @@ type hitlAttentionAsker struct {
 
 func (a hitlAttentionAsker) RaiseAttention(ctx context.Context, ask missiontools.AttentionAsk) (string, error) {
 	answer, err := a.hitl.RequestAttention(ctx, hitlservice.AttentionRequest{
-		Summary:    ask.Summary,
-		Detail:     ask.Detail,
-		MissionID:  ask.MissionID,
-		AskID:      ask.AskID,
-		ParkWindow: ask.ParkWindow,
+		Summary:   ask.Summary,
+		Detail:    ask.Detail,
+		MissionID: ask.MissionID,
+		AskID:     ask.AskID,
 	}, taskengine.NoopTaskEventSink{})
 	var pending *hitlservice.AttentionPendingError
 	if err != nil && errors.As(err, &pending) {
@@ -64,8 +63,7 @@ func newAttentionInstanceWithAsker(t *testing.T, dbPath string, newAsker func(hi
 	hitl := hitlservice.NewWithDefaultPolicy(hitlservice.NewFSPolicySource(t.TempDir()), "e2e-tenant", store, libtracker.NoopTracker{}, "")
 	missions := missionservice.New(db)
 
-	tools := missiontools.New(missions, missiontools.WithAttentionAsker(newAsker(hitl)),
-		missiontools.WithAttentionParkWindow(20*time.Millisecond))
+	tools := missiontools.New(missions, missiontools.WithAttentionAsker(newAsker(hitl)))
 
 	exec, err := taskengine.NewExec(ctx, stubModelRepo{}, tools, libtracker.NoopTracker{})
 	require.NoError(t, err)

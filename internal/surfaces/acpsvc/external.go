@@ -316,7 +316,15 @@ type externalBridge struct {
 	pendingModeID string
 
 	modelState *libacp.SessionModelState
+
+	promptCaps libacp.PromptCapabilities
 }
+
+var (
+	_ agentinstance.Viewer           = (*externalBridge)(nil)
+	_ agentinstance.FileSystemServer = (*externalBridge)(nil)
+	_ agentinstance.TerminalServer   = (*externalBridge)(nil)
+)
 
 func newExternalBridge(t *Transport, upstreamID libacp.SessionID, bound bool) *externalBridge {
 	b := &externalBridge{upstreamID: upstreamID, bound: bound, viewerID: "acp-bridge-" + uuid.NewString()}
@@ -563,6 +571,37 @@ func (b *externalBridge) markBound(ctx context.Context) {
 			ConfigOptions: configOpts,
 		})
 	}
+}
+
+func (b *externalBridge) setPromptCaps(caps libacp.PromptCapabilities) {
+	b.mu.Lock()
+	b.promptCaps = caps
+	b.mu.Unlock()
+}
+
+func (b *externalBridge) filterPrompt(prompt []libacp.ContentBlock) []libacp.ContentBlock {
+	b.mu.Lock()
+	caps := b.promptCaps
+	b.mu.Unlock()
+	kept := make([]libacp.ContentBlock, 0, len(prompt))
+	for _, block := range prompt {
+		switch libacp.ContentKind(block.Type) {
+		case libacp.ContentKindImage:
+			if !caps.Image {
+				continue
+			}
+		case libacp.ContentKindAudio:
+			if !caps.Audio {
+				continue
+			}
+		case libacp.ContentKindResource:
+			if !caps.EmbeddedContext {
+				continue
+			}
+		}
+		kept = append(kept, block)
+	}
+	return kept
 }
 
 func (b *externalBridge) seedConfigOptions(opts []libacp.SessionConfigOption) {
@@ -981,20 +1020,22 @@ func (t *Transport) resolveMcpAllowlist(ctx context.Context, cfg *runtimetypes.E
 	return servers, nil
 }
 
-// openInstanceSession opens a downstream session on a Manager-owned instance, the
-// Instances-path counterpart of initExternalConn. Terminal is false because the
-// instance's harness answers terminal/* with MethodNotFound. The caller owns
-// teardown on failure.
 func (t *Transport) openInstanceSession(ctx context.Context, instanceID string, bridge *externalBridge, cfg *runtimetypes.ExternalACPConfig, cwd, agentName string) (libacp.SessionID, error) {
 	mcpServers, err := t.resolveMcpAllowlist(ctx, cfg, agentName)
 	if err != nil {
 		return "", err
 	}
-	downstreamID, err := t.deps.Instances.OpenSession(ctx, instanceID, agentinstance.SessionSpec{
+	up := t.getClientCaps()
+	spec := agentinstance.SessionSpec{
 		Cwd:        cwd,
 		McpServers: mcpServers,
-		Terminal:   false,
-	})
+		Terminal:   up.Terminal,
+		FS: libacp.FileSystemCapabilities{
+			ReadTextFile:  up.FS.ReadTextFile,
+			WriteTextFile: up.FS.WriteTextFile,
+		},
+	}
+	downstreamID, err := t.deps.Instances.OpenSession(ctx, instanceID, spec)
 	if err != nil {
 		return "", libacp.InternalError(fmt.Sprintf("could not open a session on the running %q agent: %v", agentName, err))
 	}
@@ -1008,18 +1049,19 @@ func (t *Transport) openInstanceSession(ctx context.Context, instanceID string, 
 // initExternalConn drives the downstream ACP handshake on a connCtx-spawned
 // connection, seeding the bridge's advertised surface. The caller owns teardown
 // on failure.
-func (t *Transport) initExternalConn(ctx context.Context, conn *libacp.ClientSideConnection, bridge *externalBridge, cfg *runtimetypes.ExternalACPConfig, cwd, agentName string, terminalCapable bool) (libacp.SessionID, error) {
+func (t *Transport) initExternalConn(ctx context.Context, conn *libacp.ClientSideConnection, bridge *externalBridge, cfg *runtimetypes.ExternalACPConfig, cwd, agentName string) (libacp.SessionID, error) {
 	mcpServers, err := t.resolveMcpAllowlist(ctx, cfg, agentName)
 	if err != nil {
 		return "", err
 	}
 
-	clientCaps := libacp.ClientCapabilities{}
-	if up := t.getClientCaps(); up.FS.ReadTextFile || up.FS.WriteTextFile {
-		clientCaps.FS = libacp.FileSystemCapabilities{
+	up := t.getClientCaps()
+	clientCaps := libacp.ClientCapabilities{
+		Terminal: up.Terminal,
+		FS: libacp.FileSystemCapabilities{
 			ReadTextFile:  up.FS.ReadTextFile,
 			WriteTextFile: up.FS.WriteTextFile,
-		}
+		},
 	}
 	init, err := conn.Initialize(ctx, libacp.InitializeRequest{
 		ProtocolVersion:    libacp.ProtocolVersion,
@@ -1044,6 +1086,7 @@ func (t *Transport) initExternalConn(ctx context.Context, conn *libacp.ClientSid
 	if err != nil {
 		return "", libacp.InternalError(fmt.Sprintf("agent %q refused to open a session: %v", agentName, err))
 	}
+	bridge.setPromptCaps(init.AgentCapabilities.PromptCapabilities)
 	bridge.seedConfigOptions(downstream.ConfigOptions)
 	bridge.seedModes(downstream.Modes)
 	bridge.seedModels(downstream.Models)
@@ -1101,7 +1144,7 @@ func (t *Transport) bringUpExternal(ctx context.Context, upstreamID libacp.Sessi
 	if err != nil {
 		return nil, libacp.InternalError(fmt.Sprintf("could not spawn agent %q: %v", agentName, err))
 	}
-	downstreamID, err := t.initExternalConn(ctx, handle.Conn, bridge, cfg, cwd, agentName, false)
+	downstreamID, err := t.initExternalConn(ctx, handle.Conn, bridge, cfg, cwd, agentName)
 	if err != nil {
 		_ = handle.Close()
 		return nil, err
@@ -1213,7 +1256,7 @@ func (d *externalDriver) promptDownstream(ctx context.Context, tgt *externalTarg
 	if tgt.instanceID != "" {
 		return d.t.deps.Instances.Prompt(ctx, tgt.instanceID, tgt.downstreamID, prompt)
 	}
-	resp, err := tgt.conn.Prompt(ctx, libacp.PromptRequest{SessionID: tgt.downstreamID, Prompt: prompt})
+	resp, err := tgt.conn.Prompt(ctx, libacp.PromptRequest{SessionID: tgt.downstreamID, Prompt: tgt.bridge.filterPrompt(prompt)})
 	if err != nil {
 		return "", err
 	}
@@ -1495,6 +1538,59 @@ func (t *Transport) reemitExternalCommandMenu(ctx context.Context, store runtime
 			AvailableCommands: cmds,
 		})
 	})
+}
+
+func (b *externalBridge) upstreamTerminal() (*libacp.AgentSideConnection, error) {
+	t := b.transport()
+	if t == nil || t.conn == nil || !t.getClientCaps().Terminal {
+		return nil, libacp.NewError(libacp.ErrMethodNotFound, "no terminal: this agent's client provides none")
+	}
+	return t.conn, nil
+}
+
+func (b *externalBridge) CreateTerminal(ctx context.Context, req libacp.CreateTerminalRequest) (libacp.CreateTerminalResponse, error) {
+	conn, err := b.upstreamTerminal()
+	if err != nil {
+		return libacp.CreateTerminalResponse{}, err
+	}
+	req.SessionID = b.upstreamID
+	return conn.CreateTerminal(ctx, req)
+}
+
+func (b *externalBridge) TerminalOutput(ctx context.Context, req libacp.TerminalOutputRequest) (libacp.TerminalOutputResponse, error) {
+	conn, err := b.upstreamTerminal()
+	if err != nil {
+		return libacp.TerminalOutputResponse{}, err
+	}
+	req.SessionID = b.upstreamID
+	return conn.TerminalOutput(ctx, req)
+}
+
+func (b *externalBridge) WaitForTerminalExit(ctx context.Context, req libacp.WaitForTerminalExitRequest) (libacp.WaitForTerminalExitResponse, error) {
+	conn, err := b.upstreamTerminal()
+	if err != nil {
+		return libacp.WaitForTerminalExitResponse{}, err
+	}
+	req.SessionID = b.upstreamID
+	return conn.WaitForTerminalExit(ctx, req)
+}
+
+func (b *externalBridge) KillTerminal(ctx context.Context, req libacp.KillTerminalRequest) (libacp.KillTerminalResponse, error) {
+	conn, err := b.upstreamTerminal()
+	if err != nil {
+		return libacp.KillTerminalResponse{}, err
+	}
+	req.SessionID = b.upstreamID
+	return conn.KillTerminal(ctx, req)
+}
+
+func (b *externalBridge) ReleaseTerminal(ctx context.Context, req libacp.ReleaseTerminalRequest) (libacp.ReleaseTerminalResponse, error) {
+	conn, err := b.upstreamTerminal()
+	if err != nil {
+		return libacp.ReleaseTerminalResponse{}, err
+	}
+	req.SessionID = b.upstreamID
+	return conn.ReleaseTerminal(ctx, req)
 }
 
 func (b *externalBridge) ReadTextFile(ctx context.Context, req libacp.ReadTextFileRequest) (libacp.ReadTextFileResponse, error) {

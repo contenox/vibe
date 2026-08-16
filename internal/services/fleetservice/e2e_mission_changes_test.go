@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,6 +49,67 @@ const missionChangesChain = `{
   ]
 }`
 
+type fakeEditorFS struct {
+	root string
+
+	mu     sync.Mutex
+	reads  int
+	writes int
+}
+
+func (f *fakeEditorFS) FileSystemCapabilities() libacp.FileSystemCapabilities {
+	return libacp.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true}
+}
+
+func (f *fakeEditorFS) resolve(path string) (string, error) {
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(f.root, path)
+	}
+	clean := filepath.Clean(path)
+	if clean != f.root && !strings.HasPrefix(clean, f.root+string(filepath.Separator)) {
+		return "", libacp.NewError(libacp.ErrInvalidParams, "path outside the editor's root: "+path)
+	}
+	return clean, nil
+}
+
+func (f *fakeEditorFS) ReadTextFile(_ context.Context, req libacp.ReadTextFileRequest) (libacp.ReadTextFileResponse, error) {
+	path, err := f.resolve(req.Path)
+	if err != nil {
+		return libacp.ReadTextFileResponse{}, err
+	}
+	f.mu.Lock()
+	f.reads++
+	f.mu.Unlock()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return libacp.ReadTextFileResponse{}, libacp.NewError(libacp.ErrResourceNotFound, "no such file: "+req.Path)
+	}
+	return libacp.ReadTextFileResponse{Content: string(content)}, nil
+}
+
+func (f *fakeEditorFS) WriteTextFile(_ context.Context, req libacp.WriteTextFileRequest) (libacp.WriteTextFileResponse, error) {
+	path, err := f.resolve(req.Path)
+	if err != nil {
+		return libacp.WriteTextFileResponse{}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return libacp.WriteTextFileResponse{}, libacp.InternalError(err.Error())
+	}
+	if err := os.WriteFile(path, []byte(req.Content), 0o600); err != nil {
+		return libacp.WriteTextFileResponse{}, libacp.InternalError(err.Error())
+	}
+	f.mu.Lock()
+	f.writes++
+	f.mu.Unlock()
+	return libacp.WriteTextFileResponse{}, nil
+}
+
+func (f *fakeEditorFS) writeCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.writes
+}
+
 // TestFleetService_E2E_MissionChanges: a unit's real writes are listed by
 // the changed-files endpoint ordered by edit-weighted DOI with no scope
 // anomaly; an injected out-of-cwd read then trips scopeAnomaly as advice,
@@ -86,7 +148,8 @@ func TestFleetService_E2E_MissionChanges(t *testing.T) {
 	require.NoError(t, agents.Create(ctx, agent))
 
 	stderr := &lockedBuffer{}
-	kernel := agentinstance.New(agents, agentinstance.WithStderr(stderr))
+	editor := &fakeEditorFS{root: tmpHome}
+	kernel := agentinstance.New(agents, agentinstance.WithStderr(stderr), agentinstance.WithFilesystem(editor))
 	t.Cleanup(func() { _ = kernel.Close() })
 	missions := missionservice.New(db)
 	svc := New(kernel, agents, missions, nil, tmpHome, libtracker.NoopTracker{})
@@ -122,6 +185,14 @@ func TestFleetService_E2E_MissionChanges(t *testing.T) {
 
 	alpha := requireChangedFileWithSuffix(t, changes.Files, "/alpha.txt")
 	bravo := requireChangedFileWithSuffix(t, changes.Files, "/sub/bravo.txt")
+
+	require.GreaterOrEqual(t, editor.writeCount(), 2, "every write reached the client, since the unit has no other filesystem")
+	onDisk, err := os.ReadFile(filepath.Join(tmpHome, "alpha.txt"))
+	require.NoError(t, err, "the relayed write landed where the client put it")
+	require.Equal(t, "alpha-v1", string(onDisk))
+	onDisk, err = os.ReadFile(filepath.Join(tmpHome, "sub", "bravo.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "bravo", string(onDisk))
 
 	require.Equal(t, missionchanges.StatusAdded, alpha.Status, "alpha.txt was created by the mission")
 	require.Equal(t, missionchanges.StatusAdded, bravo.Status, "bravo.txt was created by the mission")

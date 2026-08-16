@@ -21,6 +21,7 @@ type recordingApprovePolicy struct {
 	recorded  []string
 	requests  []hitlservice.ApprovalRequest
 	resolved  map[string]bool
+	responded map[string]bool
 	recordErr error
 }
 
@@ -49,11 +50,47 @@ func (p *recordingApprovePolicy) ResolveApprovalInline(_ context.Context, approv
 	return nil
 }
 
+func (p *recordingApprovePolicy) Respond(_ context.Context, approvalID string, approved bool) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.responded == nil {
+		p.responded = map[string]bool{}
+	}
+	p.responded[approvalID] = approved
+	return nil
+}
+
+func (p *recordingApprovePolicy) verdicts() map[string]bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := map[string]bool{}
+	for k, v := range p.responded {
+		out[k] = v
+	}
+	return out
+}
+
+func (p *recordingApprovePolicy) inlineVerdicts() map[string]bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := map[string]bool{}
+	for k, v := range p.resolved {
+		out[k] = v
+	}
+	return out
+}
+
 func newRecordingApprovePolicy() *recordingApprovePolicy {
 	return &recordingApprovePolicy{result: hitlservice.EvaluationResult{Action: hitlservice.ActionApprove}}
 }
 
 var _ hitlservice.ApprovalRecorder = (*recordingApprovePolicy)(nil)
+
+type noopCheckpointSaver struct{}
+
+func (noopCheckpointSaver) SaveCheckpoint(context.Context, *taskengine.Checkpoint) error {
+	return nil
+}
 
 func blockUntilCtxDone(ctx context.Context, _ hitlservice.ApprovalRequest) (bool, error) {
 	<-ctx.Done()
@@ -70,36 +107,95 @@ func execGatedCall(t *testing.T, w *localtools.HITLWrapper, callID string) (any,
 		&taskengine.ToolsCall{Name: "local_shell", ToolName: "run_command"})
 }
 
-// TestUnit_HITLWrapper_ParkThenRelease pins that no verdict within the park window yields the typed pending outcome, row recorded first and left pending.
-func TestUnit_HITLWrapper_ParkThenRelease(t *testing.T) {
+func suspendableCtx(callID string) context.Context {
+	ctx := taskengine.WithSuspendableToolCall(context.Background())
+	ctx = taskengine.WithCheckpointSaver(ctx, noopCheckpointSaver{})
+	if callID != "" {
+		ctx = context.WithValue(ctx, taskengine.ContextKeyToolCallID, callID)
+	}
+	return ctx
+}
+
+func execSuspendableCall(t *testing.T, w *localtools.HITLWrapper, callID string) (any, taskengine.DataType, error) {
+	t.Helper()
+	return w.Exec(suspendableCtx(callID), time.Now(), map[string]any{"path": "a.txt"}, false,
+		&taskengine.ToolsCall{Name: "local_shell", ToolName: "run_command"})
+}
+
+func TestUnit_HITLWrapper_ReleasesAtCreation(t *testing.T) {
 	inner := &mockInnerTools{}
 	policy := newRecordingApprovePolicy()
-	w := localtools.NewHITLWrapper(inner, blockUntilCtxDone, policy, nil)
-	w.SetParkWindow(25 * time.Millisecond)
+	asked := make(chan struct{}, 1)
+	ask := func(ctx context.Context, req hitlservice.ApprovalRequest) (bool, error) {
+		asked <- struct{}{}
+		<-ctx.Done()
+		return false, ctx.Err()
+	}
+	w := localtools.NewHITLWrapper(inner, ask, policy, nil)
 
-	start := time.Now()
-	_, _, err := execGatedCall(t, w, "call-9")
-	elapsed := time.Since(start)
+	_, _, err := execSuspendableCall(t, w, "call-9")
 
 	var pend *taskengine.ApprovalPendingError
 	require.ErrorAs(t, err, &pend)
 	require.Equal(t, "call-9", pend.ApprovalID, "approval ID == the engine-minted call ID")
 	require.Equal(t, "run_command", pend.ToolName)
 	require.Equal(t, []string{"call-9"}, policy.recorded, "the durable row precedes the release")
-	require.Empty(t, policy.resolved, "the row stays pending — the human has not answered")
+	require.Empty(t, policy.inlineVerdicts(), "the row stays pending — nobody has answered")
 	require.Empty(t, inner.calls, "the gated tool must not run")
-	require.GreaterOrEqual(t, elapsed, 25*time.Millisecond, "the fast-path park must actually wait its window")
+
+	select {
+	case <-asked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the card must still be raised, detached from the released call")
+	}
 }
 
-// TestUnit_HITLWrapper_RecordedAskCarriesItsSession pins that a parked approval's durable row carries the run context's session ID (or none, if the run has none), never inventing one.
+func TestUnit_HITLWrapper_VerdictLandsThroughTheResponder(t *testing.T) {
+	inner := &mockInnerTools{}
+	policy := newRecordingApprovePolicy()
+	w := localtools.NewHITLWrapper(inner, alwaysApprove, policy, nil)
+
+	_, _, err := execSuspendableCall(t, w, "call-fast")
+
+	var pend *taskengine.ApprovalPendingError
+	require.ErrorAs(t, err, &pend, "an instant answer must not decide whether the ask was durable")
+	require.Equal(t, []string{"call-fast"}, policy.recorded)
+	require.Empty(t, inner.calls, "the tool runs on the resume, not here")
+
+	require.Eventually(t, func() bool {
+		return len(policy.verdicts()) == 1
+	}, 5*time.Second, 5*time.Millisecond, "the verdict must reach the durable row through Respond")
+	require.Equal(t, map[string]bool{"call-fast": true}, policy.verdicts())
+	require.Empty(t, policy.inlineVerdicts(), "a released call never closes its row inline")
+}
+
+func TestUnit_HITLWrapper_NoAttachedClientStillCheckpoints(t *testing.T) {
+	inner := &mockInnerTools{}
+	policy := newRecordingApprovePolicy()
+	noClient := func(context.Context, hitlservice.ApprovalRequest) (bool, error) {
+		return false, errors.New("no editor session is attached to answer it")
+	}
+	w := localtools.NewHITLWrapper(inner, noClient, policy, nil)
+
+	_, _, err := execSuspendableCall(t, w, "call-unattended")
+
+	var pend *taskengine.ApprovalPendingError
+	require.ErrorAs(t, err, &pend, "nobody to ask is a suspension, not a failed run")
+	require.Equal(t, "call-unattended", pend.ApprovalID)
+	require.Equal(t, []string{"call-unattended"}, policy.recorded, "the ask is durable even though no client saw it")
+	require.Empty(t, inner.calls)
+
+	require.Never(t, func() bool {
+		return len(policy.verdicts())+len(policy.inlineVerdicts()) > 0
+	}, 200*time.Millisecond, 10*time.Millisecond, "a transport failure is not a verdict")
+}
+
 func TestUnit_HITLWrapper_RecordedAskCarriesItsSession(t *testing.T) {
 	inner := &mockInnerTools{}
 	policy := newRecordingApprovePolicy()
 	w := localtools.NewHITLWrapper(inner, blockUntilCtxDone, policy, nil)
-	w.SetParkWindow(25 * time.Millisecond)
 
-	ctx := context.WithValue(context.Background(), taskengine.ContextKeyToolCallID, "call-s")
-	ctx = context.WithValue(ctx, runtimetypes.SessionIDContextKey, "f1084c50-session")
+	ctx := context.WithValue(suspendableCtx("call-s"), runtimetypes.SessionIDContextKey, "f1084c50-session")
 	_, _, err := w.Exec(ctx, time.Now(), map[string]any{"path": "a.txt"}, false,
 		&taskengine.ToolsCall{Name: "local_shell", ToolName: "run_command"})
 
@@ -107,19 +203,17 @@ func TestUnit_HITLWrapper_RecordedAskCarriesItsSession(t *testing.T) {
 	require.ErrorAs(t, err, &pend)
 	require.Len(t, policy.requests, 1)
 	require.Equal(t, "f1084c50-session", policy.requests[0].SessionID,
-		"the parked ask must know the session it belongs to")
+		"the released ask must know the session it belongs to")
 
 	bare := newRecordingApprovePolicy()
 	wBare := localtools.NewHITLWrapper(&mockInnerTools{}, blockUntilCtxDone, bare, nil)
-	wBare.SetParkWindow(25 * time.Millisecond)
-	_, _, err = execGatedCall(t, wBare, "call-bare")
+	_, _, err = execSuspendableCall(t, wBare, "call-bare")
 	require.ErrorAs(t, err, &pend)
 	require.Len(t, bare.requests, 1)
 	require.Empty(t, bare.requests[0].SessionID)
 }
 
-// TestUnit_HITLWrapper_FastPathVerdictInsideWindow pins that an in-session verdict resolves normally and closes the durable row inline.
-func TestUnit_HITLWrapper_FastPathVerdictInsideWindow(t *testing.T) {
+func TestUnit_HITLWrapper_InlineVerdictClosesTheRow(t *testing.T) {
 	inner := &mockInnerTools{}
 	policy := newRecordingApprovePolicy()
 	w := localtools.NewHITLWrapper(inner, alwaysApprove, policy, nil)
@@ -181,21 +275,22 @@ func TestUnit_HITLWrapper_InjectedVerdict(t *testing.T) {
 	require.True(t, askCalled)
 }
 
-// TestUnit_HITLWrapper_RuleTimeoutBeatsPark pins that a rule TimeoutS shorter than the park window resolves via OnTimeout instead of suspending.
-func TestUnit_HITLWrapper_RuleTimeoutBeatsPark(t *testing.T) {
+func TestUnit_HITLWrapper_ShortRuleTimeoutStillSuspends(t *testing.T) {
 	inner := &mockInnerTools{}
 	policy := newRecordingApprovePolicy()
 	policy.result.TimeoutS = 1
 	policy.result.OnTimeout = hitlservice.ActionDeny
 	w := localtools.NewHITLWrapper(inner, blockUntilCtxDone, policy, nil)
-	w.SetParkWindow(time.Hour) // rule bound must fire first
 
-	res, dt, err := execGatedCall(t, w, "call-t")
-	require.NoError(t, err, "a rule timeout resolves, never suspends")
-	require.Equal(t, taskengine.DataTypeString, dt)
-	require.Contains(t, res.(string), "timed out")
+	res, _, err := execSuspendableCall(t, w, "call-t")
+
+	var pend *taskengine.ApprovalPendingError
+	require.ErrorAs(t, err, &pend, "a short rule deadline must not collapse the ask into an auto-deny")
+	require.Equal(t, "call-t", pend.ApprovalID)
+	require.Nil(t, res)
 	require.Empty(t, inner.calls)
-	require.Equal(t, map[string]bool{"call-t": false}, policy.resolved)
+	require.Equal(t, []string{"call-t"}, policy.recorded)
+	require.Empty(t, policy.inlineVerdicts(), "the row stays answerable until its own deadline")
 }
 
 // TestUnit_HITLWrapper_RecorderFailureFallsBackToBlocking pins that a broken durable store degrades to the blocking ask, never drops the gate.
@@ -204,15 +299,14 @@ func TestUnit_HITLWrapper_RecorderFailureFallsBackToBlocking(t *testing.T) {
 	policy := newRecordingApprovePolicy()
 	policy.recordErr = errors.New("db is gone")
 	w := localtools.NewHITLWrapper(inner, alwaysApprove, policy, nil)
-	w.SetParkWindow(10 * time.Millisecond)
 
-	res, _, err := execGatedCall(t, w, "call-f")
+	res, _, err := execSuspendableCall(t, w, "call-f")
 	require.NoError(t, err)
 	require.Equal(t, "ok", res)
 	require.Equal(t, []string{"run_command"}, inner.calls, "the human still gated the call, just not durably")
+	require.Empty(t, policy.inlineVerdicts(), "there is no row to close")
 }
 
-// TestUnit_HITLWrapper_NoRecorderKeepsBlockingBehavior pins that an evaluator-only policy blocks past the park window: no row, no suspension.
 func TestUnit_HITLWrapper_NoRecorderKeepsBlockingBehavior(t *testing.T) {
 	inner := &mockInnerTools{}
 	slowApprove := func(ctx context.Context, _ hitlservice.ApprovalRequest) (bool, error) {
@@ -220,10 +314,9 @@ func TestUnit_HITLWrapper_NoRecorderKeepsBlockingBehavior(t *testing.T) {
 		return true, nil
 	}
 	w := localtools.NewHITLWrapper(inner, slowApprove, approvePolicy(), nil)
-	w.SetParkWindow(10 * time.Millisecond)
 
-	res, _, err := execGatedCall(t, w, "call-legacy")
+	res, _, err := execSuspendableCall(t, w, "call-legacy")
 	require.NoError(t, err)
-	require.Equal(t, "ok", res, "legacy path blocks until the human answers, park window notwithstanding")
+	require.Equal(t, "ok", res, "the legacy path blocks until the human answers")
 	require.Equal(t, []string{"run_command"}, inner.calls)
 }
