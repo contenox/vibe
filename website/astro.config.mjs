@@ -50,13 +50,13 @@ export default defineConfig({
     // cookbook/ and stories/ merged into docs/use-cases/.
     "/cookbook": "/docs/use-cases/",
     "/stories": "/docs/use-cases/",
-    "/cookbook/codebase-docs": "/docs/use-cases/codebase-docs/",
-    "/cookbook/git-devops": "/docs/use-cases/git-devops/",
+    "/cookbook/codebase-docs": "/docs/use-cases/",
+    "/cookbook/git-devops": "/docs/use-cases/",
     "/cookbook/hubspot-mcp": "/docs/use-cases/hubspot-mcp/",
-    "/cookbook/leads-to-hubspot": "/docs/use-cases/leads-to-hubspot/",
+    "/cookbook/leads-to-hubspot": "/docs/use-cases/",
     "/cookbook/notion-mcp": "/docs/use-cases/notion-mcp/",
     "/cookbook/playwright-mcp": "/docs/use-cases/playwright-mcp/",
-    "/cookbook/release-notes": "/docs/use-cases/release-notes/",
+    "/cookbook/release-notes": "/docs/use-cases/",
     "/cookbook/stateful-agents-mcp": "/docs/use-cases/stateful-agents-mcp/",
     "/stories/any-api-as-a-tool": "/docs/use-cases/any-api-as-a-tool/",
     "/stories/authored-approval": "/docs/use-cases/authored-approval/",
@@ -73,6 +73,13 @@ export default defineConfig({
     "/docs/tools": "/docs/integrations/tools/",
     "/docs/tools/local": "/docs/integrations/tools/local/",
     "/docs/tools/remote": "/docs/integrations/tools/remote/",
+    // 2026-08 agent-server reshape: contenox chat/run/index/search and the
+    // one-shot CLI-filter use-cases built on `contenox run` are retired.
+    "/docs/guide/search": "/docs/integrations/tools/mcp/",
+    "/docs/use-cases/codebase-docs": "/docs/use-cases/",
+    "/docs/use-cases/git-devops": "/docs/use-cases/",
+    "/docs/use-cases/leads-to-hubspot": "/docs/use-cases/",
+    "/docs/use-cases/release-notes": "/docs/use-cases/",
     // Old marketing/docs aliases the Next config carried.
     "/features": "/docs/guide/quickstart/",
     "/docs/beam": "/docs/rnd/beam-web/",

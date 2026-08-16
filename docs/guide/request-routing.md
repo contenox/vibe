@@ -85,4 +85,4 @@ Then check it: `contenox vet path/to/chain.json` refuses a chain whose branches 
 
 ## Reading which branch ran
 
-The chain is data, so the route it took is observable rather than inferred. Each task attempt is logged with its id — in the terminal UI, `~/.contenox/beam.log` records `operation=task_attempt subject=review_chat` — and `contenox events` shows the same journey for a dispatched run. When an answer disappoints, the first question is not "how should I have phrased it" but "which loop got it", and that question has an answer you can read.
+The chain is data, so the route it took is observable rather than inferred. Each task attempt is logged with its id — `~/.contenox/telemetry.log` records `operation=task_attempt subject=review_chat` — and `contenox events` shows the same journey for a dispatched run. When an answer disappoints, the first question is not "how should I have phrased it" but "which loop got it", and that question has an answer you can read.

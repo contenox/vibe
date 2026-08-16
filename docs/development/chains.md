@@ -103,12 +103,6 @@ stands. A declaration says none of those.
 }
 ```
 
-Save it, then pipe your work into it. It speaks Unix:
-
-```bash
-git diff | contenox run --chain ./review.json
-```
-
 HITL is not a hidden toggle. Gated tool calls route through policy files such as
 `hitl-policy-default.json`, `hitl-policy-strict.json`, and editor-specific ACP
 policies. The Chain defines what the workflow can ask for; the active policy

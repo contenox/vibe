@@ -153,7 +153,7 @@ a person) answered it.
 
 ## Built-in presets
 
-Contenox ships seven policy presets, written to `~/.contenox/` by `contenox init`. (A workspace `.contenox/` file with the same name overrides the global one.) The first three are the general-purpose postures; the next three are the profiles the ACP editor transports and the terminal UI load; the last is the pinned envelope of the [oracle](/docs/use-cases/auto-attention/).
+Contenox ships six policy presets, written to `~/.contenox/` by `contenox init`. (A workspace `.contenox/` file with the same name overrides the global one.) The first three are the general-purpose postures; the next two are the profiles the ACP editor transports load; the last is the pinned envelope of the [oracle](/docs/use-cases/auto-attention/).
 
 | Name | Behaviour |
 |---|---|
