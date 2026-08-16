@@ -61,10 +61,10 @@ The counts are durable and actor-aware: a restart does not refill them, your own
 
 ## What happens on an ask, step by step
 
-1. The subagent raises the ask. It becomes a durable row immediately (`contenox approvals list` shows it), and the subagent parks on it for a short window before checkpointing.
+1. The subagent raises the ask. It becomes a durable row immediately (`contenox approvals list` shows it), and the run checkpoints and releases its process.
 2. The ask is offered to the oracle **in-process, before a human sees it**.
 3. The oracle runs its chain with the ask as input: the ask kind, the subagent's **intent**, and — for a gated call — the tool, its arguments, and the rule that gated it. The model holds exactly one tool, `oracle.submit_verdict`, and one job: judge it against that intent and submit one verdict. The loop is budgeted and self-correcting — a malformed call or a chat-text reply gets a machine-register correction and a bounded retry.
-4. A verdict goes through the **service layer**, under the subagent envelope's bounds, recorded as `answeredBy`/`decidedBy: "oracle"`. The parked subagent's poll picks the resolved row up and the run continues — in the window, with no checkpoint ever created. Past the window, the durable resume path picks it up instead, exactly as a human's late answer would.
+4. A verdict goes through the **service layer**, under the subagent envelope's bounds, recorded as `answeredBy`/`decidedBy: "oracle"`. The durable resume path picks it up and the run continues from its checkpoint — the same route a human's answer takes, whether it lands in a second or a day later.
 
 ## Everything that is not a verdict leaves the ask alone
 

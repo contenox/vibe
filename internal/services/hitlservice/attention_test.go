@@ -169,37 +169,33 @@ func TestUnit_RequestAttention_AnswerFromAnotherProcessWakesTheUnit(t *testing.T
 	}
 }
 
-// TestUnit_RequestAttention_ParkWindowReturnsTypedPending pins that an elapsed
-// park window returns a typed pending error with the row still answerable.
-func TestUnit_RequestAttention_ParkWindowReturnsTypedPending(t *testing.T) {
+func TestUnit_RequestAttention_SuspendableCallerReleasesAtCreation(t *testing.T) {
 	ctx, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)
 
 	_, err := svc.RequestAttention(ctx, hitlservice.AttentionRequest{
-		Summary:    "anyone there?",
-		AskID:      "call-park1",
-		ParkWindow: 20 * time.Millisecond,
+		Summary: "anyone there?",
+		AskID:   "call-ask1",
 	}, taskengine.NoopTaskEventSink{})
 
 	var pending *hitlservice.AttentionPendingError
 	require.ErrorAs(t, err, &pending)
-	require.Equal(t, "call-park1", pending.AskID, "the pending error names the row to resume on")
+	require.Equal(t, "call-ask1", pending.AskID, "the pending error names the row to resume on")
 
-	row, err := store.GetHITLApproval(ctx, "call-park1")
+	row, err := store.GetHITLApproval(ctx, "call-ask1")
 	require.NoError(t, err)
-	require.Equal(t, runtimetypes.HITLApprovalPending, row.State, "parking must leave the question answerable")
+	require.Equal(t, runtimetypes.HITLApprovalPending, row.State, "releasing must leave the question answerable")
 }
 
-func parkAsk(t *testing.T, ctx context.Context, svc hitlservice.Service, missionID, askID, summary string) {
+func raiseAsk(t *testing.T, ctx context.Context, svc hitlservice.Service, missionID, askID, summary string) {
 	t.Helper()
 	_, err := svc.RequestAttention(ctx, hitlservice.AttentionRequest{
-		Summary:    summary,
-		MissionID:  missionID,
-		AskID:      askID,
-		ParkWindow: 10 * time.Millisecond,
+		Summary:   summary,
+		MissionID: missionID,
+		AskID:     askID,
 	}, taskengine.NoopTaskEventSink{})
 	var pending *hitlservice.AttentionPendingError
-	require.ErrorAs(t, err, &pending, "the park window must leave the row pending and answerable")
+	require.ErrorAs(t, err, &pending, "the released ask must be left pending and answerable")
 }
 
 // TestUnit_AnswerAsAgentNamed_RecordsNameAndCountsAgainstBound pins that the
@@ -210,9 +206,9 @@ func TestUnit_AnswerAsAgentNamed_RecordsNameAndCountsAgainstBound(t *testing.T) 
 	svc := newDurableService(t, store)
 	const missionID = "m-named"
 
-	parkAsk(t, ctx, svc, missionID, "ask-named", "which repo?")
-	parkAsk(t, ctx, svc, missionID, "ask-generic", "which branch?")
-	parkAsk(t, ctx, svc, missionID, "ask-human", "should I delete it?")
+	raiseAsk(t, ctx, svc, missionID, "ask-named", "which repo?")
+	raiseAsk(t, ctx, svc, missionID, "ask-generic", "which branch?")
+	raiseAsk(t, ctx, svc, missionID, "ask-human", "should I delete it?")
 
 	require.NoError(t, svc.AnswerAsAgentNamed(ctx, "ask-named", "attention-reviewer", "the runtime repo"))
 	require.NoError(t, svc.AnswerAsAgent(ctx, "ask-generic", "main"))
@@ -243,7 +239,7 @@ func TestUnit_AnswerAsAgentNamed_RecordsNameAndCountsAgainstBound(t *testing.T) 
 func TestUnit_AnswerAsAgentNamed_BlankNameDegradesToGenericMarker(t *testing.T) {
 	ctx, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)
-	parkAsk(t, ctx, svc, "m-blank", "ask-blank", "which port?")
+	raiseAsk(t, ctx, svc, "m-blank", "ask-blank", "which port?")
 
 	require.NoError(t, svc.AnswerAsAgentNamed(ctx, "ask-blank", "   ", "8080"))
 	row, err := store.GetHITLApproval(ctx, "ask-blank")
@@ -255,31 +251,24 @@ func TestUnit_AnswerAsAgentNamed_BlankNameDegradesToGenericMarker(t *testing.T) 
 	require.Equal(t, 1, count)
 }
 
-// TestUnit_RequestAttention_CallerChosenAskIDIsTheRowID pins that a caller-chosen AskID becomes the durable row's ID.
 func TestUnit_RequestAttention_CallerChosenAskIDIsTheRowID(t *testing.T) {
 	ctx, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)
 
-	done := make(chan string, 1)
-	go func() {
-		text, err := svc.RequestAttention(ctx, hitlservice.AttentionRequest{
-			Summary: "which branch?",
-			AskID:   "call-identity",
-		}, taskengine.NoopTaskEventSink{})
-		require.NoError(t, err)
-		done <- text
-	}()
+	_, err := svc.RequestAttention(ctx, hitlservice.AttentionRequest{
+		Summary: "which branch?",
+		AskID:   "call-identity",
+	}, taskengine.NoopTaskEventSink{})
+	var pending *hitlservice.AttentionPendingError
+	require.ErrorAs(t, err, &pending)
+	require.Equal(t, "call-identity", pending.AskID)
 
-	require.Eventually(t, func() bool {
-		row, err := store.GetHITLApproval(ctx, "call-identity")
-		return err == nil && row.State == runtimetypes.HITLApprovalPending
-	}, 5*time.Second, 10*time.Millisecond, "the row must appear under the caller's ID")
+	row, err := store.GetHITLApproval(ctx, "call-identity")
+	require.NoError(t, err)
+	require.Equal(t, runtimetypes.HITLApprovalPending, row.State, "the row must exist under the caller's ID")
 
 	require.NoError(t, svc.Answer(ctx, "call-identity", "main"))
-	select {
-	case text := <-done:
-		require.Equal(t, "main", text)
-	case <-time.After(5 * time.Second):
-		t.Fatal("the parked asker never received the answer")
-	}
+	row, err = store.GetHITLApproval(ctx, "call-identity")
+	require.NoError(t, err)
+	require.Equal(t, "main", hitlservice.AnswerOf(row))
 }

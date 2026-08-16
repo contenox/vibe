@@ -27,7 +27,7 @@ import (
 
 const sessionListTitleMaxLen = 60
 
-const acpClientIdentity = "acp-client"
+const ClientIdentity = "acp-client"
 
 func truncateSessionListTitle(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
@@ -1041,7 +1041,7 @@ func (t *Transport) resolveSessionWorkspace(ctx context.Context, name string) (s
 		return "", false
 	}
 	workspaceID, err := runtimetypes.ResolveMessageIndexWorkspace(
-		ctx, t.deps.DB.WithoutTransaction(), acpClientIdentity, name)
+		ctx, t.deps.DB.WithoutTransaction(), ClientIdentity, name)
 	if err != nil || workspaceID == "" {
 		return "", false
 	}
@@ -1103,7 +1103,7 @@ func (t *Transport) ListSessions(ctx context.Context, req libacp.ListSessionsReq
 	// and aren't listed. Ordering and pagination happen in Go, and the cwd filter
 	// applies after pagination.
 	indices, err := runtimetypes.NewMessageStore(exec, t.workspaceID()).
-		ListMessageSessions(ctx, acpClientIdentity)
+		ListMessageSessions(ctx, ClientIdentity)
 	if err != nil {
 		return libacp.ListSessionsResponse{}, fmt.Errorf("could not list sessions: %w", err)
 	}

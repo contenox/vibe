@@ -70,3 +70,34 @@ func TestUnit_ACPFileIO_RefusesWhenClientLacksFSCapability(t *testing.T) {
 	_, err := fio.ReadFile(context.Background(), "whatever.txt")
 	require.ErrorIs(t, err, localtools.ErrNoFilesystem)
 }
+
+func TestUnit_UnitFileSystem_NoClientAdvertisesNothing(t *testing.T) {
+	fs := NewUnitFileSystem(func() *Transport { return nil }, nil)
+	require.Equal(t, libacp.FileSystemCapabilities{}, fs.FileSystemCapabilities())
+
+	_, err := fs.ReadTextFile(context.Background(), libacp.ReadTextFileRequest{Path: absTestPath("/x.txt")})
+	require.Error(t, err)
+	_, err = fs.WriteTextFile(context.Background(), libacp.WriteTextFileRequest{Path: absTestPath("/x.txt")})
+	require.Error(t, err)
+}
+
+func TestUnit_UnitFileSystem_MirrorsClientCapabilities(t *testing.T) {
+	tr := mockTransportForFS(libacp.FileSystemCapabilities{ReadTextFile: true})
+	tr.conn = libacp.NewAgentSideConnection(inertRWC{}, func(*libacp.AgentSideConnection) libacp.Agent {
+		return libacp.UnimplementedAgent{}
+	})
+	tr.contenoxToACPID["cx-parent"] = "sid-parent"
+
+	fs := NewUnitFileSystem(
+		func() *Transport { return tr },
+		func(context.Context, libacp.SessionID) string { return "cx-parent" },
+	)
+	require.Equal(t, libacp.FileSystemCapabilities{ReadTextFile: true}, fs.FileSystemCapabilities())
+
+	_, err := fs.WriteTextFile(context.Background(), libacp.WriteTextFileRequest{Path: absTestPath("/x.txt")})
+	require.Error(t, err, "a write is refused before the wire when the client advertises none")
+
+	relay, ok := fs.(*unitFileSystem)
+	require.True(t, ok)
+	require.Equal(t, libacp.SessionID("sid-parent"), relay.upstreamSessionID(context.Background(), tr, "unit-session"))
+}

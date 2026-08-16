@@ -50,6 +50,8 @@ type SessionSpec struct {
 	// initialize; terminal/* is refused unless the session's controller implements
 	// TerminalServer.
 	Terminal bool
+
+	FS libacp.FileSystemCapabilities
 }
 
 type sessionDriver struct {
@@ -299,12 +301,34 @@ func filterMcpForCaps(servers []libacp.McpServer, caps libacp.McpCapabilities) [
 	return kept
 }
 
+func filterPromptForCaps(prompt []libacp.ContentBlock, caps libacp.PromptCapabilities) []libacp.ContentBlock {
+	kept := make([]libacp.ContentBlock, 0, len(prompt))
+	for _, block := range prompt {
+		switch libacp.ContentKind(block.Type) {
+		case libacp.ContentKindImage:
+			if !caps.Image {
+				continue
+			}
+		case libacp.ContentKindAudio:
+			if !caps.Audio {
+				continue
+			}
+		case libacp.ContentKindResource:
+			if !caps.EmbeddedContext {
+				continue
+			}
+		}
+		kept = append(kept, block)
+	}
+	return kept
+}
+
 func (i *instance) openSession(ctx context.Context, spec SessionSpec) (libacp.SessionID, error) {
 	conn := i.conn()
 	if conn == nil {
 		return "", errNoConn
 	}
-	initResp, err := i.ensureInitialized(ctx, conn, spec.Terminal)
+	initResp, err := i.ensureInitialized(ctx, conn, spec)
 	if err != nil {
 		return "", err
 	}
@@ -324,15 +348,19 @@ func (i *instance) openSession(ctx context.Context, spec SessionSpec) (libacp.Se
 	return resp.SessionID, nil
 }
 
-func (i *instance) ensureInitialized(ctx context.Context, conn *libacp.ClientSideConnection, terminal bool) (libacp.InitializeResponse, error) {
+func (i *instance) ensureInitialized(ctx context.Context, conn *libacp.ClientSideConnection, spec SessionSpec) (libacp.InitializeResponse, error) {
 	i.driver.initMu.Lock()
 	defer i.driver.initMu.Unlock()
 	if i.driver.initConn == conn {
 		return i.driver.initResp, nil
 	}
-	clientCaps := libacp.ClientCapabilities{}
-	if terminal {
-		clientCaps.Terminal = true
+	instanceFS := i.hub.instanceFileSystemCaps()
+	clientCaps := libacp.ClientCapabilities{
+		Terminal: spec.Terminal,
+		FS: libacp.FileSystemCapabilities{
+			ReadTextFile:  spec.FS.ReadTextFile || instanceFS.ReadTextFile,
+			WriteTextFile: spec.FS.WriteTextFile || instanceFS.WriteTextFile,
+		},
 	}
 	resp, err := conn.Initialize(ctx, libacp.InitializeRequest{
 		ProtocolVersion:    libacp.ProtocolVersion,
@@ -350,12 +378,18 @@ func (i *instance) ensureInitialized(ctx context.Context, conn *libacp.ClientSid
 	return resp, nil
 }
 
+func (i *instance) downstreamPromptCaps() libacp.PromptCapabilities {
+	i.driver.initMu.Lock()
+	defer i.driver.initMu.Unlock()
+	return i.driver.initResp.AgentCapabilities.PromptCapabilities
+}
+
 func (i *instance) promptSession(ctx context.Context, sid libacp.SessionID, prompt []libacp.ContentBlock) (libacp.StopReason, error) {
 	conn := i.conn()
 	if conn == nil {
 		return "", errNoConn
 	}
-	resp, err := conn.Prompt(ctx, libacp.PromptRequest{SessionID: sid, Prompt: prompt})
+	resp, err := conn.Prompt(ctx, libacp.PromptRequest{SessionID: sid, Prompt: filterPromptForCaps(prompt, i.downstreamPromptCaps())})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			return libacp.StopReasonCancelled, nil

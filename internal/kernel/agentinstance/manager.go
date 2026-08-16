@@ -207,6 +207,10 @@ func WithPermissionFallback(fn PermissionFallback) Option {
 	return func(m *manager) { m.permissionFallback = fn }
 }
 
+func WithFilesystem(fs InstanceFileSystem) Option {
+	return func(m *manager) { m.fileSystem = fs }
+}
+
 // WithSelfExecutable overrides the program a chain-kind agent is spawned from (default
 // os.Executable()), letting a test point the spawn at a built fixture binary.
 func WithSelfExecutable(path string) Option {
@@ -242,6 +246,7 @@ type manager struct {
 	restartLimit       int
 	sink               EventSink
 	permissionFallback PermissionFallback
+	fileSystem         InstanceFileSystem
 
 	rootCtx    context.Context
 	rootCancel context.CancelFunc
@@ -392,6 +397,7 @@ func (m *manager) bringUp(agent *runtimetypes.Agent, spawner agenthost.Agent) (s
 			m.emit(Event{Kind: EventUnsupervisedDeny, InstanceID: id, AgentID: agent.ID, AgentName: agent.Name, SessionID: sessionID, Time: time.Now().UTC()})
 		},
 		onUnsupervisedRequest: m.unattendedPermissionAnswerer(id, agent),
+		fileSystem:            m.fileSystem,
 	})
 
 	if err := inst.start(); err != nil {

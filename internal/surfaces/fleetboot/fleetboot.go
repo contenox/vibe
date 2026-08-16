@@ -7,6 +7,7 @@ package fleetboot
 import (
 	"context"
 	"os"
+	"sync"
 
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
@@ -73,8 +74,40 @@ func BuildInProcessFleet(ctx context.Context, deps Deps) (fleetservice.Service, 
 				kernel: kernel,
 			}
 		},
-		Stderr: os.Stderr,
+		Stderr:     os.Stderr,
+		Filesystem: acpsvc.NewUnitFileSystem(deps.Transport, missionParentSession(deps.Missions)),
 	})
+}
+
+func missionParentSession(missions missionservice.Service) func(context.Context, libacp.SessionID) string {
+	if missions == nil {
+		return nil
+	}
+	var (
+		mu     sync.Mutex
+		parent = map[libacp.SessionID]string{}
+	)
+	return func(ctx context.Context, unitSession libacp.SessionID) string {
+		if unitSession == "" {
+			return ""
+		}
+		mu.Lock()
+		cached, ok := parent[unitSession]
+		mu.Unlock()
+		if ok {
+			return cached
+		}
+		resolved := ""
+		if m, err := missions.GetBySession(ctx, string(unitSession)); err == nil && m != nil {
+			resolved = m.ParentSessionID
+		}
+		if resolved != "" {
+			mu.Lock()
+			parent[unitSession] = resolved
+			mu.Unlock()
+		}
+		return resolved
+	}
 }
 
 // missionReportDeliverer is the report router's SessionDeliverer for the

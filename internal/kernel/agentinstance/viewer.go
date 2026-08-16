@@ -37,6 +37,17 @@ type TerminalServer interface {
 	ReleaseTerminal(ctx context.Context, req libacp.ReleaseTerminalRequest) (libacp.ReleaseTerminalResponse, error)
 }
 
+type FileSystemServer interface {
+	ReadTextFile(ctx context.Context, req libacp.ReadTextFileRequest) (libacp.ReadTextFileResponse, error)
+	WriteTextFile(ctx context.Context, req libacp.WriteTextFileRequest) (libacp.WriteTextFileResponse, error)
+}
+
+type InstanceFileSystem interface {
+	FileSystemServer
+
+	FileSystemCapabilities() libacp.FileSystemCapabilities
+}
+
 type sessionState struct {
 	journal      *journal
 	viewers      map[string]Viewer
@@ -52,6 +63,8 @@ type viewerHub struct {
 	onDetach              func(sessionID libacp.SessionID, viewerID string)
 	onUnsupervisedDeny    func(sessionID libacp.SessionID)
 	onUnsupervisedRequest func(ctx context.Context, req libacp.RequestPermissionRequest) (libacp.RequestPermissionResponse, error)
+
+	fileSystem InstanceFileSystem
 
 	mu       sync.Mutex
 	sessions map[libacp.SessionID]*sessionState
@@ -207,6 +220,29 @@ func (h *viewerHub) terminalServer(sessionID libacp.SessionID) TerminalServer {
 	}
 	if ts, ok := s.viewers[s.controllerID].(TerminalServer); ok {
 		return ts
+	}
+	return nil
+}
+
+func (h *viewerHub) instanceFileSystemCaps() libacp.FileSystemCapabilities {
+	if h.fileSystem == nil {
+		return libacp.FileSystemCapabilities{}
+	}
+	return h.fileSystem.FileSystemCapabilities()
+}
+
+func (h *viewerHub) fileSystemServer(sessionID libacp.SessionID) FileSystemServer {
+	h.mu.Lock()
+	var controller FileSystemServer
+	if s := h.sessions[sessionID]; s != nil && s.controllerID != "" {
+		controller, _ = s.viewers[s.controllerID].(FileSystemServer)
+	}
+	h.mu.Unlock()
+	if controller != nil {
+		return controller
+	}
+	if h.fileSystem != nil {
+		return h.fileSystem
 	}
 	return nil
 }

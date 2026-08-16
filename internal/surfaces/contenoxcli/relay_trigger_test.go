@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +17,8 @@ import (
 	"github.com/contenox/contenox/internal/services/eventtrigger"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/surfaces/acpsvc"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/librelay"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
@@ -129,15 +133,28 @@ func TestUnit_RelayChainTrigger_RefusesWhatCannotStart(t *testing.T) {
 			payload:     librelay.ChainTrigger{RequestID: "req-3", SessionMode: "new", Input: json.RawMessage(`{}`)},
 			wantMention: "chain is required",
 		},
-		"session reuse is refused rather than downgraded": {
-			triggers:    relayChainTriggers{runner: &stubChainRunner{}},
-			payload:     librelay.ChainTrigger{RequestID: "req-4", Chain: "chain-x.json", SessionMode: librelay.ChainSessionReused, Input: json.RawMessage(`{}`)},
-			wantMention: `"reused" is not supported`,
-		},
 		"an unknown session mode": {
 			triggers:    relayChainTriggers{runner: &stubChainRunner{}},
 			payload:     librelay.ChainTrigger{RequestID: "req-5", Chain: "chain-x.json", SessionMode: "clone", Input: json.RawMessage(`{}`)},
 			wantMention: `"clone"`,
+		},
+		"a session name carrying a control character": {
+			triggers: relayChainTriggers{runner: &stubChainRunner{}},
+			payload: librelay.ChainTrigger{RequestID: "req-6", Chain: "chain-x.json", SessionMode: librelay.ChainSessionReused,
+				SessionName: "refund\ndesk", Input: json.RawMessage(`{}`)},
+			wantMention: "malformed session_name",
+		},
+		"a session name that is only whitespace": {
+			triggers: relayChainTriggers{runner: &stubChainRunner{}},
+			payload: librelay.ChainTrigger{RequestID: "req-7", Chain: "chain-x.json", SessionMode: librelay.ChainSessionReused,
+				SessionName: "   ", Input: json.RawMessage(`{}`)},
+			wantMention: "malformed session_name",
+		},
+		"a session name past the column width": {
+			triggers: relayChainTriggers{runner: &stubChainRunner{}},
+			payload: librelay.ChainTrigger{RequestID: "req-8", Chain: "chain-x.json", SessionMode: librelay.ChainSessionReused,
+				SessionName: strings.Repeat("n", maxChainSessionNameBytes+1), Input: json.RawMessage(`{}`)},
+			wantMention: "malformed session_name",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -152,6 +169,25 @@ func TestUnit_RelayChainTrigger_RefusesWhatCannotStart(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUnit_RelayChainTrigger_CarriesTheSessionToTheRunner(t *testing.T) {
+	t.Parallel()
+	runner := &stubChainRunner{}
+	h, rec := testTriggerHandler(relayChainTriggers{runner: runner})
+	h.handle(t.Context(), chainTriggerFrame(t, librelay.ChainTrigger{
+		RequestID:   "req-1",
+		Chain:       "chain-x.json",
+		SessionMode: librelay.ChainSessionReused,
+		SessionName: "  refund-desk  ",
+		Input:       json.RawMessage(`{}`),
+	}))
+	requireResult(t, rec.next(t), "req-1", librelay.ChainTriggerStatusOK)
+
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	require.Equal(t, librelay.ChainSessionReused, runner.last.SessionMode)
+	require.Equal(t, "refund-desk", runner.last.SessionName, "the wire name is trimmed before it becomes a row value")
 }
 
 // TestUnit_RelayChainTrigger_UnanswerableFramesSendNoResult asserts a frame with no well-formed request_id gets no result, except a request-shaped frame still owes its one librelay error reply.
@@ -253,9 +289,18 @@ func TestUnit_RelayChainTrigger_ClassifiesRunOutcomes(t *testing.T) {
 type fakeChainAgent struct {
 	mu      sync.Mutex
 	err     error
+	newErr  error
 	calls   int
 	lastCtx context.Context
 	lastReq agentservice.PromptRequest
+
+	listDelay   time.Duration
+	sessions    []*agentservice.SessionInfo
+	created     []string
+	resumed     []string
+	lists       int
+	promptSeen  []string
+	promptNames []string
 }
 
 func (f *fakeChainAgent) Prompt(ctx context.Context, req agentservice.PromptRequest) (*agentservice.PromptResponse, error) {
@@ -264,6 +309,12 @@ func (f *fakeChainAgent) Prompt(ctx context.Context, req agentservice.PromptRequ
 	f.calls++
 	f.lastCtx = ctx
 	f.lastReq = req
+	f.promptSeen = append(f.promptSeen, req.SessionID)
+	for _, s := range f.sessions {
+		if s.ID == req.SessionID {
+			f.promptNames = append(f.promptNames, s.Name)
+		}
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -276,19 +327,58 @@ func (f *fakeChainAgent) last() (context.Context, agentservice.PromptRequest, in
 	return f.lastCtx, f.lastReq, f.calls
 }
 
+func (f *fakeChainAgent) sessionOps() (created, resumed, promptSeen, promptNames []string, lists int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.created...), append([]string(nil), f.resumed...),
+		append([]string(nil), f.promptSeen...), append([]string(nil), f.promptNames...), f.lists
+}
+
 func (f *fakeChainAgent) Capabilities(context.Context) (*agentservice.AgentCapabilities, error) {
 	return &agentservice.AgentCapabilities{}, nil
 }
-func (f *fakeChainAgent) SessionNew(context.Context, string) (string, error) { return "", nil }
-func (f *fakeChainAgent) SessionList(context.Context) ([]*agentservice.SessionInfo, error) {
-	return nil, nil
+
+func (f *fakeChainAgent) SessionNew(_ context.Context, name string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.newErr != nil {
+		return "", f.newErr
+	}
+	f.created = append(f.created, name)
+	id := fmt.Sprintf("sid-%d", len(f.sessions)+1)
+	f.sessions = append(f.sessions, &agentservice.SessionInfo{ID: id, Name: name})
+	return id, nil
 }
+
+func (f *fakeChainAgent) SessionList(context.Context) ([]*agentservice.SessionInfo, error) {
+	f.mu.Lock()
+	f.lists++
+	out := append([]*agentservice.SessionInfo(nil), f.sessions...)
+	delay := f.listDelay
+	f.mu.Unlock()
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+	return out, nil
+}
+
 func (f *fakeChainAgent) SessionLoad(context.Context, string) (string, []taskengine.Message, error) {
 	return "", nil, nil
 }
-func (f *fakeChainAgent) SessionResume(context.Context, string) (string, error) { return "", nil }
-func (f *fakeChainAgent) SessionDelete(context.Context, string) error           { return nil }
-func (f *fakeChainAgent) SessionEnsureDefault(context.Context) (string, error)  { return "", nil }
+
+func (f *fakeChainAgent) SessionResume(_ context.Context, name string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resumed = append(f.resumed, name)
+	for _, s := range f.sessions {
+		if s.Name == name {
+			return s.ID, nil
+		}
+	}
+	return "", fmt.Errorf("session %q not found", name)
+}
+func (f *fakeChainAgent) SessionDelete(context.Context, string) error          { return nil }
+func (f *fakeChainAgent) SessionEnsureDefault(context.Context) (string, error) { return "", nil }
 
 var _ agentservice.Agent = (*fakeChainAgent)(nil)
 
@@ -338,6 +428,7 @@ func TestUnit_RelayTriggerRunner_HappyPathThroughTheHandler(t *testing.T) {
 	require.Equal(t, "missionservice.events.report_added", inputValue["type"])
 	require.Equal(t, "test-model", req.TemplateVars["model"])
 	require.Equal(t, 4096, req.ContextLength)
+	require.NotEmpty(t, req.SessionID, "the event lands in a session, not beside one")
 
 	require.Equal(t, 3, runtimetypes.EventHopFromContext(ctx), "the run executes at the event's hop+1")
 	require.Equal(t, "hitl-policy-strict.json", hitlservice.PolicyNameFromContext(ctx))
@@ -403,7 +494,6 @@ func jsonInt(n int) string {
 	return string(b)
 }
 
-// TestUnit_BuildRelayChainTriggers asserts no engine and the beta gate each yield a refusing seam with its reason, and an enabled host yields the real runner.
 func TestUnit_BuildRelayChainTriggers(t *testing.T) {
 	t.Parallel()
 	noEngine := buildRelayChainTriggers(nil, t.TempDir(), DefaultWorkspaceID, nil, chatOpts{EffectiveOptInBeta: true})
@@ -411,10 +501,177 @@ func TestUnit_BuildRelayChainTriggers(t *testing.T) {
 	require.Contains(t, noEngine.unavailable, "no engine")
 
 	betaOff := buildRelayChainTriggers(nil, t.TempDir(), DefaultWorkspaceID, &Engine{}, chatOpts{})
-	require.Nil(t, betaOff.runner)
-	require.Contains(t, betaOff.unavailable, "beta")
+	require.NotNil(t, betaOff.runner, "the beta gate no longer withholds the runner")
+	require.Empty(t, betaOff.unavailable)
 
 	on := buildRelayChainTriggers(nil, t.TempDir(), DefaultWorkspaceID, &Engine{}, chatOpts{EffectiveOptInBeta: true})
 	require.NotNil(t, on.runner)
 	require.Empty(t, on.unavailable)
+}
+
+func TestUnit_RelayTriggerRunner_SessionModes(t *testing.T) {
+	reused := func(name string) relayChainRequest {
+		return relayChainRequest{
+			Chain: "chain-on-event.json", SessionMode: librelay.ChainSessionReused,
+			SessionName: name, Input: json.RawMessage(`{"hop":0}`),
+		}
+	}
+	fresh := func(mode string) relayChainRequest {
+		return relayChainRequest{Chain: "chain-on-event.json", SessionMode: mode, Input: json.RawMessage(`{"hop":0}`)}
+	}
+
+	for name, tc := range map[string]struct {
+		firings      []relayChainRequest
+		wantCreated  int
+		wantSessions int
+		wantLists    int
+		wantNames    []string
+	}{
+		"new mode gives every firing its own session": {
+			firings:      []relayChainRequest{fresh(librelay.ChainSessionNew), fresh(librelay.ChainSessionNew)},
+			wantCreated:  2,
+			wantSessions: 2,
+			wantLists:    0,
+		},
+		"an absent mode is new": {
+			firings:      []relayChainRequest{fresh(""), fresh("")},
+			wantCreated:  2,
+			wantSessions: 2,
+			wantLists:    0,
+		},
+		"reused mode creates on the first firing and reuses on the second": {
+			firings:      []relayChainRequest{reused("refund-desk"), reused("refund-desk")},
+			wantCreated:  1,
+			wantSessions: 1,
+			wantLists:    2,
+			wantNames:    []string{triggerSessionPrefix + "refund-desk"},
+		},
+		"reused mode with no wire name derives it from the chain file": {
+			firings:      []relayChainRequest{reused(""), reused("")},
+			wantCreated:  1,
+			wantSessions: 1,
+			wantLists:    2,
+			wantNames:    []string{triggerSessionPrefix + "chain-on-event"},
+		},
+		"reused sessions with different names never merge": {
+			firings:      []relayChainRequest{reused("refund-desk"), reused("ops-desk")},
+			wantCreated:  2,
+			wantSessions: 2,
+			wantLists:    2,
+			wantNames:    []string{triggerSessionPrefix + "refund-desk", triggerSessionPrefix + "ops-desk"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := triggerTestWorkspace(t)
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "chain-on-event.json"), []byte(`{"id":"c","tasks":[]}`), 0o600))
+
+			agent := &fakeChainAgent{}
+			runner := &relayTriggerRunner{agent: agent, contenoxDir: dir}
+			for _, f := range tc.firings {
+				require.NoError(t, runner.RunChain(t.Context(), f))
+			}
+
+			created, resumed, promptSeen, promptNames, lists := agent.sessionOps()
+			require.Len(t, created, tc.wantCreated)
+			require.Equal(t, tc.wantLists, lists, `only "reused" reads the session list`)
+			require.Empty(t, resumed, "reuse resolves by listing, never by switching the workspace's active session")
+			if tc.wantNames != nil {
+				require.Equal(t, tc.wantNames, created)
+			}
+
+			require.Len(t, promptSeen, len(tc.firings), "every firing reaches the chain with a session")
+			require.Len(t, promptNames, len(tc.firings), "every session Prompt received was one the runner created")
+			distinct := map[string]struct{}{}
+			for _, id := range promptSeen {
+				require.NotEmpty(t, id, "PromptRequest.SessionID carries the session the event lands in")
+				distinct[id] = struct{}{}
+			}
+			require.Len(t, distinct, tc.wantSessions)
+			for _, n := range created {
+				require.True(t, strings.HasPrefix(n, triggerSessionPrefix),
+					"a trigger session name is namespaced away from the identity-blind unique index")
+				require.True(t, validChainSessionName(n))
+			}
+		})
+	}
+}
+
+func TestUnit_RelayTriggerRunner_RefusesWhenTheSessionCannotBeCreated(t *testing.T) {
+	dir := triggerTestWorkspace(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "chain-on-event.json"), []byte(`{"id":"c","tasks":[]}`), 0o600))
+
+	agent := &fakeChainAgent{newErr: errors.New("session name already exists")}
+	runner := &relayTriggerRunner{agent: agent, contenoxDir: dir}
+	err := runner.RunChain(t.Context(), relayChainRequest{
+		Chain: "chain-on-event.json", SessionMode: librelay.ChainSessionNew, Input: json.RawMessage(`{"hop":0}`),
+	})
+	require.ErrorIs(t, err, errChainTriggerRefused)
+	require.Contains(t, err.Error(), "session name already exists")
+	_, _, calls := agent.last()
+	require.Zero(t, calls, "no session means no run")
+}
+
+func TestUnit_RelayTriggerRunner_ConcurrentFiringsShareOneReusedSession(t *testing.T) {
+	dir := triggerTestWorkspace(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "chain-on-event.json"), []byte(`{"id":"c","tasks":[]}`), 0o600))
+
+	agent := &fakeChainAgent{listDelay: 5 * time.Millisecond}
+	runner := &relayTriggerRunner{agent: agent, contenoxDir: dir}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			require.NoError(t, runner.RunChain(t.Context(), relayChainRequest{
+				Chain: "chain-on-event.json", SessionMode: librelay.ChainSessionReused,
+				SessionName: "refund-desk", Input: json.RawMessage(`{"hop":0}`),
+			}))
+		}()
+	}
+	wg.Wait()
+
+	created, _, promptSeen, _, _ := agent.sessionOps()
+	require.Equal(t, []string{triggerSessionPrefix + "refund-desk"}, created)
+	require.Len(t, promptSeen, 8)
+	for _, id := range promptSeen {
+		require.Equal(t, promptSeen[0], id, "every concurrent firing lands in the one reused session")
+	}
+	runner.mu.Lock()
+	require.Empty(t, runner.inSession, "the per-name gate is released once no firing holds it")
+	runner.mu.Unlock()
+}
+
+func TestUnit_RelayTriggerRunner_WritesSessionsAcpsvcCanList(t *testing.T) {
+	ctx := context.Background()
+	dir := triggerTestWorkspace(t)
+	db, err := libdb.NewSQLiteDBManager(ctx, filepath.Join(t.TempDir(), "trigger.db"), runtimetypes.SchemaSQLite)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), DefaultWorkspaceID)
+	require.NoError(t, store.CreateNamedMessageIndex(ctx, "idx-local", "local-user", "default"))
+
+	triggers := buildRelayChainTriggers(db, dir, DefaultWorkspaceID, &Engine{}, chatOpts{})
+	runner, ok := triggers.runner.(*relayTriggerRunner)
+	require.True(t, ok)
+
+	name := triggerSessionPrefix + "default"
+	first, err := runner.ensureSession(ctx, librelay.ChainSessionReused, name)
+	require.NoError(t, err)
+	require.NotEmpty(t, first)
+
+	second, err := runner.ensureSession(ctx, librelay.ChainSessionReused, name)
+	require.NoError(t, err)
+	require.Equal(t, first, second, "the second firing resolves the same row instead of creating another")
+
+	listed, err := store.ListMessageSessions(ctx, acpsvc.ClientIdentity)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.Equal(t, first, listed[0].ID)
+	require.Equal(t, name, listed[0].Name, "an unnamed row can never be attached, so the name is the contract")
+
+	local, err := store.GetMessageSessionByName(ctx, "local-user", "default")
+	require.NoError(t, err)
+	require.Equal(t, "idx-local", local.ID, "the prefix keeps a wire name clear of another identity's session")
 }

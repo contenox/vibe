@@ -67,10 +67,6 @@ type askRecovery struct {
 	RecoveryCommand string `json:"recoveryCommand,omitempty"`
 }
 
-// attachAskRecovery merges the ask's deadline and recovery command into the
-// permission request's `_meta`. The deadline is the durable row's ExpiresAt, not
-// localtools.ApprovalParkWindow, and nothing is attached unless the row is found
-// under the id this card carries.
 func (t *Transport) attachAskRecovery(ctx context.Context, rpcReq *libacp.RequestPermissionRequest, askID string) {
 	if t.deps.DB == nil || strings.TrimSpace(askID) == "" {
 		return

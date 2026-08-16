@@ -40,11 +40,43 @@ func TestUnit_ChainTriggerFramesRoundTrip(t *testing.T) {
 		t.Fatalf("DecodePayload: %v", err)
 	}
 	if decoded.RequestID != "req-1" || decoded.Chain != "chain-on-report.json" ||
-		decoded.SessionMode != librelay.ChainSessionNew || decoded.Policy != "" {
+		decoded.SessionMode != librelay.ChainSessionNew || decoded.Policy != "" ||
+		decoded.SessionName != "" {
 		t.Fatalf("payload = %+v", decoded)
 	}
 	if string(decoded.Input) != `{"nid":7,"type":"missionservice.events.report_added","hop":2}` {
 		t.Fatalf("input = %s", decoded.Input)
+	}
+
+	named, err := librelay.Frame{
+		Type:     librelay.TypeChainTrigger,
+		Instance: "inst-1",
+	}.WithPayload(librelay.ChainTrigger{
+		RequestID:   "req-2",
+		Chain:       "chain-on-report.json",
+		SessionMode: librelay.ChainSessionReused,
+		SessionName: "refund-desk",
+		Input:       json.RawMessage(`{"hop":0}`),
+	})
+	if err != nil {
+		t.Fatalf("WithPayload: %v", err)
+	}
+	buf.Reset()
+	if err := librelay.NewWriter(&buf).WriteFrame(named); err != nil {
+		t.Fatalf("WriteFrame: %v", err)
+	}
+	got, err = librelay.NewReader(&buf).ReadFrame()
+	if err != nil {
+		t.Fatalf("ReadFrame: %v", err)
+	}
+	var namedDecoded librelay.ChainTrigger
+	if err := got.DecodePayload(&namedDecoded); err != nil {
+		t.Fatalf("DecodePayload: %v", err)
+	}
+	if namedDecoded.RequestID != "req-2" ||
+		namedDecoded.SessionMode != librelay.ChainSessionReused ||
+		namedDecoded.SessionName != "refund-desk" {
+		t.Fatalf("payload = %+v", namedDecoded)
 	}
 
 	result, err := librelay.Frame{
@@ -94,6 +126,22 @@ func TestUnit_ChainTriggerWireShape(t *testing.T) {
 		t.Fatalf("trigger payload = %s, want %s", trigger.Payload, wantTrigger)
 	}
 
+	named, err := librelay.Frame{Type: librelay.TypeChainTrigger, Instance: "inst-1"}.
+		WithPayload(librelay.ChainTrigger{
+			RequestID:   "req-3",
+			Chain:       "chain-on-report.json",
+			SessionMode: "reused",
+			SessionName: "refund-desk",
+			Input:       json.RawMessage(`{"hop":0}`),
+		})
+	if err != nil {
+		t.Fatalf("WithPayload: %v", err)
+	}
+	wantNamed := `{"request_id":"req-3","chain":"chain-on-report.json","session_mode":"reused","session_name":"refund-desk","input":{"hop":0}}`
+	if string(named.Payload) != wantNamed {
+		t.Fatalf("named trigger payload = %s, want %s", named.Payload, wantNamed)
+	}
+
 	result, err := librelay.Frame{Type: librelay.TypeChainTriggerResult, Instance: "inst-1"}.
 		WithPayload(librelay.ChainTriggerResult{RequestID: "req-1", Status: "ok"})
 	if err != nil {
@@ -106,11 +154,12 @@ func TestUnit_ChainTriggerWireShape(t *testing.T) {
 
 	// The relay-authored shape decodes, including the optional policy field.
 	var decoded librelay.ChainTrigger
-	relaySide := `{"request_id":"req-2","chain":"chain-x.json","session_mode":"reused","input":[1,2],"policy":"hitl-policy-strict.json"}`
+	relaySide := `{"request_id":"req-2","chain":"chain-x.json","session_mode":"reused","session_name":"refund-desk","input":[1,2],"policy":"hitl-policy-strict.json"}`
 	if err := json.Unmarshal([]byte(relaySide), &decoded); err != nil {
 		t.Fatalf("decode relay-side payload: %v", err)
 	}
-	if decoded.SessionMode != librelay.ChainSessionReused || decoded.Policy != "hitl-policy-strict.json" {
+	if decoded.SessionMode != librelay.ChainSessionReused || decoded.Policy != "hitl-policy-strict.json" ||
+		decoded.SessionName != "refund-desk" {
 		t.Fatalf("decoded = %+v", decoded)
 	}
 

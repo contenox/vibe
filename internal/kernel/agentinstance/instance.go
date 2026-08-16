@@ -54,6 +54,20 @@ func (h *journalingHarness) RequestPermission(ctx context.Context, req libacp.Re
 	return h.hub.requestPermission(ctx, req)
 }
 
+func (h *journalingHarness) ReadTextFile(ctx context.Context, req libacp.ReadTextFileRequest) (libacp.ReadTextFileResponse, error) {
+	if fs := h.hub.fileSystemServer(req.SessionID); fs != nil {
+		return fs.ReadTextFile(ctx, req)
+	}
+	return libacp.ReadTextFileResponse{}, libacp.MethodNotFound(libacp.MethodFSReadTextFile)
+}
+
+func (h *journalingHarness) WriteTextFile(ctx context.Context, req libacp.WriteTextFileRequest) (libacp.WriteTextFileResponse, error) {
+	if fs := h.hub.fileSystemServer(req.SessionID); fs != nil {
+		return fs.WriteTextFile(ctx, req)
+	}
+	return libacp.WriteTextFileResponse{}, libacp.MethodNotFound(libacp.MethodFSWriteTextFile)
+}
+
 func (h *journalingHarness) CreateTerminal(ctx context.Context, req libacp.CreateTerminalRequest) (libacp.CreateTerminalResponse, error) {
 	if ts := h.hub.terminalServer(req.SessionID); ts != nil {
 		return ts.CreateTerminal(ctx, req)
@@ -107,6 +121,8 @@ type instanceConfig struct {
 	onDetach              func(sessionID libacp.SessionID, viewerID string)
 	onUnsupervisedDeny    func(sessionID libacp.SessionID)
 	onUnsupervisedRequest func(ctx context.Context, req libacp.RequestPermissionRequest) (libacp.RequestPermissionResponse, error)
+
+	fileSystem InstanceFileSystem
 }
 
 type instance struct {
@@ -140,6 +156,7 @@ func newInstance(cfg instanceConfig) *instance {
 	hub.onDetach = cfg.onDetach
 	hub.onUnsupervisedDeny = cfg.onUnsupervisedDeny
 	hub.onUnsupervisedRequest = cfg.onUnsupervisedRequest
+	hub.fileSystem = cfg.fileSystem
 	driver := newSessionDriver()
 	return &instance{
 		id:             cfg.id,

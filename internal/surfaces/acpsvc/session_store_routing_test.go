@@ -23,7 +23,7 @@ const routingWorkspace = "ws-routing"
 func seedRoutingSession(t *testing.T, ctx context.Context, store runtimetypes.MessageStore, name string) string {
 	t.Helper()
 	internalID := "idx-" + uuid.NewString()
-	require.NoError(t, store.CreateNamedMessageIndex(ctx, internalID, acpClientIdentity, name))
+	require.NoError(t, store.CreateNamedMessageIndex(ctx, internalID, ClientIdentity, name))
 	return internalID
 }
 
@@ -41,10 +41,10 @@ func TestUnit_ListSessions_ThroughStore_PinsRosterOutput(t *testing.T) {
 	seedRoutingSession(t, ctx, store, "beam-idle") // named, never messaged
 
 	// An unnamed index: predates ACP naming, must not be listed.
-	require.NoError(t, store.CreateMessageIndex(ctx, "idx-unnamed", acpClientIdentity))
+	require.NoError(t, store.CreateMessageIndex(ctx, "idx-unnamed", ClientIdentity))
 	// Another workspace's session, and another identity's: neither is ours.
 	otherWS := runtimetypes.NewMessageStore(exec, "ws-other")
-	require.NoError(t, otherWS.CreateNamedMessageIndex(ctx, "idx-foreign", acpClientIdentity, "beam-foreign"))
+	require.NoError(t, otherWS.CreateNamedMessageIndex(ctx, "idx-foreign", ClientIdentity, "beam-foreign"))
 	require.NoError(t, store.CreateNamedMessageIndex(ctx, "idx-cli", "cli", "beam-cli"))
 
 	base := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
@@ -185,7 +185,7 @@ func TestUnit_ServeSessionCwd_ThroughStore(t *testing.T) {
 	require.Equal(t, "", serveSessionCwd(ctx, db, "idx-does-not-exist"), "an unknown id is not an error, it is no cwd")
 
 	// An index with no name cannot key the cwd record.
-	require.NoError(t, store.CreateMessageIndex(ctx, "idx-nameless", acpClientIdentity))
+	require.NoError(t, store.CreateMessageIndex(ctx, "idx-nameless", ClientIdentity))
 	require.Equal(t, "", serveSessionCwd(ctx, db, "idx-nameless"))
 
 	// A named index with no stored record is also "".

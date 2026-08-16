@@ -42,22 +42,17 @@ type Prechecker interface {
 	Precheck(ctx context.Context, input any, tools *taskengine.ToolsCall) error
 }
 
-// ApprovalParkWindow is how long an ActionApprove call waits for a verdict
-// before the run suspends to a durable checkpoint instead of blocking.
-const ApprovalParkWindow = 30 * time.Second
-
 // HITLWrapper decorates a ToolsRepo, gating configured tool calls on
 // ActionAllow/ActionDeny/ActionApprove before delegating to the inner tools.
 type HITLWrapper struct {
-	inner      taskengine.ToolsRepo
-	ask        AskApproval
-	policy     hitlservice.PolicyEvaluator
-	tracker    libtracker.ActivityTracker
-	eventSink  taskengine.TaskEventSink
-	recorder   hitlservice.ApprovalRecorder
-	responder  approvalResponder
-	parkWindow time.Duration
-	shellKind  hitlservice.ShellKind
+	inner     taskengine.ToolsRepo
+	ask       AskApproval
+	policy    hitlservice.PolicyEvaluator
+	tracker   libtracker.ActivityTracker
+	eventSink taskengine.TaskEventSink
+	recorder  hitlservice.ApprovalRecorder
+	responder approvalResponder
+	shellKind hitlservice.ShellKind
 }
 
 type approvalResponder interface {
@@ -75,15 +70,14 @@ func NewHITLWrapper(inner taskengine.ToolsRepo, ask AskApproval, policy hitlserv
 	recorder, _ := policy.(hitlservice.ApprovalRecorder)
 	responder, _ := policy.(approvalResponder)
 	return &HITLWrapper{
-		inner:      inner,
-		ask:        ask,
-		policy:     policy,
-		tracker:    tracker,
-		eventSink:  eventSink,
-		recorder:   recorder,
-		responder:  responder,
-		parkWindow: ApprovalParkWindow,
-		shellKind:  trustedShellKind(DetectPlatformShell()),
+		inner:     inner,
+		ask:       ask,
+		policy:    policy,
+		tracker:   tracker,
+		eventSink: eventSink,
+		recorder:  recorder,
+		responder: responder,
+		shellKind: trustedShellKind(DetectPlatformShell()),
 	}
 }
 
@@ -103,14 +97,6 @@ func trustedShellKind(shell PlatformShell) hitlservice.ShellKind {
 		return hitlservice.ShellKindCmd
 	default:
 		return hitlservice.ShellKindUnknown
-	}
-}
-
-// SetParkWindow overrides the fast-path park duration; non-positive values
-// are ignored, and it is not synchronized against in-flight Execs.
-func (h *HITLWrapper) SetParkWindow(d time.Duration) {
-	if d > 0 {
-		h.parkWindow = d
 	}
 }
 
@@ -162,11 +148,6 @@ func policyEvalArgs(input any, tools *taskengine.ToolsCall) map[string]any {
 func askSessionID(ctx context.Context) string {
 	id, _ := ctx.Value(runtimetypes.SessionIDContextKey).(string)
 	return id
-}
-
-type askOutcome struct {
-	approved bool
-	err      error
 }
 
 // Exec implements taskengine.ToolsRepo.
@@ -285,7 +266,7 @@ func (h *HITLWrapper) Exec(
 		if h.recorder != nil {
 			return h.askDurable(ctx, startTime, input, debug, tools, req, result, toolCallID, reportErr, reportChange)
 		}
-		return h.askBlocking(ctx, startTime, input, debug, tools, req, result, reportErr, reportChange)
+		return h.askBlocking(ctx, startTime, input, debug, tools, req, result, "", reportErr, reportChange)
 
 	default:
 		h.publishDecision(ctx, tools.Name, toolName, args, result, false)
@@ -301,6 +282,7 @@ func (h *HITLWrapper) askBlocking(
 	tools *taskengine.ToolsCall,
 	req hitlservice.ApprovalRequest,
 	result hitlservice.EvaluationResult,
+	durableID string,
 	reportErr func(error),
 	reportChange func(string, any),
 ) (any, taskengine.DataType, error) {
@@ -325,8 +307,10 @@ func (h *HITLWrapper) askBlocking(
 			if onTimeout == "" {
 				onTimeout = hitlservice.ActionDeny
 			}
-			if onTimeout == hitlservice.ActionAllow {
-				h.hitlLog(ctx, "verdict entered", "tool", req.ToolName, "approval_id", req.ToolCallID, "approved", true, "reason", "on_timeout")
+			allow := onTimeout == hitlservice.ActionAllow
+			h.hitlLog(ctx, "verdict entered", "tool", req.ToolName, "approval_id", req.ToolCallID, "approved", allow, "reason", "on_timeout")
+			h.closeRowInline(ctx, durableID, allow, reportErr)
+			if allow {
 				return h.inner.Exec(ctx, startTime, input, debug, tools)
 			}
 			h.hitlLog(ctx, "turn failed", "tool", req.ToolName, "approval_id", req.ToolCallID, "reason", "approval_timed_out")
@@ -339,11 +323,27 @@ func (h *HITLWrapper) askBlocking(
 		return nil, taskengine.DataTypeAny, err
 	}
 	h.hitlLog(ctx, "verdict entered", "tool", req.ToolName, "approval_id", req.ToolCallID, "approved", approved)
+	h.closeRowInline(ctx, durableID, approved, reportErr)
 	if !approved {
-		reportChange("denied", DenyMessage)
-		return DenyMessage, taskengine.DataTypeString, nil
+		msg := DenyMessage
+		if durableID != "" {
+			msg = h.denyMessage(ctx, durableID)
+		}
+		reportChange("denied", msg)
+		return msg, taskengine.DataTypeString, nil
 	}
 	return h.inner.Exec(ctx, startTime, input, debug, tools)
+}
+
+func (h *HITLWrapper) closeRowInline(ctx context.Context, approvalID string, approved bool, reportErr func(error)) {
+	if h.recorder == nil || approvalID == "" {
+		return
+	}
+	if err := h.recorder.ResolveApprovalInline(ctx, approvalID, approved); err != nil && !errors.Is(err, hitlservice.ErrApprovalAlreadyResolved) {
+		reportErr(fmt.Errorf("hitl: closing answered approval row %s: %w", approvalID, err))
+		return
+	}
+	h.hitlLog(ctx, "verdict recorded", "approval_id", approvalID, "approved", approved)
 }
 
 func (h *HITLWrapper) askDurable(
@@ -369,100 +369,40 @@ func (h *HITLWrapper) askDurable(
 	if err := h.recorder.RecordPendingApproval(ctx, approvalID, req); err != nil {
 		// Do not lose the gate: fall back to blocking (not restart-durable this once).
 		reportErr(fmt.Errorf("hitl: durable approval row failed, falling back to blocking ask: %w", err))
-		return h.askBlocking(ctx, startTime, input, debug, tools, req, result, reportErr, reportChange)
+		return h.askBlocking(ctx, startTime, input, debug, tools, req, result, "", reportErr, reportChange)
 	}
 
-	park := h.parkWindow
-	if park <= 0 {
-		park = ApprovalParkWindow
-	}
-	ruleTimeout := time.Duration(result.TimeoutS) * time.Second
-	// A shorter rule deadline wins: such a rule opted out of long waits and
-	// must not start suspending now.
-	ruleBounds := result.TimeoutS > 0 && ruleTimeout <= park
-	window := park
-	if ruleBounds {
-		window = ruleTimeout
+	if !taskengine.ToolCallSuspendable(ctx) || !taskengine.HasCheckpointSaver(ctx) {
+		return h.askBlocking(ctx, startTime, input, debug, tools, req, result, approvalID, reportErr, reportChange)
 	}
 
-	askCtx, askCancel := context.WithTimeout(ctx, window)
-	defer askCancel()
-
-	outcomeCh := make(chan askOutcome, 1)
-	approvalPending.Add(1)
 	h.hitlLog(ctx, "card shown", "tool", req.ToolName, "approval_id", approvalID)
+	h.raiseCard(ctx, req, approvalID, result)
+	h.hitlLog(ctx, "checkpoint pending", "tool", req.ToolName, "approval_id", approvalID)
+	reportChange("approval_pending", approvalID)
+	return nil, taskengine.DataTypeAny, &taskengine.ApprovalPendingError{
+		ApprovalID: approvalID,
+		ToolName:   req.ToolName,
+	}
+}
+
+func (h *HITLWrapper) raiseCard(ctx context.Context, req hitlservice.ApprovalRequest, approvalID string, result hitlservice.EvaluationResult) {
+	if h.responder == nil {
+		return
+	}
+	askCtx, askCancel := context.WithTimeout(context.WithoutCancel(ctx), rowLifetime(result))
 	go func() {
+		defer askCancel()
 		approved, err := h.ask(askCtx, req)
-		outcomeCh <- askOutcome{approved: approved, err: err}
+		h.deliverVerdict(approvalID, req.ToolName, approved, err)
 	}()
-	var out askOutcome
-	select {
-	case out = <-outcomeCh:
-	case <-askCtx.Done():
-		// ask() ignores its context; abandon it here, the buffered channel
-		// lets the goroutine drain whenever it returns.
-		out = askOutcome{err: askCtx.Err()}
-	}
-	approvalPending.Add(-1)
+}
 
-	if out.err != nil {
-		if errors.Is(askCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
-			if ruleBounds {
-				// Row closed best-effort: a racing Respond may already have
-				// closed it, which is fine.
-				onTimeout := result.OnTimeout
-				if onTimeout == "" {
-					onTimeout = hitlservice.ActionDeny
-				}
-				allow := onTimeout == hitlservice.ActionAllow
-				h.hitlLog(ctx, "verdict entered", "tool", req.ToolName, "approval_id", approvalID, "approved", allow, "reason", "on_timeout")
-				if err := h.recorder.ResolveApprovalInline(ctx, approvalID, allow); err != nil && !errors.Is(err, hitlservice.ErrApprovalAlreadyResolved) {
-					reportErr(fmt.Errorf("hitl: closing timed-out approval row %s: %w", approvalID, err))
-				} else {
-					h.hitlLog(ctx, "verdict recorded", "tool", req.ToolName, "approval_id", approvalID, "approved", allow)
-				}
-				if allow {
-					return h.inner.Exec(ctx, startTime, input, debug, tools)
-				}
-				h.hitlLog(ctx, "turn failed", "tool", req.ToolName, "approval_id", approvalID, "reason", "approval_timed_out")
-				reportErr(fmt.Errorf("hitl: approval timed out: %w", out.err))
-				return DenyTimeoutMessage, taskengine.DataTypeString, nil
-			}
-			// Park window elapsed with no verdict: the row stays pending and
-			// the engine checkpoints and releases.
-			h.hitlLog(ctx, "checkpoint parked", "tool", req.ToolName, "approval_id", approvalID)
-			reportChange("approval_parked", approvalID)
-			// The abandoned ask() goroutine's outcome must still be forwarded.
-			if h.responder != nil {
-				go h.deliverLateVerdict(approvalID, req.ToolName, outcomeCh)
-			}
-			return nil, taskengine.DataTypeAny, &taskengine.ApprovalPendingError{
-				ApprovalID: approvalID,
-				ToolName:   req.ToolName,
-			}
-		}
-		// Row left pending: SweepExpired closes it; no checkpoint exists on
-		// this path so nothing resumes.
-		h.hitlLog(ctx, "turn failed", "tool", req.ToolName, "approval_id", approvalID, "reason", "ask_error", "error", out.err.Error())
-		err := fmt.Errorf("hitl: approval error: %w", out.err)
-		reportErr(err)
-		return nil, taskengine.DataTypeAny, err
+func rowLifetime(result hitlservice.EvaluationResult) time.Duration {
+	if result.TimeoutS > 0 {
+		return time.Duration(result.TimeoutS) * time.Second
 	}
-
-	// Fast path: close the row inline (never the resume hook) since the
-	// waiter is right here.
-	h.hitlLog(ctx, "verdict entered", "tool", req.ToolName, "approval_id", approvalID, "approved", out.approved)
-	if err := h.recorder.ResolveApprovalInline(ctx, approvalID, out.approved); err != nil && !errors.Is(err, hitlservice.ErrApprovalAlreadyResolved) {
-		reportErr(fmt.Errorf("hitl: closing answered approval row %s: %w", approvalID, err))
-	} else {
-		h.hitlLog(ctx, "verdict recorded", "tool", req.ToolName, "approval_id", approvalID, "approved", out.approved)
-	}
-	if !out.approved {
-		msg := h.denyMessage(ctx, approvalID)
-		reportChange("denied", msg)
-		return msg, taskengine.DataTypeString, nil
-	}
-	return h.inner.Exec(ctx, startTime, input, debug, tools)
+	return hitlservice.DefaultApprovalCeiling
 }
 
 type guidanceReader interface {
@@ -484,32 +424,28 @@ func (h *HITLWrapper) denyMessage(ctx context.Context, approvalID string) string
 	return fmt.Sprintf("Denied by %s per the mission envelope: %s Do not retry this call.", by, guidance)
 }
 
-func (h *HITLWrapper) deliverLateVerdict(approvalID, toolName string, outcomeCh <-chan askOutcome) {
-	out, ok := <-outcomeCh
-	if !ok {
-		return
-	}
+func (h *HITLWrapper) deliverVerdict(approvalID, toolName string, approved bool, askErr error) {
 	bg := context.Background()
-	reportErr, _, end := h.tracker.Start(bg, "hitl", "late_verdict", "tool_name", toolName, "approval_id", approvalID)
+	reportErr, _, end := h.tracker.Start(bg, "hitl", "deliver_verdict", "tool_name", toolName, "approval_id", approvalID)
 	defer end()
 
-	if out.err != nil {
-		h.hitlLog(bg, "turn failed", "tool", toolName, "approval_id", approvalID, "reason", "late_ask_error", "error", out.err.Error())
+	if askErr != nil {
+		h.hitlLog(bg, "turn failed", "tool", toolName, "approval_id", approvalID, "reason", "ask_error", "error", askErr.Error())
 		return
 	}
-	h.hitlLog(bg, "verdict entered", "tool", toolName, "approval_id", approvalID, "approved", out.approved, "late", true)
-	if err := h.responder.Respond(bg, approvalID, out.approved); err != nil {
+	h.hitlLog(bg, "verdict entered", "tool", toolName, "approval_id", approvalID, "approved", approved)
+	if err := h.responder.Respond(bg, approvalID, approved); err != nil {
 		if errors.Is(err, hitlservice.ErrApprovalAlreadyResolved) {
 			// A racing sweep or external Respond may have closed this row already.
-			h.hitlLog(bg, "verdict entered", "tool", toolName, "approval_id", approvalID, "approved", out.approved, "late", true, "outcome", "already_resolved")
+			h.hitlLog(bg, "verdict entered", "tool", toolName, "approval_id", approvalID, "approved", approved, "outcome", "already_resolved")
 			return
 		}
-		h.hitlLog(bg, "turn failed", "tool", toolName, "approval_id", approvalID, "reason", "late_respond_failed", "error", err.Error())
-		reportErr(fmt.Errorf("hitl: delivering late verdict for approval %s: %w", approvalID, err))
+		h.hitlLog(bg, "turn failed", "tool", toolName, "approval_id", approvalID, "reason", "respond_failed", "error", err.Error())
+		reportErr(fmt.Errorf("hitl: delivering verdict for approval %s: %w", approvalID, err))
 		return
 	}
-	h.hitlLog(bg, "verdict recorded", "tool", toolName, "approval_id", approvalID, "approved", out.approved, "late", true)
-	h.hitlLog(bg, "tool resumed", "tool", toolName, "approval_id", approvalID, "approved", out.approved)
+	h.hitlLog(bg, "verdict recorded", "tool", toolName, "approval_id", approvalID, "approved", approved)
+	h.hitlLog(bg, "tool resumed", "tool", toolName, "approval_id", approvalID, "approved", approved)
 }
 
 func (h *HITLWrapper) publishDecision(ctx context.Context, toolsName, toolName string, args map[string]any, result hitlservice.EvaluationResult, approvalRequested bool) {

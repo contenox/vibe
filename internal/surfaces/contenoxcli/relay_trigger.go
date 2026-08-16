@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -16,9 +17,11 @@ import (
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/surfaces/acpsvc"
 	"github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/librelay"
 	"github.com/contenox/contenox/libtracker"
+	"github.com/google/uuid"
 )
 
 var errChainTriggerRefused = errors.New("chain trigger refused")
@@ -32,9 +35,11 @@ type relayChainRunner interface {
 }
 
 type relayChainRequest struct {
-	Chain  string
-	Policy string
-	Input  json.RawMessage
+	Chain       string
+	Policy      string
+	SessionMode string
+	SessionName string
+	Input       json.RawMessage
 }
 
 type relayChainTriggers struct {
@@ -46,14 +51,12 @@ func buildRelayChainTriggers(db libdbexec.DBManager, contenoxDir, workspaceID st
 	if engine == nil {
 		return relayChainTriggers{unavailable: "no engine is running in this process; configure a default model and restart"}
 	}
-	if !opts.EffectiveOptInBeta {
-		return relayChainTriggers{unavailable: "event triggers are beta-gated off on this machine (contenox config set opt-in-beta true)"}
-	}
 	return relayChainTriggers{runner: &relayTriggerRunner{
 		agent: agentservice.New(agentservice.Deps{
 			Engine:      engine,
 			DB:          db,
 			WorkspaceID: workspaceID,
+			Identity:    acpsvc.ClientIdentity,
 		}),
 		opts:        opts,
 		contenoxDir: contenoxDir,
@@ -111,11 +114,10 @@ func (h *relayTriggerHandler) handle(ctx context.Context, f librelay.Frame) {
 		refusal = h.triggers.unavailable
 	case req.Chain == "":
 		refusal = "chain is required"
-	case req.SessionMode == librelay.ChainSessionReused:
-		// Running "reused" as "new" would report a reuse that never happened.
-		refusal = `session_mode "reused" is not supported by this build; use "new"`
-	case req.SessionMode != "" && req.SessionMode != librelay.ChainSessionNew:
+	case req.SessionMode != "" && req.SessionMode != librelay.ChainSessionNew && req.SessionMode != librelay.ChainSessionReused:
 		refusal = fmt.Sprintf("unknown session_mode %q", req.SessionMode)
+	case req.SessionName != "" && !validChainSessionName(req.SessionName):
+		refusal = "malformed session_name"
 	}
 	if refusal != "" {
 		h.sendResult(ctx, f, req.RequestID, librelay.ChainTriggerStatusRefused, refusal)
@@ -133,9 +135,11 @@ func (h *relayTriggerHandler) handle(ctx context.Context, f librelay.Frame) {
 		runCtx := context.WithValue(ctx, libtracker.ContextKeyRequestID, req.RequestID)
 		status, msg := librelay.ChainTriggerStatusOK, ""
 		if err := h.triggers.runner.RunChain(runCtx, relayChainRequest{
-			Chain:  req.Chain,
-			Policy: req.Policy,
-			Input:  req.Input,
+			Chain:       req.Chain,
+			Policy:      req.Policy,
+			SessionMode: req.SessionMode,
+			SessionName: strings.TrimSpace(req.SessionName),
+			Input:       req.Input,
 		}); err != nil {
 			status = librelay.ChainTriggerStatusError
 			if errors.Is(err, errChainTriggerRefused) {
@@ -197,10 +201,88 @@ func validChainRequestID(id string) bool {
 	return !strings.ContainsFunc(id, func(r rune) bool { return r < 0x20 || r == 0x7f })
 }
 
+const triggerSessionPrefix = "trigger-"
+
+const maxChainSessionNameBytes = 255 - len(triggerSessionPrefix)
+
+func validChainSessionName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > maxChainSessionNameBytes || !utf8.ValidString(name) {
+		return false
+	}
+	return !strings.ContainsFunc(name, func(r rune) bool { return r < 0x20 || r == 0x7f })
+}
+
 type relayTriggerRunner struct {
 	agent       agentservice.Agent
 	opts        chatOpts
 	contenoxDir string
+
+	mu        sync.Mutex
+	inSession map[string]*triggerSessionGate
+}
+
+type triggerSessionGate struct {
+	mu   sync.Mutex
+	refs int
+}
+
+func (r *relayTriggerRunner) enterSession(name string) func() {
+	r.mu.Lock()
+	if r.inSession == nil {
+		r.inSession = map[string]*triggerSessionGate{}
+	}
+	gate := r.inSession[name]
+	if gate == nil {
+		gate = &triggerSessionGate{}
+		r.inSession[name] = gate
+	}
+	gate.refs++
+	r.mu.Unlock()
+
+	gate.mu.Lock()
+	return func() {
+		gate.mu.Unlock()
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		gate.refs--
+		if gate.refs == 0 {
+			delete(r.inSession, name)
+		}
+	}
+}
+
+func (r *relayTriggerRunner) sessionNameFor(req relayChainRequest) (string, error) {
+	if req.SessionMode != librelay.ChainSessionReused {
+		return triggerSessionPrefix + uuid.NewString(), nil
+	}
+	name := req.SessionName
+	if name == "" {
+		name = strings.TrimSuffix(filepath.Base(req.Chain), ".json")
+	}
+	if !validChainSessionName(name) {
+		return "", fmt.Errorf("cannot name a reused session for chain %q", req.Chain)
+	}
+	return triggerSessionPrefix + strings.TrimSpace(name), nil
+}
+
+func (r *relayTriggerRunner) ensureSession(ctx context.Context, mode, name string) (string, error) {
+	if mode == librelay.ChainSessionReused {
+		sessions, err := r.agent.SessionList(ctx)
+		if err != nil {
+			return "", refuseChainTrigger(fmt.Errorf("list sessions: %w", err))
+		}
+		for _, s := range sessions {
+			if s != nil && s.Name == name {
+				return s.ID, nil
+			}
+		}
+	}
+	id, err := r.agent.SessionNew(ctx, name)
+	if err != nil {
+		return "", refuseChainTrigger(fmt.Errorf("create session %q: %w", name, err))
+	}
+	return id, nil
 }
 
 func (r *relayTriggerRunner) RunChain(ctx context.Context, req relayChainRequest) error {
@@ -234,12 +316,25 @@ func (r *relayTriggerRunner) RunChain(ctx context.Context, req relayChainRequest
 	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
 		execCtx = vfs.WithSessionCwd(execCtx, cwd)
 	}
+
+	sessionName, err := r.sessionNameFor(req)
+	if err != nil {
+		return refuseChainTrigger(err)
+	}
+	release := r.enterSession(sessionName)
+	defer release()
+	contenoxSessionID, err := r.ensureSession(execCtx, req.SessionMode, sessionName)
+	if err != nil {
+		return err
+	}
+
 	_, err = r.agent.Prompt(execCtx, agentservice.PromptRequest{
 		Input:         string(req.Input),
 		InputValue:    input,
 		InputType:     taskengine.DataTypeJSON,
 		Chain:         chain,
 		ChainRef:      path,
+		SessionID:     contenoxSessionID,
 		TemplateVars:  buildTemplateVars(r.opts),
 		ContextLength: r.opts.EffectiveContext,
 	})

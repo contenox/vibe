@@ -75,6 +75,7 @@ type ChainTrigger struct {
 	Chain string `json:"chain"`
 	// SessionMode is [ChainSessionNew] or [ChainSessionReused].
 	SessionMode string `json:"session_mode"`
+	SessionName string `json:"session_name,omitempty"`
 	// Input is the event envelope the chain receives, raw.
 	Input json.RawMessage `json:"input"`
 	// Policy optionally names the HITL policy envelope for the run; empty applies the machine's own default.
