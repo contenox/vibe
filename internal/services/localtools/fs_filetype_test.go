@@ -21,13 +21,6 @@ func writeExecutableBinary(t *testing.T, dir, name string, size int) string {
 	return p
 }
 
-// TestUnit_ListDir_AnnotatesExecutableAndLargeFiles asserts list_dir annotates entries with '/' for directories, '*' for the executable bit, and a compact size once a file is large enough to matter.
-// TestUnit_ListDir_SmallExecutableGetsNoSizeAnnotation asserts a small executable gets only the '*' marker, never a size annotation.
-// TestUnit_ListDir_RecursiveAnnotatesExecutableAndLargeFiles asserts the recursive listing carries the same annotations as the non-recursive one.
-// TestUnit_ListDir_NonDirectoryErrorDescribesWhatItIs asserts the non-directory error names what the path actually is (regular file, size, executable, binary).
-// TestUnit_StatFile_ReportsExecutableAndBinaryFlags asserts stat_file's JSON reports executable/binary flags, and that ordinary files/directories are not falsely flagged.
-// TestUnit_StatFile_SniffIsCheapOnLargeFiles asserts stat_file classifies a file far larger than read_file's size policy without loading the whole thing.
-// TestUnit_ReadFile_RefusesBinaryWithTeachingError asserts read_file refuses binary content with a teaching error naming stat_file, rather than dumping raw bytes.
 func TestUnit_ReadFile_RefusesBinaryWithTeachingError(t *testing.T) {
 	dir := t.TempDir()
 	// Small enough to pass the size gate untouched, exercising the content-based refusal rather than the size guard.
@@ -53,5 +46,3 @@ func TestUnit_ReadFile_ExecutableTextFileIsStillReadable(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, res.(string), "echo hi")
 }
-
-// TestUnit_ReadFile_OversizedBinaryStillBlockedBySizeGuard asserts an oversized binary is still blocked by the pre-existing size gate, before the binary-content check ever runs.
