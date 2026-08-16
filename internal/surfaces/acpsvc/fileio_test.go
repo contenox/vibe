@@ -5,10 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"testing"
 
+	"github.com/contenox/contenox/internal/services/localtools"
 	libacp "github.com/contenox/contenox/libacp"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUnit_MapACPNotExist_WrapsResourceNotFoundAsErrNotExist(t *testing.T) {
@@ -52,56 +53,22 @@ func TestUnit_MapACPNotExist_WrapsResourceNotFoundAsErrNotExist(t *testing.T) {
 // before a transport binds, or a chain fired by a trigger with nobody watching.
 // Such a call has no editor to proxy through, and must read the disk rather
 // than fail: refusing here made file tools unusable outside an editor.
-func TestUnit_ACPFileIO_FallsBackToOSWhenNoClientIsAttached(t *testing.T) {
-	t.Parallel()
-	io := NewACPFileIO(func(context.Context) *Transport { return nil })
-	ctx := context.Background()
-
-	p := filepath.Join(t.TempDir(), "unattached.txt")
-	if err := io.WriteFile(ctx, p, []byte("written with no client")); err != nil {
-		t.Fatalf("WriteFile with no attached transport must fall back to os, got %v", err)
-	}
-	got, err := io.ReadFile(ctx, p)
-	if err != nil {
-		t.Fatalf("ReadFile with no attached transport must fall back to os, got %v", err)
-	}
-	if string(got) != "written with no client" {
-		t.Fatalf("os fallback round-trip mismatch: %q", got)
-	}
+func TestUnit_ACPFileIO_RefusesWhenNoClientIsAttached(t *testing.T) {
+	fio := NewACPFileIO(func(context.Context) *Transport { return nil })
+	_, err := fio.ReadFile(context.Background(), "whatever.txt")
+	require.ErrorIs(t, err, localtools.ErrNoFilesystem)
+	require.ErrorIs(t, fio.WriteFile(context.Background(), "whatever.txt", []byte("x")), localtools.ErrNoFilesystem)
 }
 
-// An unset resolver is the same situation as an unattached one, and must not
-// panic on the way to the same answer.
-func TestUnit_ACPFileIO_NilResolverFallsBackToOS(t *testing.T) {
-	t.Parallel()
-	io := NewACPFileIO(nil)
-	ctx := context.Background()
-
-	p := filepath.Join(t.TempDir(), "nil-resolver.txt")
-	if err := io.WriteFile(ctx, p, []byte("still works")); err != nil {
-		t.Fatalf("WriteFile with a nil resolver must fall back to os, got %v", err)
-	}
-	if got, err := io.ReadFile(ctx, p); err != nil || string(got) != "still works" {
-		t.Fatalf("ReadFile with a nil resolver = %q, %v", got, err)
-	}
+func TestUnit_ACPFileIO_RefusesWhenNilResolver(t *testing.T) {
+	fio := NewACPFileIO(nil)
+	_, err := fio.ReadFile(context.Background(), "whatever.txt")
+	require.ErrorIs(t, err, localtools.ErrNoFilesystem)
 }
 
-func TestUnit_ACPFileIO_FallsBackToOSWhenClientLacksFSCapability(t *testing.T) {
-	t.Parallel()
+func TestUnit_ACPFileIO_RefusesWhenClientLacksFSCapability(t *testing.T) {
 	tr := mockTransportForFS(libacp.FileSystemCapabilities{})
-	io := NewACPFileIO(func(context.Context) *Transport { return tr })
-	ctx := context.Background()
-
-	p := filepath.Join(t.TempDir(), "note.txt")
-
-	if err := io.WriteFile(ctx, p, []byte("hello from os")); err != nil {
-		t.Fatalf("WriteFile must fall back to os when client lacks fs.writeTextFile, got %v", err)
-	}
-	got, err := io.ReadFile(ctx, p)
-	if err != nil {
-		t.Fatalf("ReadFile must fall back to os when client lacks fs.readTextFile, got %v", err)
-	}
-	if string(got) != "hello from os" {
-		t.Fatalf("os fallback round-trip mismatch: %q", got)
-	}
+	fio := NewACPFileIO(func(context.Context) *Transport { return tr })
+	_, err := fio.ReadFile(context.Background(), "whatever.txt")
+	require.ErrorIs(t, err, localtools.ErrNoFilesystem)
 }

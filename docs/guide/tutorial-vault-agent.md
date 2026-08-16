@@ -91,23 +91,25 @@ files you are about to write go in there.
 
 ## 3. Write the chain
 
-The chain is *what the agent does*. Save this as `.contenox/vault-filer.json`:
+The chain is *what the agent does*. Discovery registers every `chain-agent-*.json`
+file as a dispatchable agent, using its `id` — not the filename — as the agent's
+name, so save this as `.contenox/chain-agent-vaultfiler.json`:
 
 ```json
 {
   "$schema": "https://contenox.com/schema/task-chain.schema.json",
-  "id": "vault-filer",
+  "id": "vaultfiler",
   "description": "Reads every file in inbox/ and files each one into an Obsidian vault as a note.",
   "token_limit": 131072,
   "tasks": [
     {
       "id": "file_notes",
       "handler": "chat_completion",
-      "system_instruction": "You file raw notes into an Obsidian vault.\n\nThe folder `inbox/` holds raw text files. The folder `vault/` is an Obsidian vault.\n\nDo this, using your tools:\n1. Call list_dir on `inbox` to see every file.\n2. For EACH file: read it, then write ONE note into `vault/`.\n\nEach note you write must be a markdown file named after its topic in Title Case (e.g. `vault/Connection Pool Exhaustion.md`) and must contain, in this order:\n- YAML frontmatter delimited by --- lines, with `source:` set to the inbox filename it came from, and `tags:` as a YAML list of 2-4 lowercase topic tags.\n- An `## Summary` section: two or three sentences in your own words.\n- An `## Details` section: the concrete facts, as bullets. Keep names, numbers and settings exactly as written.\n- An `## Open questions` section, only when the source leaves something genuinely unresolved.\n\nWrite one note per inbox file. Do not modify anything in `inbox/`. When every file has a note, reply with a one-line summary of what you filed and stop.",
+      "system_instruction": "You file raw notes into an Obsidian vault.\n\nThe folder `inbox/` holds raw text files. The folder `vault/` is an Obsidian vault.\n\nDo this, using your tools:\n1. Run `ls inbox` over the shell to see every file.\n2. For EACH file: read it, then write ONE note into `vault/`.\n\nEach note you write must be a markdown file named after its topic in Title Case (e.g. `vault/Connection Pool Exhaustion.md`) and must contain, in this order:\n- YAML frontmatter delimited by --- lines, with `source:` set to the inbox filename it came from, and `tags:` as a YAML list of 2-4 lowercase topic tags.\n- An `## Summary` section: two or three sentences in your own words.\n- An `## Details` section: the concrete facts, as bullets. Keep names, numbers and settings exactly as written.\n- An `## Open questions` section, only when the source leaves something genuinely unresolved.\n\nWrite one note per inbox file. Do not modify anything in `inbox/`. When every file has a note, reply with a one-line summary of what you filed and stop.",
       "execute_config": {
         "model": "{{var:model}}",
         "provider": "{{var:provider}}",
-        "tools": ["local_fs"],
+        "tools": ["local_fs", "local_shell"],
         "tools_policies": {
           "local_fs": { "_allowed_dir": ".", "_max_read_bytes": "262144" }
         },
@@ -154,9 +156,10 @@ not a framework feature — it is two lines of JSON pointing at each other.
 chain ends regardless. Without it, a confused model loops until something else
 stops it.
 
-**`"tools": ["local_fs"]`** grants exactly one toolset. The default is *nothing*
-— a task has no tools until this list says otherwise, so an agent cannot reach
-for a shell you never mentioned.
+**`"tools": ["local_fs", "local_shell"]`** grants exactly these two toolsets. The
+default is *nothing* — a task has no tools until this list says otherwise, so an
+agent cannot reach for a shell you never mentioned. `local_shell` is here only
+for `ls`; the envelope below still keeps it on a short leash.
 
 **`{{var:model}}` / `{{var:provider}}`** resolve to whatever `contenox setup`
 configured, which is why this chain works unchanged on Ollama or a hosted
@@ -174,9 +177,9 @@ before every single tool call, by the runtime, not by the model. Save this as
   "default_action": "deny",
   "rules": [
     { "tools": "local_fs", "tool": "read_file",  "action": "allow" },
-    { "tools": "local_fs", "tool": "list_dir",   "action": "allow" },
-    { "tools": "local_fs", "tool": "find_files", "action": "allow" },
-    { "tools": "local_fs", "tool": "stat_file",  "action": "allow" },
+
+    { "tools": "local_shell", "tool": "local_shell", "action": "allow",
+      "when": [ { "key": "command", "op": "command_prefix_allowlist", "value": "ls" } ] },
 
     { "tools": "local_fs", "tool": "write_file", "action": "allow",
       "when": [ { "key": "path", "op": "glob", "value": "**/vault/**" } ] },
@@ -203,37 +206,44 @@ the unit as `stuck` rather than letting it run on.
 Check both files before running anything:
 
 ```bash
-contenox vet .contenox/vault-filer.json
+contenox vet .contenox/chain-agent-vaultfiler.json
 contenox vet .contenox/hitl-policy-vault.json
 ```
 
 ## 5. Activate the envelope
 
-Writing a policy file does not make it the active one. Name it:
+Writing a policy file does not make it the active one. Name it as the mission
+envelope:
 
 ```bash
-contenox config set hitl-policy-name hitl-policy-vault.json
+contenox config set default-mission-policy hitl-policy-vault.json
 ```
 
 ```
-✓  hitl-policy-name = hitl-policy-vault.json  (workspace)
+✓  default-mission-policy = hitl-policy-vault.json  (workspace)
 ```
 
-`(workspace)` confirms it applies here and not to your other projects. Until you
-do this the agent runs under the default policy instead of yours. The full
-lookup order — this key, then the workspace `.contenox/`, then `~/.contenox/` —
-is in [policy resolution order](/docs/guide/hitl/#policy-resolution-order).
+`(workspace)` confirms it applies here and not to your other projects. Every
+`mission fire` reads this key when you do not pass `--policy` explicitly —
+without either set, the fire is refused rather than guessing at an envelope.
+See [the envelope](/docs/guide/missions/#the-envelope).
 
 ## 6. Run it
 
 ```bash
-contenox run --chain .contenox/vault-filer.json --local-exec-allowed-dir . \
-  "File everything in inbox/ into the vault."
+contenox mission fire vaultfiler "File everything in inbox/ into the vault." --wait
 ```
 
 ```
-Filed 3 notes from `inbox/` into your vault.
+Mission fired at agent "vaultfiler" under envelope "hitl-policy-vault.json".
+Intent: File everything in inbox/ into the vault.
+Waiting for a terminal status…
+Status: landed  (18s)
 ```
+
+`--wait` blocks until the mission reaches a terminal status, then prints its
+report summaries — [`contenox mission show <id>`](/docs/reference/contenox-cli/#contenox-mission)
+reads the full record any time after.
 
 ```bash
 $ ls vault/
@@ -278,13 +288,14 @@ An agent that behaves is not the same as an agent that is contained. Ask it to
 write somewhere it should not be able to:
 
 ```bash
-contenox run --chain .contenox/vault-filer.json --local-exec-allowed-dir . \
-  "Write a file named draft.md directly inside the inbox folder with the text hello."
+contenox mission fire vaultfiler \
+  "Write a file named draft.md directly inside the inbox folder with the text hello." --wait
 ```
 
 ```
-I'm sorry, but I was unable to write the file `draft.md` to the `inbox/` folder.
-The operation was denied.
+Status: stuck  (6s)
+[blocker] The write_file call for inbox/draft.md was denied by the active
+policy. Unable to complete the request as given.
 ```
 
 ```bash

@@ -23,15 +23,15 @@ In the **CLI**, approval prompts appear inline in the terminal (TTY):
 
 ![A destructive rm command stops at a human approval gate before it runs](/hitl-approve.gif)
 
-To disable HITL entirely, pass `--auto`:
+To disable HITL entirely, pass `--auto` on a surface that would otherwise prompt:
 
 ```bash
-# HITL on (default) — the engine pauses before destructive tool calls:
-contenox chat --shell "refactor main.go"
+# HITL on (default) — the engine pauses before gated tool calls:
+contenox acp
 
 # HITL off — autonomous mode, no approval prompts:
-contenox chat --shell --auto "refactor main.go"
-contenox run  --auto --chain ./my-chain.json "do the thing"
+contenox acp --auto
+contenox events dispatch --auto
 ```
 
 > **Warning:**
@@ -56,12 +56,9 @@ A policy is a JSON file with an optional `default_action` and a list of `rules`:
   "default_action": "deny",
   "rules": [
     { "tools": "local_fs",    "tool": "write_file",  "action": "approve" },
+    { "tools": "local_fs",    "tool": "edit_file",   "action": "approve" },
     { "tools": "local_fs",    "tool": "sed",         "action": "approve" },
-    { "tools": "local_shell", "tool": "local_shell", "action": "approve" },
-    { "tools": "webtools",    "tool": "web_post",    "action": "approve" },
-    { "tools": "webtools",    "tool": "web_put",     "action": "approve" },
-    { "tools": "webtools",    "tool": "web_patch",   "action": "approve" },
-    { "tools": "webtools",    "tool": "web_delete",  "action": "approve" }
+    { "tools": "local_shell", "tool": "local_shell", "action": "approve" }
   ]
 }
 ```
@@ -160,9 +157,9 @@ Contenox ships seven policy presets, written to `~/.contenox/` by `contenox init
 
 | Name | Behaviour |
 |---|---|
-| `hitl-policy-default.json` | Prompts for filesystem writes, `sed`, shell commands, and the mutating webtools verbs (`web_post`, `web_put`, `web_patch`, `web_delete`); allows reads (`read_file`, `list_dir`, `grep`, `stat_file`, `count_stats`) and the safe webtools verbs (`web_get`, `web_head`); anything not matched by a rule fail-closes to approval (`default_action: "approve"`) |
+| `hitl-policy-default.json` | Prompts for filesystem writes (`write_file`, `edit_file`, `sed`) and shell commands; allows reads (`read_file`, `read_file_range`); anything not matched by a rule fail-closes to approval (`default_action: "approve"`) |
 | `hitl-policy-strict.json` | Deny-by-default; only the rules listed are prompted |
-| `hitl-policy-dev.json` | `default_action: allow`, but explicit rules still gate `local_shell` (every shell call requires approval, and a fixed blacklist is always denied); useful for local development when you don't want prompts on filesystem/webtools calls. Unlike `hitl-policy-default.json` it carries **no secret quarantine** — its only rules cover the shell, so reads of `.ssh`, `.gnupg`, `.aws`, `.azure`, `.kube`, gcloud, browser profiles, wallets, shell history, `.netrc`, `.npmrc` and `id_rsa*` are not denied. Use it on a machine whose secrets you would not mind an agent reading |
+| `hitl-policy-dev.json` | `default_action: allow`, but explicit rules still gate `local_shell` (every shell call requires approval, and a fixed blacklist is always denied); useful for local development when you don't want prompts on filesystem calls. Unlike `hitl-policy-default.json` it carries **no secret quarantine** — its only rules cover the shell, so reads of `.ssh`, `.gnupg`, `.aws`, `.azure`, `.kube`, gcloud, browser profiles, wallets, shell history, `.netrc`, `.npmrc` and `id_rsa*` are not denied. Use it on a machine whose secrets you would not mind an agent reading |
 | `hitl-policy-acp.json` | Profile for editor (ACP) sessions — gated tool calls route through the editor's own approval UI |
 | `hitl-policy-acpx.json` | Hardened profile for headless / untrusted-driver (ACPX, e.g. OpenClaw) sessions — shell, writes, and network are denied outright rather than offered for approval |
 | `hitl-policy-oracle.json` | the [oracle's](/docs/use-cases/auto-attention/) pinned envelope — `default_action: deny` with exactly two allows, the in-process `oracle.submit_verdict` and `oracle.verdict_state` tools; no shell, filesystem, or network rule of any kind; seeded by init, inert until `default-oracle-chain` mounts the driver |

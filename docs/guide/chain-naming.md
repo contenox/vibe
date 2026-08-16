@@ -13,13 +13,13 @@ chain-<role>-<variant>.json
 
 The **role** says what kind of work the chain does and therefore *where it is selectable*. The **variant** distinguishes chains within a role — `default`, `conservative`, or any name you choose for your own. Roles communicate; nothing gates: a valid chain file is selectable in every context its role appears in. There is no registry to update and no approval step — the filename is what makes it eligible.
 
-One name everywhere is the rule behind the grammar: the name embedded in the binary, the name `contenox init` seeds to disk, and the name the docs use are the same string. When a page says `chain-agent-acp.json`, that is the literal file — in `~/.contenox/system/` as shipped, or `~/.contenox/` once you copy it up.
+One name everywhere is the rule behind the grammar: the name embedded in the binary, the name `contenox init` seeds to disk, and the name the docs use are the same string.
 
 ## The roles
 
 | Role | What it does | Where it is selectable |
 | ---- | ------------ | ---------------------- |
-| `agent` | A conversational, tool-using loop | Session and editor surfaces (`--chain`, the `default-chain` config, per-surface env overrides) and mission dispatch: chain-agent discovery declares every `chain-agent-*.json` file as a fleet-dispatchable agent |
+| `agent` | A conversational, tool-using loop | Session and editor surfaces (the `default-chain` config, per-surface env overrides) and mission dispatch: chain-agent discovery declares every `chain-agent-*.json` file as a fleet-dispatchable agent |
 | `planner` | Holds and evolves a mission's living plan | Mission planning: the default agent behind `/mission` and `contenox mission fire` |
 | `compact` | Summarizes conversation history | The compaction machinery: `/compact` in editor and terminal-UI sessions, `contenox session fork --summary` |
 | `fim` | Fill-in-the-middle completion | Editor autocomplete (`_contenox/autocomplete`) |
@@ -28,11 +28,6 @@ What every `agent` chain shares — the bounded ReAct loop inside it — is mapp
 
 The seeded set:
 
-- `chain-agent-contenox.json` — interactive CLI chat: `contenox chat` and a bare `contenox "..."`
-- `chain-agent-run.json` — the one-shot, stateless `contenox run` loop
-- `chain-agent-acp.json` — editor (ACP) sessions
-- `chain-agent-acpx.json` — the headless / untrusted-driver ACP profile
-- `chain-agent-beam.json` — attended terminal sessions
 - `chain-planner-default.json` — the default mission planner
 - `chain-compact-default.json` — history compaction
 - `chain-fim-default.json` — editor autocomplete
@@ -71,21 +66,15 @@ in [Tutorial: a mission agent](/docs/guide/tutorial-mission-agent/).
 
 ## Resolution: which file wins
 
-For files resolved by name — the CLI chat chain, the run chain, the compact chain, trigger-referenced chains and policies — resolution is workspace-first:
+For files resolved by name — the `default-chain` workspace setting, the compact chain, trigger-referenced chains and policies — resolution is workspace-first:
 
 1. the workspace `.contenox/<name>` (found by walking up from your current directory, like `.git/`), then
 2. `~/.contenox/<name>`, then
 3. `~/.contenox/system/<name>` — where `contenox init` puts the shipped chains.
 
-The two operator-owned locations come first on purpose. The shipped chains are the runtime's own execution paths, kept under `system/` because they are machinery rather than files you are expected to author — but **copying one up a level is all it takes to own it**:
+The two operator-owned locations come first on purpose. The shipped chains are the runtime's own execution paths, kept under `system/` because they are machinery rather than files you are expected to author — but **copying one up a level is all it takes to own it**. From then on your copy wins, and `contenox init` neither overwrites it nor puts a shipped copy back underneath. A workspace file wins over both. `contenox doctor` lists every shadowing copy it finds.
 
-```bash
-cp ~/.contenox/system/chain-agent-run.json ~/.contenox/
-```
-
-From then on your copy wins, and `contenox init` neither overwrites it nor puts a shipped copy back underneath. A workspace file wins over both. `contenox doctor` lists every shadowing copy it finds.
-
-The ACP surfaces resolve differently, by design: `contenox acp` and `acpx` load their chain from `~/.contenox/` (then `~/.contenox/system/`) only, each overridable with its own environment variable — `CONTENOX_ACP_CHAIN_PATH`, `CONTENOX_ACPX_CHAIN_PATH`, and `CONTENOX_ACP_FIM_CHAIN_PATH` for autocomplete. An editor may be launched from anywhere, so these surfaces anchor to the home directory rather than a cwd walk; the env var is the per-launch override.
+The ACP surfaces resolve differently, by design: `contenox acp` and `acpx` load their chain from an operator copy at `~/.contenox/<name>.json`, then a compiled `~/.contenox/.generated/<name>.json`, then the shipped `~/.contenox/system/<name>.json` — first match wins, and nothing outside `~/.contenox/` is searched. Each is overridable with its own environment variable — `CONTENOX_ACP_CHAIN_PATH`, `CONTENOX_ACPX_CHAIN_PATH`, and `CONTENOX_ACP_FIM_CHAIN_PATH` for autocomplete. An editor may be launched from anywhere, so these surfaces anchor to the home directory rather than a cwd walk; the env var is the per-launch override.
 
 ## What `contenox init` touches — and never touches
 
@@ -106,7 +95,7 @@ Before v0.38 the seeded files carried per-surface names (`default-chain.json`, `
 - If a legacy name and its new name both exist, the new file wins untouched; the legacy file is left in place with a one-line note, never deleted.
 - The step is idempotent — a second `--update` finds nothing to rename.
 
-For example, `chain-agent-acp.json` (formerly `default-acp-chain.json`) is the editor chain after one `contenox init --update`.
+For example, `chain-compact-default.json` (formerly `chain-compact.json`) is the history-compaction chain after one `contenox init --update`.
 
 Your **own** files are yours: `--update` never renames or rewrites anything init did not seed. One consequence of the clean cut is discovery — fleet chain-agent discovery keys on the `chain-agent-*` filename, so a custom agent chain you named `agent-mybot.json` under the old convention is no longer discovered. Renaming it to `chain-agent-mybot.json` is the whole migration; its agent name (the chain `id`) does not change.
 

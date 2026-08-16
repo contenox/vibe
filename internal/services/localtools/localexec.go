@@ -38,7 +38,6 @@ type LocalExecTools struct {
 	deniedCommands  []string
 	runner          CommandRunner
 	shell           PlatformShell
-	scrubEnv        func([]string) []string
 }
 
 // LocalExecOption configures LocalExecTools.
@@ -80,13 +79,6 @@ func WithLocalExecShell(shell PlatformShell) LocalExecOption {
 	}
 }
 
-// WithLocalExecScrubEnv sets the environment scrub applied through the default runner: scrub maps the parent environment to the one the command inherits, so serve's credentials do not leak into an LLM-driven shell; nil keeps the full environment, and this is ignored when an explicit runner is supplied to NewLocalExecToolsWith.
-func WithLocalExecScrubEnv(scrub func([]string) []string) LocalExecOption {
-	return func(h *LocalExecTools) {
-		h.scrubEnv = scrub
-	}
-}
-
 // NewLocalExecTools creates a new LocalExecTools with the given options.
 func NewLocalExecTools(opts ...LocalExecOption) taskengine.ToolsRepo {
 	return NewLocalExecToolsWith(nil, opts...)
@@ -102,7 +94,7 @@ func NewLocalExecToolsWith(runner CommandRunner, opts ...LocalExecOption) tasken
 		opt(h)
 	}
 	if runner == nil {
-		runner = NewOSCommandRunnerWithShellAndScrub(h.shell, h.scrubEnv)
+		runner = noTerminalRunner{}
 	}
 	h.runner = runner
 	return h
@@ -602,3 +594,9 @@ func (h *LocalExecTools) GetToolsForToolsByName(ctx context.Context, name string
 }
 
 var _ taskengine.ToolsRepo = (*LocalExecTools)(nil)
+
+type noTerminalRunner struct{}
+
+func (noTerminalRunner) Run(context.Context, CommandSpec, io.Writer, io.Writer) (int, error) {
+	return 0, ErrNoTerminal
+}

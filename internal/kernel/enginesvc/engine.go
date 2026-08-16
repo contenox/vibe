@@ -163,20 +163,17 @@ func Build(ctx context.Context, db libdbexec.DBManager, cfg Config) (*Engine, er
 
 	tokenizer := ollamatokenizer.NewEstimateTokenizer()
 
-	embedding := resolveEmbeddingModel(ctx, runtimetypes.New(db.WithoutTransaction()), cfg, tracker)
 	audio := resolveAudioModel(ctx, runtimetypes.New(db.WithoutTransaction()), cfg)
 
 	repo, err := llmrepo.NewModelManager(state, tokenizer, llmrepo.ModelManagerConfig{
-		DefaultPromptModel:    llmrepo.ModelConfig{Name: cfg.DefaultModel, Provider: cfg.DefaultProvider},
-		DefaultEmbeddingModel: embedding,
-		DefaultChatModel:      llmrepo.ModelConfig{Name: cfg.DefaultModel, Provider: cfg.DefaultProvider},
-		DefaultAudioModel:     audio,
+		DefaultPromptModel: llmrepo.ModelConfig{Name: cfg.DefaultModel, Provider: cfg.DefaultProvider},
+		DefaultChatModel:   llmrepo.ModelConfig{Name: cfg.DefaultModel, Provider: cfg.DefaultProvider},
+		DefaultAudioModel:  audio,
 	}, tracker)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create model manager: %w", err)
 	}
 	engine.Models = repo
-	engine.EmbeddingModel = embedding
 	engine.AudioModel = audio
 
 	eventSink := cfg.TaskEventSink
@@ -225,34 +222,6 @@ func Build(ctx context.Context, db libdbexec.DBManager, cfg Config) (*Engine, er
 	}
 	success = true
 	return engine, nil
-}
-
-func resolveEmbeddingModel(ctx context.Context, store runtimetypes.Store, cfg Config, tracker libtracker.ActivityTracker) llmrepo.ModelConfig {
-	if tracker == nil {
-		tracker = libtracker.NoopTracker{}
-	}
-	model := strings.TrimSpace(cfg.DefaultEmbedModel)
-	if model == "" {
-		model = clikv.Read(ctx, store, "default-embed-model")
-	}
-	provider := strings.TrimSpace(cfg.DefaultEmbedProvider)
-	if provider == "" {
-		provider = clikv.Read(ctx, store, "default-embed-provider")
-	}
-
-	if model == "" {
-		_, reportFallback, endFallback := tracker.Start(ctx, "resolve", "embedding_model",
-			"fallback_model", cfg.DefaultModel,
-			"fallback_provider", cfg.DefaultProvider,
-			"hint", "contenox config set default-embed-model <name>  # a chat model embeds only on some providers")
-		reportFallback(cfg.DefaultModel, "no embedding model configured; falling back to the chat model")
-		endFallback()
-		model = cfg.DefaultModel
-	}
-	if provider == "" {
-		provider = cfg.DefaultProvider
-	}
-	return llmrepo.ModelConfig{Name: model, Provider: provider}
 }
 
 func resolveAudioModel(ctx context.Context, store runtimetypes.Store, cfg Config) llmrepo.ModelConfig {

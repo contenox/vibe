@@ -121,16 +121,14 @@ func TestUnit_Discover_FilenameConventionDeclaresAnAgent(t *testing.T) {
 func TestUnit_Discover_ShippedAgenticChainsAreEligibleByID(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
-	writeChain(t, dir, "default-chain.json", "chain-contenox")
 	writeChain(t, dir, "default-acp-chain.json", "chain-acp")
 	writeChain(t, dir, "headless-acp-chain.json", "chain-acpx")
-	writeChain(t, dir, "default-run-chain.json", "chain-run")
 	writeChain(t, dir, "chain-compact-default.json", "chain-compact")
 	writeChain(t, dir, "chain-fim-default.json", "chain-fim")
 
 	res, err := chainagents.Discover(ctx, agents, dir)
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"chain-contenox", "chain-acp", "chain-acpx", "chain-run"}, res.Created)
+	require.ElementsMatch(t, []string{"chain-acp", "chain-acpx"}, res.Created)
 
 	for _, utility := range []string{"chain-compact", "chain-fim"} {
 		_, err := agents.GetByName(ctx, utility)
@@ -174,12 +172,12 @@ func TestUnit_DiscoverKept_StableRosterCut(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
 	writeChain(t, dir, "chain-planner-default.json", "agent-planner")
-	writeChain(t, dir, "chain-agent-contenox.json", "chain-contenox")
+	writeChain(t, dir, "chain-agent-acp.json", "chain-acp")
 	custom := writeChain(t, dir, "chain-agent-custom.json", "agent-custom")
 
 	res, err := chainagents.DiscoverKept(ctx, agents, nil, chainagents.StableAgentName, dir)
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"agent-planner", "chain-contenox"}, res.Created,
+	require.ElementsMatch(t, []string{"agent-planner", "chain-acp"}, res.Created,
 		"the shipped planner and surface chains stay dispatchable without the beta roster")
 	_, err = agents.GetByName(ctx, "agent-custom")
 	require.ErrorIs(t, err, libdb.ErrNotFound, "a user-authored chain-agent-* chain is invisible without opt-in")

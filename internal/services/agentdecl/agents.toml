@@ -47,7 +47,7 @@ max_tokens = "{{var:max_tokens|16384}}"
 # vocabularies coincide.
 think = "{{var:think}}"
 
-# Bounds on the two-stage tool loop, matching the shipped chain-run topology.
+# Bounds on the two-stage tool loop.
 # The main stage hands to recovery after this many traversals; recovery
 # summarises the failure rather than looping.
 main_rounds = 60
@@ -61,6 +61,11 @@ retry_on_failure = 0
 # does not pin this machine to that vendor.
 model = "{{var:model}}"
 provider = "{{var:provider}}"
+
+# Recovery and the failure summary run here: a second attempt and a report do
+# not need the model the first attempt used.
+alt_model = "{{var:alt_model|var:default_model}}"
+alt_provider = "{{var:alt_provider|var:default_provider}}"
 
 # Use the model the declaration itself names, instead of the templates above.
 # Off by default for the reason given there; turn it on for one agent with

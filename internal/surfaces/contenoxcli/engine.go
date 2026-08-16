@@ -4,18 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/contenox/contenox/internal/kernel/enginesvc"
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/eventlog"
-	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/hitlservice"
-	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
-	"github.com/contenox/contenox/internal/services/searchtool"
 	"github.com/contenox/contenox/internal/services/setupcheck"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
@@ -49,24 +45,12 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	reportErr, reportChange, end := tracker.Start(ctx, "build", "engine")
 	defer end()
 
-	// Construction loads and validates every script file, so a broken script is a startup error, not a silently skipped tool. Opt-in-beta gated: without it the scripts are never loaded.
-	gojaScriptDir := filepath.Join(opts.ContenoxDir, "tools")
-	if !opts.EffectiveOptInBeta {
-		gojaScriptDir = ""
-	}
-	gt, err := gojatool.New(gojatool.Config{ScriptDir: gojaScriptDir})
-	if err != nil {
-		reportErr(err)
-		return nil, err
-	}
-
 	// One bus for this process: the mission tools below must publish on the same bus the engine runs on, or a resumed unit's report/mission_finish reaches nothing.
 	bus := libbus.NewSQLite(db.WithoutTransaction())
 
 	engineBuilt := false
 	defer func() {
 		if !engineBuilt {
-			gt.Shutdown()
 			bus.Close()
 		}
 	}()
@@ -96,7 +80,7 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	if hitlSvc != nil {
 		missionOpts = append(missionOpts, missiontools.WithAttentionAsker(missionAttentionAsker{hitl: hitlSvc, missions: missions, bus: missionPub}))
 	}
-	tools := localToolset(opts, db, tracker, gt, missions, missionOpts...)
+	tools := localToolset(opts, db, tracker, missions, missionOpts...)
 
 	askApproval := opts.EffectiveAskApproval
 	if askApproval == nil {
@@ -126,19 +110,12 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		HITLPolicySource:         hitlPolicySource(opts.ContenoxDir),
 		TaskEventSink:            opts.EffectiveTaskEventSink,
 		Bus:                      bus, // reuse the one bus the mission tools publish on
-		// Closes the goja sandbox's construction cycle: host.tool needs the aggregate repo the sandbox is itself registered inside.
-		OnToolsRepoReady: func(repo taskengine.ToolsRepo) {
-			gt.SetHost(gojatool.HostFromRepo(repo))
-		},
 	})
 	if err != nil {
 		reportErr(err)
 		return nil, err
 	}
-	// The engine now has the resolved model route workspace_search needs.
-	bindWorkspaceSearch(tools, db, engine)
 	// Same ordering for local_fs's audio seam: read_file on an audio file transcribes through the engine's chat path from here on.
-	bindAudioTranscriber(tools, engine)
 	trigHook.Set(buildInProcessTriggerHook(ctx, db, opts.ContenoxDir, workspaceID, engine, opts, os.Stderr))
 	if hitlSvc != nil {
 		hitlservice.SetResumeHook(hitlSvc, agentservice.ResumeHook(agentservice.Deps{
@@ -148,14 +125,11 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		}))
 	}
 	reportChange("phase", "enginesvc_built")
-	// Rides the engine's chainable stop so the goja sandbox joins on shutdown.
 	engineBuilt = true
 	oldStop := engine.Stop
 	engine.Stop = func() {
 		// Draining before teardown keeps at-least-once true: a firing claims its row before running, so an exit mid-firing would strand the claim otherwise.
 		trigHook.Drain(eventlog.DefaultDrainTimeout)
-		// Refuses further executions and joins in-flight ones (bounded — a call may be parked on a human approval).
-		gt.Shutdown()
 		oldStop()
 		// Ours to close: enginesvc closes only a bus it minted itself.
 		bus.Close()
@@ -163,43 +137,10 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	return engine, nil
 }
 
-func localToolset(opts chatOpts, db libdbexec.DBManager, tracker libtracker.ActivityTracker, gojaTools *gojatool.Toolset, missions missionservice.Service, missionOpts ...missiontools.Option) map[string]taskengine.ToolsRepo {
+func localToolset(opts chatOpts, db libdbexec.DBManager, tracker libtracker.ActivityTracker, missions missionservice.Service, missionOpts ...missiontools.Option) map[string]taskengine.ToolsRepo {
 	tools := map[string]taskengine.ToolsRepo{
-		"webtools": localtools.NewWebCaller(tracker),
-		"local_fs": localtools.NewLocalFSToolsWith(opts.EffectiveLocalExecAllowedDir, db, nil, localtools.LocalFSToolsName, nil),
-		// Always registered, unlike local_shell: the seeded policies allow the six reads and hold the four writes at an approval.
-		localtools.GitToolsName: localtools.NewGitTools(opts.EffectiveLocalExecAllowedDir),
-		// Always registered, unbound: completed by bindWorkspaceSearch below once the engine's embedding seam exists.
-		searchtool.ToolsProviderName: newWorkspaceSearchTools(ResolveWorkspaceID(opts.ContenoxDir)),
 		// Wired, not durable-only: this engine resumes suspended mission chains, and a resumed unit asks its remaining questions here.
 		missiontools.ToolsProviderName: missiontools.New(missions, missionOpts...),
-	}
-	if opts.EffectiveOptInBeta {
-		// Registered only under opt-in-beta: with no scripts, goja carries only goja_eval, a pure compute sandbox with no ambient I/O.
-		tools[gojatool.ToolsProviderName] = gojaTools
-	}
-	if opts.EffectiveEnableLocalExec {
-		execOpts := []localtools.LocalExecOption{}
-		if opts.EffectiveLocalExecAllowedDir != "" {
-			execOpts = append(execOpts, localtools.WithLocalExecAllowedDir(opts.EffectiveLocalExecAllowedDir))
-		}
-		// SANDBOX_* scrub composition (see sandbox_scrub.go); db nil only in tests that register the toolset but never call Exec on it.
-		if db != nil {
-			if shellScrub, _, err := resolvedSandboxEnv(db, tracker, opts.WarnW); err != nil {
-				if opts.WarnW != nil {
-					fmt.Fprintf(opts.WarnW, "warning: sandbox env scrub unavailable, local_shell inherits the full environment: %v\n", err)
-				}
-			} else if shellScrub != nil {
-				execOpts = append(execOpts, localtools.WithLocalExecScrubEnv(shellScrub))
-			}
-		}
-		tools["local_shell"] = localtools.NewLocalExecTools(execOpts...)
-
-		// A message for the operator, not telemetry: reaching here takes an explicit --auto.
-		if !opts.EffectiveHITL && opts.EffectiveLocalExecAllowedDir == "" && opts.WarnW != nil {
-			fmt.Fprint(opts.WarnW, "warning: --auto disabled the approval prompt and local_shell has no allowed dir — the agent may run any command, anywhere.\n"+
-				"         scope it with: --local-exec-allowed-dir .\n")
-		}
 	}
 	// Host-scoped providers last, never overriding a standard registration.
 	for name, repo := range opts.EffectiveExtraTools {

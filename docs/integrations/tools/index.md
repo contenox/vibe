@@ -72,23 +72,17 @@ Contenox ships with built-in local tools and supports unlimited remote tools:
 
 | Tools name | Type | Always available | What it does |
 |---|---|---|---|
-| `local_fs` | Local | ✅ | Read, write, and search files within a configured directory (10 verb-specific tools, read-before-write contract for mutations) |
-| `git` | Local | `contenox chat`/`run`/`new`, ACP sessions | Read and mutate the workspace's own Git repository in-process — status, diff, log, show, branches, blame, add, commit, checkout, restore |
-| `workspace` | Local | `contenox chat`/`run`/`new`, ACP sessions | `workspace_search` — semantic search over the index built by `contenox index` |
-| `goja` | Local | `contenox chat`/`run`/`new`, ACP sessions — **beta**, requires `opt-in-beta` | `goja_eval` — a JavaScript (ES2023) sandbox with no ambient I/O, plus one tool per operator-authored script under `$CONTENOX_DIR/tools/*.js` |
-| `webtools` | Local | ✅ | Call HTTP endpoints — `web_get`, `web_head`, `web_post`, `web_put`, `web_patch`, `web_delete`. SSRF guarding is opt-in (`_denied_hosts` is empty by default — see [local tools](/docs/integrations/tools/local/)); mutating verbs HITL-approve by default. |
-| `local_shell` | Local | CLI opt-in | Run shell commands. `contenox run` and `contenox chat` require `--shell`; editor clients route shell execution through their own approval surface where supported. |
+| `local_fs` | Local | Via ACP client | Read, write, and edit a file you already know the path to — five tools (`read_file`, `write_file`, `edit_file`, `sed`, `read_file_range`), read-before-write contract for mutations. Forwarded to the ACP client's `fs/*` capability. |
+| `local_shell` | Local | Via ACP client | Run shell commands — including listing, searching, and globbing (`ls`, `find`, `grep`/`rg`) — forwarded to the ACP client's `terminal/*` capability, governed by HITL policy. |
+| MCP servers | Remote | Operator attaches | Any MCP-compatible server (filesystem, memory, SaaS, internal tools) — see [Model Context Protocol](/docs/integrations/tools/mcp/) |
 | _your name_ | Remote | Register with `contenox tools add` | Any OpenAPI v3 service |
 
 ## Choosing the right tools
 
-- **`local_fs`** — best for code analysis, file editing, report generation. Prefer over `local_shell` for file ops; the read-before-write contract and sandbox guard against confabulated edits.
-- **`git`** — prefer over `local_shell` for repository operations (status, diff, log, commit, branch, restore); each operation is a separate tool the HITL policy can gate individually, rather than one decision for all of `git`.
-- **`workspace`** — semantic, meaning-based search over an already-built `contenox index`; approximately right, not exact — treat a hit as a location to verify, not a proof.
-- **`goja`** — imperative logic or multi-tool composition over data you already have, via `host.tool(...)`. Beta: requires `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`); absent otherwise.
-- **`webtools`** — when the model needs to call HTTP. Use `web_get` / `web_head` for retrieval; mutating verbs trigger HITL approval by default.
-- **`local_shell`** — full power; use only in trusted, sandboxed environments. Reach for it for build / test scripts, not for cat / grep / sed / git against project files — those have dedicated tools.
-- **Remote tools** — turn any OpenAPI service into an agent tool; ideal for internal APIs, SaaS integrations, and team-shared tools
+- **`local_fs`** — best for reading, writing, and editing a file whose path you already know. The read-before-write contract and sandbox guard against confabulated edits.
+- **`local_shell`** — for everything else on the machine: listing directories, searching/grepping, globbing, and running build or test commands. Use only in trusted, sandboxed environments.
+- **MCP servers** — attach any MCP-compatible server for retrieval, memory, or a SaaS integration; see [Model Context Protocol](/docs/integrations/tools/mcp/).
+- **Remote tools** — turn any OpenAPI service into an agent tool; ideal for internal APIs and team-shared tools without an MCP server.
 
 ## Further reading
 

@@ -43,7 +43,7 @@ contenox doctor
 Its first line is the verdict:
 
 ```
-Ready: yes — chat now with `contenox "your prompt"`.
+Ready: yes
 ```
 
 If it says `Ready: no`, the line under it names the one command that fixes it.
@@ -70,7 +70,6 @@ An agent is one file. `.contenox/agents/reviewer.md`:
 ---
 name: reviewer
 description: Reviews a file for correctness problems
-tools: Read, Glob, Grep
 ---
 
 You are a code reviewer. Read the file you are asked about, then list the
@@ -88,28 +87,7 @@ The frontmatter says how to run it, the body becomes its system prompt. Budgets,
 
 ---
 
-## 5. Start working
-
-Pass a prompt straight to the CLI. The session persists, so the next
-invocation carries the conversation forward:
-
-```bash
-contenox "hello, what can you do?"
-echo "summarise README.md" | contenox
-```
-
-![contenox backend list showing local and hosted providers, then a first chat on a local model](/quickstart.gif)
-
-Chat is always session-backed — history persists across invocations automatically.
-Pass `-e` to compose your message in `$EDITOR` instead of on the command line:
-
-```bash
-contenox chat -e
-```
-
----
-
-## 6. Optional editor use
+## 5. Optional editor use
 
 Contenox can also run inside editor or desktop clients that speak ACP. The same agents, model config, tools, and HITL policy are used either way:
 
@@ -146,6 +124,5 @@ If you're not sure, start with [Ollama](/docs/integrations/providers/ollama/) fo
 - [Writing a chain by hand](/docs/guide/first-chain/) — for the agent that has outgrown a declaration
 - [How contenox compares](/docs/guide/comparison/) — what it shares with the coding agents, and the three things that are built differently
 - [MCP integration](/docs/integrations/tools/mcp/) — connect external tools
-- [Workspace index & search](/docs/guide/search/) — ask the repo a question, get file:line citations back
 - [Pairing a machine with a relay](/docs/guide/pairing/) — reach a running session from your phone: one typed key, optional always, free for you and three teammates (one machine each)
 - [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/) — hosting, state, and oversight controls you own

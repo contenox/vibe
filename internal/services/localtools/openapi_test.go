@@ -191,18 +191,13 @@ var fsComponents = map[string]string{
 	"read_file":       "LocalFsReadFile",
 	"write_file":      "LocalFsWriteFile",
 	"edit_file":       "LocalFsEditFile",
-	"list_dir":        "LocalFsListDir",
-	"grep":            "LocalFsGrep",
-	"find_files":      "LocalFsFindFiles",
 	"sed":             "LocalFsSed",
-	"count_stats":     "LocalFsCountStats",
 	"read_file_range": "LocalFsReadFileRange",
-	"stat_file":       "LocalFsStatFile",
 }
 
 func TestUnit_LocalFSTools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 	dir := t.TempDir()
-	repo := localtools.NewLocalFSTools(dir, nil).(schemaRepo)
+	repo := localtools.NewLocalFSToolsForTest(dir, nil).(schemaRepo)
 	doc := assertPublishedDoc(t, repo, "local_fs", fsComponents)
 
 	for _, component := range fsComponents {
@@ -223,21 +218,12 @@ func TestUnit_LocalFSTools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 		variantByRequired(t, doc.Components.Schemas["LocalFsWriteFileResponse"].Value, "written"), written)
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.txt"), []byte("x"), 0o644))
-	stat := exec("stat_file", map[string]any{"path": "b.txt"})
-	var statGot map[string]any
-	require.NoError(t, json.Unmarshal([]byte(stat.(string)), &statGot))
-	assertResultIsDeclared(t, "stat_file", doc.Components.Schemas["LocalFsStatFileResponse"].Value, statGot)
-
-	found := exec("find_files", map[string]any{"pattern": "*.txt"})
-	var foundGot map[string]any
-	require.NoError(t, json.Unmarshal([]byte(found.(string)), &foundGot))
-	assertResultIsDeclared(t, "find_files", doc.Components.Schemas["LocalFsFindFilesResponse"].Value, foundGot)
 }
 
 // TestUnit_LocalFSTools_MutatingResultsCarryTheDisplayPath pins that a local_fs result addresses a file as workspace-relative Path, while AbsPath (unserialized) survives for ToolDiff alone, since ACP tool-call locations are absolute by protocol.
 func TestUnit_LocalFSTools_MutatingResultsCarryTheDisplayPath(t *testing.T) {
 	dir := t.TempDir()
-	repo := localtools.NewLocalFSTools(dir, nil)
+	repo := localtools.NewLocalFSToolsForTest(dir, nil)
 	ctx := context.Background()
 	now := time.Now()
 	exec := func(tool string, args map[string]any) any {
@@ -297,7 +283,7 @@ func TestUnit_LocalFSTools_MutatingResultsCarryTheDisplayPath(t *testing.T) {
 
 // TestUnit_LocalFSTools_PublishedSchemaTracksVerboseDescriptions pins that context-dependent descriptions (verbose mode) still match between the descriptor and the published schema.
 func TestUnit_LocalFSTools_PublishedSchemaTracksVerboseDescriptions(t *testing.T) {
-	repo := localtools.NewLocalFSTools(t.TempDir(), nil).(schemaRepo)
+	repo := localtools.NewLocalFSToolsForTest(t.TempDir(), nil).(schemaRepo)
 	ctx := taskengine.WithToolsArgs(context.Background(), "local_fs",
 		map[string]string{"_verbose_tool_descriptions": "true"})
 	assertPublishedDoc(t, repo, "local_fs", fsComponents)
@@ -331,92 +317,3 @@ var gitComponents = map[string]string{
 	"git_restore":         "GitRestore",
 }
 
-func TestUnit_GitTools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	newTestRepo(t, dir, map[string]string{"a.txt": "one\n"})
-	repo := localtools.NewGitTools(dir).(schemaRepo)
-	doc := assertPublishedDoc(t, repo, "git", gitComponents)
-
-	for _, component := range gitComponents {
-		assertEveryPropertyDescribed(t, component, doc.Components.Schemas[component+"Response"].Value)
-	}
-
-	// The three tools that answer with a typed value are declared against what that value actually carries.
-	ctx := context.Background()
-	now := time.Now()
-	exec := func(tool string, args map[string]any) any {
-		t.Helper()
-		out, _, err := repo.(taskengine.ToolsRepo).Exec(ctx, now, args, false, &taskengine.ToolsCall{ToolName: tool})
-		require.NoErrorf(t, err, "%s", tool)
-		return out
-	}
-	assertResultIsDeclared(t, "git_status", doc.Components.Schemas["GitStatusResponse"].Value, exec("git_status", map[string]any{}))
-	assertResultIsDeclared(t, "git_log", doc.Components.Schemas["GitLogResponse"].Value, exec("git_log", map[string]any{}))
-	assertResultIsDeclared(t, "git_branch_list", doc.Components.Schemas["GitBranchListResponse"].Value, exec("git_branch_list", map[string]any{}))
-
-	// The seven text answers are declared as text, not as an object nobody returns.
-	for _, tool := range []string{"git_diff", "git_show", "git_blame", "git_add", "git_commit", "git_checkout_branch", "git_restore"} {
-		resp := doc.Components.Schemas[gitComponents[tool]+"Response"].Value
-		require.NotNilf(t, resp.Type, "%s: response has no type", tool)
-		assert.Truef(t, resp.Type.Is(openapi3.TypeString), "%s: response type %v", tool, resp.Type)
-		assert.NotEmptyf(t, resp.Description, "%s: response is not described", tool)
-	}
-}
-
-var webComponents = map[string]string{
-	"web_get":    "WebGet",
-	"web_head":   "WebHead",
-	"web_post":   "WebPost",
-	"web_put":    "WebPut",
-	"web_patch":  "WebPatch",
-	"web_delete": "WebDelete",
-}
-
-func TestUnit_WebCaller_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
-	t.Parallel()
-	repo := localtools.NewWebCaller(nil).(schemaRepo)
-	doc := assertPublishedDoc(t, repo, "webtools", webComponents)
-
-	// The two argument shapes a flat property table could not have held survive the conversion.
-	post := doc.Components.Schemas["WebPostRequest"].Value
-	headers := post.Properties["headers"].Value
-	require.NotNil(t, headers.AdditionalProperties.Schema, "headers keeps its additionalProperties")
-	assert.True(t, headers.AdditionalProperties.Schema.Value.Type.Is(openapi3.TypeString))
-	body := post.Properties["body"].Value
-	assert.True(t, body.Nullable, "body accepts null")
-	for _, want := range []string{"string", "number", "integer", "boolean", "object", "array"} {
-		assert.Containsf(t, []string(*body.Type), want, "body keeps its %s branch", want)
-	}
-	require.NotNil(t, body.Items, "an array branch needs an item schema to be a valid document")
-
-	// GET/HEAD take no body; the other four do — that difference is the contract.
-	assert.NotContains(t, doc.Components.Schemas["WebGetRequest"].Value.Properties, "body")
-	assert.NotContains(t, doc.Components.Schemas["WebHeadRequest"].Value.Properties, "body")
-
-	for _, component := range webComponents {
-		resp := doc.Components.Schemas[component+"Response"].Value
-		assert.NotEmptyf(t, resp.AnyOf, "%s: the response shapes are not declared", component)
-		assertEveryPropertyDescribed(t, component, resp)
-	}
-	envelope := variantByRequired(t, doc.Components.Schemas["WebGetResponse"].Value, "_truncated")
-	for _, key := range []string{"_truncated", "_bytes_read", "_max_bytes", "body"} {
-		assert.Containsf(t, envelope.Properties, key, "the truncation envelope declares %s", key)
-	}
-
-	// The descriptor must also say what only the schema declares (non-2xx is an error, an oversized body changes the shape), since that is all a model has at call time.
-	declared, err := repo.GetToolsForToolsByName(context.Background(), "webtools")
-	require.NoError(t, err)
-	require.Len(t, declared, len(webComponents))
-	for _, tool := range declared {
-		desc := tool.Function.Description
-		assert.Containsf(t, desc, "non-2xx status is returned as an ERROR",
-			"%s: a model cannot tell a 404 from a transport failure unless the descriptor says so", tool.Function.Name)
-		if tool.Function.Name == "web_head" {
-			assert.NotContains(t, desc, "_truncated", "web_head has no body to truncate")
-			continue
-		}
-		assert.Containsf(t, desc, "{_truncated,_bytes_read,_max_bytes,body}",
-			"%s: the truncation envelope changes the result shape, so the descriptor must name it", tool.Function.Name)
-	}
-}

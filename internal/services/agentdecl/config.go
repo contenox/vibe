@@ -62,6 +62,11 @@ type RoutingDefaults struct {
 	// Empty falls back to Model/Provider.
 	RouterModel    string `toml:"router_model"`
 	RouterProvider string `toml:"router_provider"`
+	// AltModel and AltProvider run the recovery and terminal nodes: a second
+	// attempt and a failure summary do not need the model the first attempt
+	// used. Empty falls back to Model/Provider.
+	AltModel    string `toml:"alt_model"`
+	AltProvider string `toml:"alt_provider"`
 }
 
 // PolicyDefaults describe the emitted human-in-the-loop policy.

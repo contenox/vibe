@@ -30,7 +30,7 @@ Register an HTTP API as a tool with the credential hidden from the model, the en
 
 3. Reference the tool from a chain's `execute_config.tools` allowlist, or rely on `"tools": ["*"]` in the default chain so it's picked up automatically.
 
-4. For an interactive, device-owner session (`contenox chat`, `contenox acp` — Zed, JetBrains), calls route through HITL: allow, deny, or approve per call, per your active policy.
+4. For an interactive, device-owner session (`contenox acp` — Zed, JetBrains — or `contenox serve`), calls route through HITL: allow, deny, or approve per call, per your active policy.
 
 5. For an untrusted, non-interactive driver (`contenox acpx` — see [Use from OpenClaw](/docs/integrations/editors/openclaw/)), add an explicit `allow` rule for the tool to `hitl-policy-acpx.json`:
 

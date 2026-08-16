@@ -23,8 +23,6 @@ var validConfigKeys = map[string]string{
 	"default-alt-provider":          "Optional alt LLM provider type. Used by chains referencing {{var:alt_provider}}.",
 	"default-autocomplete-model":    "Optional editor autocomplete model name, independent from default-model.",
 	"default-autocomplete-provider": "Optional editor autocomplete provider type, independent from default-provider.",
-	"default-embed-model":           "Embedding model for 'contenox index' / 'contenox search' (e.g. nomic-embed-text). Unset falls back to default-model, which embeds only on some providers.",
-	"default-embed-provider":        "Optional embedding provider type, independent from default-provider. Unset uses default-provider.",
 	"default-audio-model":           "Optional model preferred for requests carrying audio attachments. Unset falls back to default-model; audio requests resolve only to audio-capable models either way.",
 	"default-audio-provider":        "Optional provider type for the audio model, independent from default-provider. Unset uses default-provider.",
 	"default-max-tokens":            "Optional default response token cap. Used by chains referencing {{var:max_tokens}}.",
@@ -33,7 +31,7 @@ var validConfigKeys = map[string]string{
 	"hitl-policy-name":              "Active HITL policy file name (e.g. hitl-policy-strict.json). Empty = use hitl-policy-default.json.",
 	"telemetry-enabled":             "Enable writing telemetry logs to <data-dir>/telemetry.log (true/false)",
 	"update-check":                  "Enable automatic update availability checks (true/false). Set false for zero-trust/air-gapped environments.",
-	"opt-in-beta":                   "Enable beta features (true/false): goja, shell_session, agent roster. CONTENOX_OPT_IN_BETA overrides per invocation.",
+	"opt-in-beta":                   "Enable beta features (true/false): shell_session, agent roster. CONTENOX_OPT_IN_BETA overrides per invocation.",
 	"default-mission-agent":         "Default declared agent run as a subagent by '/plan', mission_start, '/mission <intent>' and 'contenox mission fire' with no --agent.",
 	"default-mission-policy":        "Default subagent envelope (HITL policy) used when none is named.",
 	"default-oracle-chain":          "Chain that adjudicates a subagent's asks (e.g. chain-oracle-default.json). Unset means no oracle: every ask waits for a human.",
@@ -50,7 +48,7 @@ var configCmd = &cobra.Command{
 	Short: "Manage persistent CLI settings (default model, provider, chain, HITL policy).",
 	Long: `Store and retrieve persistent CLI defaults backed by SQLite.
 
-Global keys (shared across all projects): default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-embed-model, default-embed-provider, default-audio-model, default-audio-provider, default-max-tokens, default-think, telemetry-enabled, update-check, opt-in-beta, default-mission-agent, default-mission-policy, log-max-size, log-max-files, log-max-age-days
+Global keys (shared across all projects): default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-audio-model, default-audio-provider, default-max-tokens, default-think, telemetry-enabled, update-check, opt-in-beta, default-mission-agent, default-mission-policy, log-max-size, log-max-files, log-max-age-days
 Workspace keys (scoped to current project): default-chain, hitl-policy-name
 
 Supported keys:
@@ -60,15 +58,13 @@ Supported keys:
   default-alt-provider           Optional alt LLM provider (chains using {{var:alt_provider}})
   default-autocomplete-model     Optional editor autocomplete model, separate from chat
   default-autocomplete-provider  Optional editor autocomplete provider, separate from chat
-  default-embed-model            Embedding model for 'contenox index' / 'contenox search'
-  default-embed-provider         Optional embedding provider, separate from default-provider
   default-audio-model            Optional model preferred for requests carrying audio
   default-audio-provider         Optional provider for the audio model, separate from default-provider
   default-max-tokens             Optional response token cap (chains using {{var:max_tokens}})
   default-think                  Default reasoning level: auto, off, minimal, low, medium, high, xhigh
   telemetry-enabled              Enable local telemetry logs (true/false)
   update-check                   Enable automatic update checks (true/false)
-  opt-in-beta                    Enable beta features: goja, shell_session, agent roster (true/false)
+  opt-in-beta                    Enable beta features: shell_session, agent roster (true/false)
   default-chain                  Default chain file path
   hitl-policy-name               Active HITL policy file name (e.g. hitl-policy-strict.json)
   default-mission-agent          Default agent run as a subagent when none is named
@@ -86,7 +82,7 @@ var configSetCmd = &cobra.Command{
 	Short: "Set a persistent config value.",
 	Long: `Set a persistent CLI default stored in the SQLite database.
 
-Global keys (default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-embed-model, default-embed-provider, default-audio-model, default-audio-provider, default-max-tokens, default-think, telemetry-enabled, update-check, opt-in-beta) are shared across all projects.
+Global keys (default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-audio-model, default-audio-provider, default-max-tokens, default-think, telemetry-enabled, update-check, opt-in-beta) are shared across all projects.
 Workspace keys (default-chain, hitl-policy-name) are scoped to the current project
 workspace and fall back to the global value when not set locally.
 

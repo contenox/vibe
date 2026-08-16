@@ -23,7 +23,7 @@ const (
 // The workspace directory is the first root chainagents scans, so a declaration
 // claiming one would shadow the shipped agent rather than error.
 //
-// ⚠ chain-contenox, chain-acp, chain-acpx, chain-beam and chain-run are NOT
+// ⚠ chain-acp and chain-acpx are NOT
 // here any more. They stopped being shipped JSON and became the seeded
 // declarations under agents/, so reserving their names would refuse the very
 // files init writes. They are ordinary declarations now, and a workspace copy

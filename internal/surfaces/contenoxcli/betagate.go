@@ -9,8 +9,6 @@ import (
 	"strings"
 
 	"github.com/contenox/contenox/internal/services/clikv"
-	"github.com/contenox/contenox/internal/services/gojatool"
-	"github.com/contenox/contenox/internal/services/shellsession"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/libtracker"
 )
@@ -80,7 +78,5 @@ func betaGatedToolsets(enabled bool) map[string]bool {
 		return nil
 	}
 	return map[string]bool{
-		gojatool.ToolsProviderName:     true,
-		shellsession.ToolsProviderName: true,
 	}
 }

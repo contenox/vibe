@@ -23,23 +23,8 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-//go:embed chain-agent-contenox.json
-var initChain string
-
-//go:embed chain-agent-run.json
-var initRunChain string
-
 //go:embed chain-compact-default.json
 var initCompactChain string
-
-//go:embed chain-agent-acp.json
-var initACPChain string
-
-//go:embed chain-agent-acpx.json
-var initACPXChain string
-
-//go:embed chain-agent-beam.json
-var initBeamChain string
 
 //go:embed chain-fim-default.json
 var initFIMChain string
@@ -51,11 +36,8 @@ var initPlannerChain string
 var initOracleDefaultChain string
 
 const (
-	chainAgentContenoxFilename  = "chain-agent-contenox.json"
-	chainAgentRunFilename       = "chain-agent-run.json"
 	chainAgentACPFilename       = "chain-agent-acp.json"
 	chainAgentACPXFilename      = "chain-agent-acpx.json"
-	chainAgentBeamFilename      = "chain-agent-beam.json"
 	chainFIMDefaultFilename     = "chain-fim-default.json"
 	chainCompactDefaultFilename = "chain-compact-default.json"
 	chainPlannerDefaultFilename = "chain-planner-default.json"
@@ -79,11 +61,8 @@ func systemDir(contenoxDir string) string {
 var blessedChainHashes = map[string][]string{}
 
 var legacyChainRenames = map[string]string{
-	"default-chain.json":      chainAgentContenoxFilename,
-	"default-run-chain.json":  chainAgentRunFilename,
 	"default-acp-chain.json":  chainAgentACPFilename,
 	"headless-acp-chain.json": chainAgentACPXFilename,
-	"default-beam-chain.json": chainAgentBeamFilename,
 	"default-fim-chain.json":  chainFIMDefaultFilename,
 	"chain-compact.json":      chainCompactDefaultFilename,
 	"agent-planner.json":      chainPlannerDefaultFilename,
@@ -166,36 +145,6 @@ func migrateChainsIntoSystemDir(out io.Writer, contenoxDir string) error {
 	return nil
 }
 
-func seedHeadlessACPChainIfMissing(contenoxDir string) error {
-	if _, err := os.Stat(filepath.Join(contenoxDir, chainAgentACPXFilename)); err == nil {
-		return nil
-	}
-	dir := systemDir(contenoxDir)
-	dst := filepath.Join(dir, chainAgentACPXFilename)
-	if _, err := os.Stat(dst); err == nil {
-		return nil
-	}
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return err
-	}
-	return os.WriteFile(dst, []byte(initACPXChain), 0644)
-}
-
-func seedACPChainIfMissing(contenoxDir string) error {
-	if _, err := os.Stat(filepath.Join(contenoxDir, chainAgentACPFilename)); err == nil {
-		return nil
-	}
-	dir := systemDir(contenoxDir)
-	dst := filepath.Join(dir, chainAgentACPFilename)
-	if _, err := os.Stat(dst); err == nil {
-		return nil
-	}
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return err
-	}
-	return os.WriteFile(dst, []byte(initACPChain), 0644)
-}
-
 func seedFIMChainIfMissing(contenoxDir string) error {
 	if _, err := os.Stat(filepath.Join(contenoxDir, chainFIMDefaultFilename)); err == nil {
 		return nil
@@ -211,24 +160,9 @@ func seedFIMChainIfMissing(contenoxDir string) error {
 	return os.WriteFile(dst, []byte(initFIMChain), 0644)
 }
 
-func seedBeamChainIfMissing(contenoxDir string) error {
-	if _, err := os.Stat(filepath.Join(contenoxDir, chainAgentBeamFilename)); err == nil {
-		return nil
-	}
-	dir := systemDir(contenoxDir)
-	dst := filepath.Join(dir, chainAgentBeamFilename)
-	if _, err := os.Stat(dst); err == nil {
-		return nil
-	}
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return err
-	}
-	return os.WriteFile(dst, []byte(initBeamChain), 0644)
-}
-
 // initChainFiles are the chains still shipped as JSON.
 //
-// ⚠ contenox, run, acp, acpx and beam are NOT here: they are declarations under
+// ⚠ acp and acpx are NOT here: they are declarations under
 // agents/, seeded by agentdecl.Preseed and transpiled into .generated on every
 // discovery pass. Shipping both would be two sources for one agent, and the
 // JSON would be the one nobody edits — which is what made the recommended
@@ -583,7 +517,7 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 		return err
 	}
 	// The seeded declarations become chains here rather than at first use, so a
-	// fresh install has a working contenox/acp/beam/run before anything asks for
+	// fresh install has a working acp before anything asks for
 	// one. Reported, not fatal: a declaration that will not transpile is worth
 	// naming, and the rest of init still stands.
 	if problems := transpileSeededAgents(out, homeDir); problems != nil {

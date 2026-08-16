@@ -98,13 +98,13 @@ Then, as the operator:
 **Works:**
 
 - The full agentic loop — Contenox answers, reasons, and uses its read tools, driven from the bound chat.
-- Read-only filesystem inspection in the workspace: `read_file`, `list_dir`, `grep`, `stat_file`.
+- Reading a file whose path you already know: `read_file`, `read_file_range`.
 
 **Does not work — denied by design:**
 
-- Shell / command execution (`local_shell`) — entirely.
+- Shell / command execution (`local_shell`) — entirely, so there is also no directory listing, search, or glob (those live in the shell now, not in `local_fs`).
 - Any file write or edit (`write_file`, `edit_file`, `sed`).
-- Any network call (`web_get`, `web_post`, and every other web verb).
+- Any network call — there is no built-in network tool; the only way this profile could reach the network is an MCP server the operator explicitly attaches, and none is attached by default.
 - Reads of credential, key, dotfile, and secret paths.
 - Anything not explicitly allowed — `default_action: deny`.
 - Interactive approval — there is no "ask the operator" tier on this profile; an action is allowed or it is refused.
@@ -120,9 +120,9 @@ From the bound conversation:
 | You ask | Expected |
 |---|---|
 | read a workspace file | answered |
+| list or search the workspace | refused (no shell) |
 | run a shell command | refused |
 | write or edit a file | refused |
-| fetch or POST a URL | refused |
 | read `~/.ssh/…` or `.env` | refused |
 
 Reads working while every write, shell, and network action is refused is the profile behaving correctly. If a write or shell action succeeds, the wrong profile is wired — confirm the registered command is `… acpx` (not `acp`) and `nonInteractivePermissions` is `deny`.

@@ -33,9 +33,9 @@ The `Next:` line is the single command that moves you closest to yes. When every
 
 ---
 
-## Chat won't answer: no model configured
+## Nothing answers: no model configured
 
-**Symptom.** `contenox chat`, an editor session, or a chain run refuses to resolve a model. `doctor` reports `Ready: no`.
+**Symptom.** An ACP session, a fired mission, or a dispatched event refuses to resolve a model. `doctor` reports `Ready: no`.
 
 **Cause.** One of the defaults is unset, or the default names something the reachable backends do not serve. `doctor` distinguishes these:
 

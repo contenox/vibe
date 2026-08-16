@@ -15,7 +15,7 @@ All three stories share one setup: the trigger file, its chain, and its policy s
 
 A mission unit that hits a question it must not decide alone parks on a durable ask. If you are at the terminal, you see it. If you are making coffee, the ask waits silently — correct, and easy to miss for an hour.
 
-The event tier closes that gap. Every ask also appends a `missionservice.events.attention_asked` event, and its `data` carries the ask's id (`askId`), a `summary`, and `detail`. A trigger can hand that event to a chain that POSTs one line to an [ntfy](https://ntfy.sh) topic your phone subscribes to — `webtools.web_post` is a shipped tool, and ntfy is nothing more than an HTTP endpoint that turns a POST into a push notification. Your phone buzzes because your own chain called an URL you allowed; contenox knows nothing about phones.
+The event tier closes that gap. Every ask also appends a `missionservice.events.attention_asked` event, and its `data` carries the ask's id (`askId`), a `summary`, and `detail`. A trigger can hand that event to a chain that posts one line to an [ntfy](https://ntfy.sh) topic your phone subscribes to. Outbound calls like this aren't a built-in toolset anymore — register the endpoint once as a narrow [remote tool](/docs/integrations/tools/remote/) (`contenox tools add ntfy --url https://ntfy.sh --spec ./ntfy-post.yaml`, a one-operation spec), and ntfy itself is nothing more than an HTTP endpoint that turns a POST into a push notification. Your phone buzzes because your own chain called the one tool you registered for it; contenox knows nothing about phones.
 
 The trigger, `trigger-attention-buzz.json`:
 
@@ -39,11 +39,11 @@ The chain, `chain-attention-buzz.json` — one model turn that composes the line
     {
       "id": "compose",
       "handler": "chat_completion",
-      "system_instruction": "The input is a contenox event envelope. data.summary is a mission unit's question for a human; data.askId answers it. Call webtools.web_post exactly once: url https://ntfy.sh/my-fleet-attention, body is one line — the summary, then: answer with contenox approvals respond <askId> --answer '...'",
+      "system_instruction": "The input is a contenox event envelope. data.summary is a mission unit's question for a human; data.askId answers it. Call ntfy.postMessage exactly once: topic my-fleet-attention, body is one line — the summary, then: answer with contenox approvals respond <askId> --answer '...'",
       "execute_config": {
         "model": "{{var:model}}",
         "provider": "{{var:provider}}",
-        "tools": ["webtools"]
+        "tools": ["ntfy"]
       },
       "transition": {
         "branches": [
@@ -63,23 +63,22 @@ The chain, `chain-attention-buzz.json` — one model turn that composes the line
 }
 ```
 
-The envelope, `hitl-policy-notify.json`, is where the story earns its keep. A trigger grants timing, never capability — so a fired chain whose policy holds `web_post` at approve-tier (as the shipped default does) would park on an approval *to send the notification that tells you something is parked*. The notify envelope allows exactly one thing:
+The envelope, `hitl-policy-notify.json`, is where the story earns its keep. A trigger grants timing, never capability — so a fired chain whose policy has no `allow` rule for `ntfy.postMessage` would fall through to the default policy's `default_action` (`approve`) and park on an approval *to send the notification that tells you something is parked*. The notify envelope allows exactly one thing:
 
 ```json
 {
   "default_action": "deny",
   "rules": [
     {
-      "tools": "webtools",
-      "tool": "web_post",
-      "action": "allow",
-      "when": [{ "key": "url", "op": "host", "value": "ntfy.sh" }]
+      "tools": "ntfy",
+      "tool": "postMessage",
+      "action": "allow"
     }
   ]
 }
 ```
 
-One verb, one host, everything else denied. The chain cannot read a file, run a command, or POST anywhere but the host you wrote down.
+One tool, one operation, everything else denied — and because `ntfy` was registered with `--url https://ntfy.sh` in the first place, there's no other host it could reach even if the chain wanted one. The chain cannot read a file, run a command, or call anywhere but the endpoint you registered.
 
 Now fire a mission and walk away. The `mission fire` host runs an engine, so under opt-in-beta it fires the trigger live, in-process, the moment the ask's event is appended; `contenox events dispatch --auto` in a tmux pane is the catch-up for anything appended while no engine-running host was up, and the shared firings table makes sure the overlap fires once. The phone buzzes with the unit's actual question and the command that answers it.
 
@@ -108,7 +107,7 @@ A mission that ends while you are elsewhere reaches one of four terminal statuse
 }
 ```
 
-`chain-shift-report.json` has the same two-task shape as the buzz chain, with `local_fs` in place of `webtools`: the model turn reads the envelope and calls `local_fs.write_file` with a summary of what the mission was, how it ended, and why — one new markdown file per mission, `path` pinned by instruction to `reports/<missionId>.md`.
+`chain-shift-report.json` has the same two-task shape as the buzz chain, with `local_fs` in place of `ntfy`: the model turn reads the envelope and calls `local_fs.write_file` with a summary of what the mission was, how it ended, and why — one new markdown file per mission, `path` pinned by instruction to `reports/<missionId>.md`.
 
 Instruction is not enforcement, so the envelope repeats the boundary in a form that cannot be talked around:
 

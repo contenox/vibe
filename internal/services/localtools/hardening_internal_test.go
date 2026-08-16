@@ -166,34 +166,6 @@ func TestUnit_PruneToolOutput_AgeCap(t *testing.T) {
 }
 
 // suggestSiblings must surface substring and small-edit-distance matches, cap the
-// count, and never include an exact self-match.
-func TestUnit_SuggestSiblings_FuzzyAndCapped(t *testing.T) {
-	dir := t.TempDir()
-	for _, n := range []string{"README.md", "readme.txt", "reader.go", "main.go", "config.yaml", "unrelated.bin"} {
-		if err := os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	got := suggestSiblings(dir, "readme", 5)
-	if len(got) == 0 {
-		t.Fatal("expected sibling suggestions for 'readme'")
-	}
-	joined := strings.Join(got, ",")
-	if !strings.Contains(joined, "README.md") || !strings.Contains(joined, "readme.txt") {
-		t.Fatalf("expected README.md and readme.txt among suggestions: %v", got)
-	}
-	if strings.Contains(joined, "unrelated.bin") {
-		t.Fatalf("an unrelated name must not be suggested: %v", got)
-	}
-
-	capped := suggestSiblings(dir, "readme", 2)
-	if len(capped) > 2 {
-		t.Fatalf("suggestion cap not honored: %v", capped)
-	}
-}
-
-// suggestNearestLines picks the closest window and never returns the pattern
-// itself when the pattern is absent — SUGGEST only.
 func TestUnit_SuggestNearestLines_PicksClosestWindow(t *testing.T) {
 	content := "func Alpha() {}\nfunc Bravo() {}\nfunc Charlie() {}\n"
 	near := suggestNearestLines(content, "func Bravl() {}", 0)

@@ -22,7 +22,7 @@ func setupFSMutateGuard(t *testing.T) (context.Context, taskengine.ToolsRepo, st
 
 	var mutated []string
 	allowedDir := t.TempDir()
-	tools := localtools.NewLocalFSToolsWith(allowedDir, db, nil, localtools.LocalFSToolsName, nil,
+	tools := localtools.NewLocalFSToolsWith(allowedDir, db, localtools.TestHostFileIO{}, localtools.LocalFSToolsName, nil,
 		localtools.WithOnFileMutated(func(absPath string) { mutated = append(mutated, absPath) }))
 	ctxWithSession := context.WithValue(ctx, runtimetypes.SessionIDContextKey, "test-session")
 	return ctxWithSession, tools, allowedDir, &mutated

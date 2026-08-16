@@ -56,7 +56,7 @@ func TestUnit_ShippedAgentsStillRegisterFromSystemDir(t *testing.T) {
 
 	discoverChainAgents(ctx, svc, contenoxDir, libtracker.NoopTracker{}, DiscoverDeps{})
 
-	for _, name := range []string{"chain-contenox", "chain-acp", "chain-acpx", "chain-run"} {
+	for _, name := range []string{"chain-acp", "chain-acpx"} {
 		_, err := svc.GetByName(ctx, name)
 		require.NoErrorf(t, err, "shipped agent %q must still register from %s/", name, SystemDirName)
 	}

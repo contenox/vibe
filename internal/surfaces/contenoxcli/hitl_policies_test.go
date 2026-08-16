@@ -158,74 +158,6 @@ func TestUnit_SeededPolicies_PassTheEnvelopeVet(t *testing.T) {
 }
 
 // TestUnit_InteractivePolicies_GitToolTiers asserts git reads never ask and git writes always ask.
-func TestUnit_InteractivePolicies_GitToolTiers(t *testing.T) {
-	t.Parallel()
-	for name, content := range map[string]string{
-		"hitl-policy-default.json": hitlPolicyDefault,
-		"hitl-policy-acp.json":     hitlPolicyACP,
-	} {
-		name, content := name, content
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			svc := seededPolicyService(t, name, content)
-			ctx := context.Background()
-
-			for _, tool := range []string{"git_status", "git_diff", "git_log", "git_show", "git_branch_list", "git_blame"} {
-				r, err := svc.Evaluate(ctx, "git", tool, map[string]any{})
-				require.NoError(t, err)
-				assert.Equal(t, hitlservice.ActionAllow, r.Action, "%s: git.%s must never nag", name, tool)
-			}
-			for _, tool := range []string{"git_add", "git_commit", "git_checkout_branch", "git_restore"} {
-				r, err := svc.Evaluate(ctx, "git", tool, map[string]any{})
-				require.NoError(t, err)
-				assert.Equal(t, hitlservice.ActionApprove, r.Action, "%s: git.%s changes the repository and must ask", name, tool)
-			}
-		})
-	}
-}
-
-// TestUnit_InteractivePolicies_RuleForEveryGitTool asserts every git tool the toolset declares has a rule, so none silently falls through to default_action.
-func TestUnit_InteractivePolicies_RuleForEveryGitTool(t *testing.T) {
-	t.Parallel()
-	declared, err := localtools.NewGitTools(t.TempDir()).GetToolsForToolsByName(context.Background(), localtools.GitToolsName)
-	require.NoError(t, err)
-	require.NotEmpty(t, declared)
-
-	for name, content := range map[string]string{
-		"hitl-policy-default.json": hitlPolicyDefault,
-		"hitl-policy-acp.json":     hitlPolicyACP,
-	} {
-		name, content := name, content
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			for _, tool := range declared {
-				assert.Containsf(t, content, `"tool": "`+tool.Function.Name+`"`,
-					"%s has no rule for git.%s — it would fall through to default_action", name, tool.Function.Name)
-			}
-		})
-	}
-}
-
-// policyRuleDoc is the minimal shape needed to inspect a seeded preset's rules
-// for the drift check below.
-type policyRuleDoc struct {
-	Rules []struct {
-		Tools  string `json:"tools"`
-		Tool   string `json:"tool"`
-		Action string `json:"action"`
-		When   []struct {
-			Key   string `json:"key"`
-			Op    string `json:"op"`
-			Value string `json:"value"`
-		} `json:"when"`
-	} `json:"rules"`
-}
-
-// TestUnit_InteractivePolicies_RuleForEveryMutatingLocalFSTool asserts every
-// mutating local_fs tool has a deny rule guarding .git/** and hitl-policy*.json
-// in the presets that protect those globs, so the next mutating tool added to
-// local_fs without matching envelope coverage fails this build instead of
-// silently falling through.
 func TestUnit_InteractivePolicies_RuleForEveryMutatingLocalFSTool(t *testing.T) {
 	t.Parallel()
 	mutators := []string{"write_file", "sed", "edit_file"}
@@ -452,7 +384,7 @@ func TestUnit_NoFilePolicyFallback_FailsClosed(t *testing.T) {
 // matching rule fails the build instead of surprising a human with a card.
 func TestUnit_InteractivePolicies_RuleForEveryReadOnlyLocalFSTool(t *testing.T) {
 	t.Parallel()
-	declared, err := localtools.NewLocalFSTools(t.TempDir(), nil).Supports(context.Background())
+	declared, err := localtools.NewLocalFSToolsWith(t.TempDir(), nil, hostFileIO{}, localtools.LocalFSToolsName, nil).Supports(context.Background())
 	require.NoError(t, err)
 	require.NotEmpty(t, declared)
 
@@ -554,4 +486,25 @@ func TestUnit_InteractivePolicies_JSAndPythonShellTiers(t *testing.T) {
 			}
 		})
 	}
+}
+
+type hostFileIO struct{}
+
+func (hostFileIO) ReadFile(_ context.Context, path string) ([]byte, error) { return os.ReadFile(path) }
+
+func (hostFileIO) WriteFile(_ context.Context, path string, data []byte) error {
+	return os.WriteFile(path, data, 0o644)
+}
+
+type policyRuleDoc struct {
+	Rules []struct {
+		Tools  string `json:"tools"`
+		Tool   string `json:"tool"`
+		Action string `json:"action"`
+		When   []struct {
+			Key   string `json:"key"`
+			Op    string `json:"op"`
+			Value string `json:"value"`
+		} `json:"when"`
+	} `json:"rules"`
 }

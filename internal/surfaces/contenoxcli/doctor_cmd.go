@@ -111,7 +111,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	printWorkspaceShadowNote(cmd.OutOrStdout(), contenoxDir, triggerShadowNames(o.EffectiveOptInBeta, contenoxDir))
 	printVisionSummary(cmd.OutOrStdout(), vision)
 	if o.EffectiveOptInBeta {
-		fmt.Fprintln(cmd.OutOrStdout(), "Beta features enabled (opt-in-beta): goja, shell_session, agent roster, event triggers")
+		fmt.Fprintln(cmd.OutOrStdout(), "Beta features enabled (opt-in-beta): shell_session, agent roster, event triggers")
 		printLoadedTriggers(ctx, cmd.OutOrStdout(), contenoxDir)
 		printFiringTrouble(ctx, cmd.OutOrStdout(), db.WithoutTransaction(), ResolveWorkspaceID(contenoxDir))
 	}

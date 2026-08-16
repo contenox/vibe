@@ -13,7 +13,6 @@ import (
 	"github.com/contenox/contenox/internal/kernel/enginesvc"
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/chatservice"
-	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	libacp "github.com/contenox/contenox/libacp"
@@ -670,12 +669,6 @@ func TestE2E_Wire_SessionWorkspaceCwd(t *testing.T) {
 	toolCtx := context.WithValue(ctx, runtimetypes.SessionIDContextKey, internalID)
 	assert.Equal(t, resolvedB, resolver(toolCtx), "resolver must return the session's persisted cwd")
 
-	tool := localtools.NewLocalFSToolsWith("", nil, nil, "local_fs", resolver)
-	out, _, err := tool.Exec(toolCtx, time.Now(), map[string]any{"path": "."}, false, &taskengine.ToolsCall{ToolName: "list_dir"})
-	require.NoError(t, err)
-	outStr, _ := out.(string)
-	assert.Contains(t, outStr, "hello-b.txt", "local_fs must list files under the session workspace root")
-	assert.NotContains(t, outStr, "only-in-a.txt", "local_fs must not see the default root when the session chose another")
 
 	// A session without a workspace in scope falls back to the default root.
 	assert.Equal(t, factory.Default(), resolver(context.Background()))

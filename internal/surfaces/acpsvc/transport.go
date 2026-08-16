@@ -14,7 +14,6 @@ import (
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/chatservice"
 	"github.com/contenox/contenox/internal/services/clikv"
-	"github.com/contenox/contenox/internal/services/shellsession"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	libacp "github.com/contenox/contenox/libacp"
@@ -60,10 +59,6 @@ type Deps struct {
 	// stays authoritative: a cwd outside the allowlist is refused, not adopted.
 	// See Transport.resolveWorkspaceCwd, the single enforcement point.
 	WorkspaceRoots *vfs.Factory
-
-	// ShellSessions manages per-chat-session PTY shells. Nil disables shell
-	// tooling: extension methods report method-not-found rather than erroring.
-	ShellSessions shellsession.Manager
 
 	// KnownPolicies are the HITL policy preset names /policy lists. Display only.
 	KnownPolicies []string

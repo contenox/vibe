@@ -39,7 +39,7 @@ can work while you are not there. Same file, different back half.
 ---
 name: timesheet
 description: Files this week's tracked hours to the timesheet system
-tools: Read, Grep
+tools: read_file, write_file
 ---
 
 You file weekly timesheets.
@@ -66,14 +66,16 @@ timesheet  discovered  chain  true
 ```
 
 The `tools:` line names what it may call. **Omit it and the agent inherits every
-tool** — name them to narrow it. The names resolved out of the box are `Read`,
-`Write`, `Edit`, `Bash`, `PowerShell`, `Glob`, `Grep`, `WebFetch`.
+tool** — name them to narrow it. The names resolved out of the box are the local
+ones — `read_file`, `write_file`, `edit_file`, `sed`, `read_file_range` (all
+under `local_fs`) and `local_shell` — plus anything you have registered as a
+remote tool or MCP server.
 
 ---
 
 ## 2. The tools it does not have yet
 
-`Read` and `Grep` cannot reach a timesheet system. That lives behind an internal
+`read_file` cannot reach a timesheet system. That lives behind an internal
 API, and the agent needs it.
 
 You have two ways to give it one, and the difference is worth understanding.

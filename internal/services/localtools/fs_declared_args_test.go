@@ -16,7 +16,7 @@ import (
 // with local_shell).
 func TestUnit_LocalFSTools_FallsBackToDeclaredArgs(t *testing.T) {
 	tempDir := t.TempDir()
-	h := localtools.NewLocalFSTools(tempDir, nil)
+	h := localtools.NewLocalFSToolsForTest(tempDir, nil)
 
 	toolsCall := &taskengine.ToolsCall{
 		ToolName: "write_file",
@@ -42,7 +42,7 @@ func TestUnit_LocalFSTools_FallsBackToDeclaredArgs(t *testing.T) {
 }
 
 func TestUnit_LocalFSTools_NoInputNoArgsStillErrors(t *testing.T) {
-	h := localtools.NewLocalFSTools(t.TempDir(), nil)
+	h := localtools.NewLocalFSToolsForTest(t.TempDir(), nil)
 	_, _, err := h.Exec(context.Background(), time.Now(), "not-a-map", false, &taskengine.ToolsCall{ToolName: "write_file"})
 	if err == nil {
 		t.Fatal("expected error when input is not a map and no declared args exist")

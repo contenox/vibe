@@ -2,7 +2,7 @@ package localtools
 
 import (
 	"context"
-	"os"
+	"errors"
 )
 
 type FileIO interface {
@@ -10,16 +10,10 @@ type FileIO interface {
 	WriteFile(ctx context.Context, path string, data []byte) error
 }
 
-func NewOSFileIO() FileIO {
-	return osFileIO{}
-}
+var ErrNoFilesystem = errors.New("no filesystem: the connected client provides none and contenox does not read the host")
 
-type osFileIO struct{}
+type noFilesystemIO struct{}
 
-func (osFileIO) ReadFile(_ context.Context, path string) ([]byte, error) {
-	return os.ReadFile(path)
-}
+func (noFilesystemIO) ReadFile(context.Context, string) ([]byte, error) { return nil, ErrNoFilesystem }
 
-func (osFileIO) WriteFile(_ context.Context, path string, data []byte) error {
-	return os.WriteFile(path, data, 0644)
-}
+func (noFilesystemIO) WriteFile(context.Context, string, []byte) error { return ErrNoFilesystem }

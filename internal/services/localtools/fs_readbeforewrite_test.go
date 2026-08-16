@@ -34,7 +34,7 @@ func setupFSReadGuard(t *testing.T) (context.Context, taskengine.ToolsRepo, stri
 	t.Cleanup(func() { _ = db.Close() })
 
 	allowedDir := t.TempDir()
-	tools := localtools.NewLocalFSTools(allowedDir, db)
+	tools := localtools.NewLocalFSToolsForTest(allowedDir, db)
 	ctxWithSession := context.WithValue(ctx, runtimetypes.SessionIDContextKey, "test-session")
 	return ctxWithSession, tools, allowedDir
 }
@@ -158,7 +158,7 @@ func TestUnit_ReadBeforeWrite_BypassWithoutSession(t *testing.T) {
 
 	dir := t.TempDir()
 	writeFile(t, dir, "a.txt", "original")
-	tools := localtools.NewLocalFSTools(dir, db)
+	tools := localtools.NewLocalFSToolsForTest(dir, db)
 
 	res, err := execTool(t, ctx, tools, "write_file", map[string]any{"path": "a.txt", "content": "updated"})
 	require.NoError(t, err)
@@ -171,7 +171,7 @@ func TestUnit_ReadBeforeWrite_NilDBBypasses(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "a.txt", "original")
 
-	tools := localtools.NewLocalFSTools(dir, nil)
+	tools := localtools.NewLocalFSToolsForTest(dir, nil)
 	ctx := context.WithValue(context.Background(), runtimetypes.SessionIDContextKey, "irrelevant")
 
 	res, err := execTool(t, ctx, tools, "write_file", map[string]any{"path": "a.txt", "content": "updated"})
@@ -205,7 +205,7 @@ func TestUnit_ReadBeforeWrite_SessionScoping(t *testing.T) {
 
 	dir := t.TempDir()
 	writeFile(t, dir, "a.txt", "original")
-	tools := localtools.NewLocalFSTools(dir, db)
+	tools := localtools.NewLocalFSToolsForTest(dir, db)
 
 	ctxA := context.WithValue(ctx, runtimetypes.SessionIDContextKey, "session-A")
 	_, err = execTool(t, ctxA, tools, "read_file", map[string]any{"path": "a.txt"})

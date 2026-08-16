@@ -52,7 +52,3 @@ Behind the tenant-facing product, an operator console tracked the workspaces, th
 - **A connector is just a labeled container image.** Publishing a new source type was a registry push, not a platform release — the catalog grew without touching Bob's own code.
 - **Semantic search backed by a real embedding model held up under an honest test:** paraphrased queries across unrelated domains still found the right document by meaning, not word overlap.
 - **A hosted-apps catalog proved arbitrary OSS software can become a one-click, per-tenant feature**, provisioned the exact same way as everything else on the platform.
-
-## Where this lives now
-
-The semantic-search lesson lives on directly: `contenox index` plus `workspace_search` is the same real-embedding, ranked-by-meaning retrieval, now run locally over your own codebase instead of a hosted tenant's documents.

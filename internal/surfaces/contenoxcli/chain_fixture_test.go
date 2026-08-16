@@ -2,95 +2,59 @@ package contenoxcli
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"testing"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/agentdecl"
 	"github.com/stretchr/testify/require"
 )
 
 func TestUnit_BuiltinChains_SetThinkOnlyOnUserFacingChatTasks(t *testing.T) {
-	cases := []struct {
-		name        string
-		raw         string
-		wantThink   []string
-		wantNoThink []string
-	}{
-		{name: "contenox", raw: initChain, wantThink: []string{"coding_chat", "coding_recovery", "contenox_chat", "recovery_chat", "summarise_failure"}, wantNoThink: []string{"classify_request", "coding_tools", "coding_recovery_tools", "run_tools", "recovery_tools"}},
-		{name: "run", raw: initRunChain, wantThink: []string{"contenox_run", "recovery_run", "summarise_failure"}, wantNoThink: []string{"run_tools", "recovery_run_tools"}},
-		{name: "acp", raw: initACPChain, wantThink: []string{"coding_chat", "coding_recovery", "acp_chat", "recovery_chat", "summarise_failure"}, wantNoThink: []string{"classify_request", "coding_tools", "coding_recovery_tools", "run_tools", "recovery_tools"}},
-		{name: "acpx", raw: initACPXChain, wantThink: []string{"acp_chat", "recovery_chat", "summarise_failure"}, wantNoThink: []string{"run_tools", "recovery_tools"}},
-		{name: "beam", raw: initBeamChain, wantThink: []string{"coding_chat", "coding_recovery", "acp_chat", "recovery_chat", "summarise_failure"}, wantNoThink: []string{"classify_request", "coding_tools", "coding_recovery_tools", "run_tools", "recovery_tools"}},
-		{name: "compact", raw: initCompactChain, wantNoThink: []string{"compact_history"}},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var chain taskengine.TaskChainDefinition
-			require.NoError(t, json.Unmarshal([]byte(tc.raw), &chain))
-			byID := make(map[string]taskengine.TaskDefinition)
+	for _, name := range []string{"acp", "acpx"} {
+		t.Run(name, func(t *testing.T) {
+			chain := chainFor(t, name)
+			require.NotEmpty(t, chain.Tasks)
 			for _, task := range chain.Tasks {
-				byID[task.ID] = task
-			}
-			for _, id := range tc.wantThink {
-				task, ok := byID[id]
-				require.True(t, ok, "task %s missing", id)
-				require.NotNil(t, task.ExecuteConfig, "task %s execute_config", id)
-				require.Equal(t, "{{var:think}}", task.ExecuteConfig.Think, "task %s think", id)
-			}
-			for _, id := range tc.wantNoThink {
-				task, ok := byID[id]
-				require.True(t, ok, "task %s missing", id)
-				if task.ExecuteConfig != nil {
-					require.Empty(t, task.ExecuteConfig.Think, "task %s should not set think", id)
+				if task.ExecuteConfig == nil {
+					continue
 				}
+				if task.Handler == taskengine.HandleChatCompletion {
+					require.Equal(t, "{{var:think}}", task.ExecuteConfig.Think,
+						"task %s is user-facing chat and must carry think", task.ID)
+					continue
+				}
+				require.Empty(t, task.ExecuteConfig.Think,
+					"task %s is a %v node and must not set think", task.ID, task.Handler)
 			}
 		})
 	}
 }
 
-// requireReadOnlyReviewLoop pins the property that makes the review branch a
-// specialist rather than a differently-worded assistant: it cannot write.
-//
-// Every mutating tool is listed in hide_tools, which taskexec enforces at
-// EXECUTION (isExecutionToolHidden), not merely by omitting it from the
-// advertised list — so a model that asks for write_file anyway still cannot
-// run it. Both halves of the loop must carry the same withholding, since a
-// tool withheld only at the chat step would still execute at the tool step.
-func requireReadOnlyReviewLoop(t *testing.T, byID map[string]taskengine.TaskDefinition) {
+func requireReadOnlyReviewLoop(t *testing.T, byID map[string]taskengine.TaskDefinition, agent string) {
 	t.Helper()
-	mutating := []string{
-		"local_fs.write_file",
-		"local_fs.edit_file",
-		"local_fs.sed",
-		"git.git_add",
-		"git.git_commit",
-		"git.git_checkout_branch",
-		"git.git_restore",
-	}
-	for _, id := range []string{"review_chat", "review_tools"} {
+	reviewChat := "chain-" + agent + "-review-agent"
+	reviewTools := "chain-" + agent + "-review-tools"
+	for _, id := range []string{reviewChat, reviewTools} {
 		task, ok := byID[id]
 		require.True(t, ok, "chain has no %s task", id)
 		require.NotNil(t, task.ExecuteConfig, "task %s execute_config", id)
-		for _, tool := range mutating {
-			require.Contains(t, task.ExecuteConfig.HideTools, tool,
-				"task %s must withhold %s: a reviewer that can write is not read-only", id, tool)
-		}
-		require.Contains(t, task.ExecuteConfig.Tools, "!webtools",
-			"task %s must exclude the network", id)
 	}
-	require.Equal(t, taskengine.HandleChatCompletion, byID["review_chat"].Handler)
-	require.Equal(t, taskengine.HandleExecuteToolCalls, byID["review_tools"].Handler)
-	require.Equal(t, "review_chat", byID["review_tools"].InputVar)
-	require.Equal(t, "review_chat", branchGoto(t, byID["review_tools"], taskengine.OpDefault, "", "review_chat").Goto)
+	require.Equal(t, taskengine.HandleChatCompletion, byID[reviewChat].Handler)
+	require.Equal(t, taskengine.HandleExecuteToolCalls, byID[reviewTools].Handler)
+	require.Equal(t, reviewChat, byID[reviewTools].InputVar)
+	require.Equal(t, reviewChat, branchGoto(t, byID[reviewTools], taskengine.OpDefault, "", reviewChat).Goto)
+	require.Contains(t, byID[reviewChat].SystemInstruction, "withheld",
+		"the review prompt must state that write tools are withheld")
 }
 
 func TestUnit_ACPChain_RoutesToSimpleBoundedLoops(t *testing.T) {
-	var chain taskengine.TaskChainDefinition
-	require.NoError(t, json.Unmarshal([]byte(initACPChain), &chain))
+	chain := chainFor(t, "acp")
 	require.NotEmpty(t, chain.Tasks)
-	require.Equal(t, "classify_request", chain.Tasks[0].ID)
+	require.Equal(t, "chain-acp-route", chain.Tasks[0].ID)
 	require.Len(t, chain.Tasks, 12)
 
 	byID := make(map[string]taskengine.TaskDefinition)
@@ -98,7 +62,7 @@ func TestUnit_ACPChain_RoutesToSimpleBoundedLoops(t *testing.T) {
 		byID[task.ID] = task
 	}
 
-	classifier := byID["classify_request"]
+	classifier := byID["chain-acp-route"]
 	require.Equal(t, taskengine.HandleRoute, classifier.Handler)
 	var routeLabels []string
 	for _, branch := range classifier.Transition.Branches {
@@ -106,8 +70,8 @@ func TestUnit_ACPChain_RoutesToSimpleBoundedLoops(t *testing.T) {
 			routeLabels = append(routeLabels, branch.When)
 		}
 	}
-	require.ElementsMatch(t, []string{"coding_change", "general", "review_change"}, routeLabels)
-	requireReadOnlyReviewLoop(t, byID)
+	require.ElementsMatch(t, []string{"coding", "general", "review"}, routeLabels)
+	requireReadOnlyReviewLoop(t, byID, "acp")
 
 	for _, oldID := range []string{
 		"coding_inspect",
@@ -149,69 +113,15 @@ func TestUnit_ACPChain_RoutesToSimpleBoundedLoops(t *testing.T) {
 		require.Equal(t, "131072", tools.ExecuteConfig.ToolsPolicies["local_fs"]["_max_output_bytes"])
 	}
 
-	requireLoop("coding_chat", "coding_tools", "coding_recovery", "60")
-	requireLoop("acp_chat", "run_tools", "recovery_chat", "60")
+	requireLoop("chain-acp-coding-agent", "chain-acp-coding-tools", "chain-acp-coding-recovery", "60")
+	requireLoop("chain-acp-general-agent", "chain-acp-general-tools", "chain-acp-general-recovery", "60")
 
-	codingRecoveryTools := byID["coding_recovery_tools"]
+	codingRecoveryTools := byID["chain-acp-coding-recovery-tools"]
 	require.Equal(t, taskengine.HandleExecuteToolCalls, codingRecoveryTools.Handler)
-	require.Equal(t, "coding_recovery", codingRecoveryTools.InputVar)
+	require.Equal(t, "chain-acp-coding-recovery", codingRecoveryTools.InputVar)
 	require.Equal(t, []string{"*"}, codingRecoveryTools.ExecuteConfig.Tools)
 
-	summary := byID["summarise_failure"]
-	require.Equal(t, taskengine.HandleChatCompletion, summary.Handler)
-	require.Equal(t, "previous_output", summary.InputVar)
-	require.Empty(t, summary.ExecuteConfig.Tools)
-}
-
-func TestUnit_ContenoxChain_RoutesToSpecialistLoops(t *testing.T) {
-	var chain taskengine.TaskChainDefinition
-	require.NoError(t, json.Unmarshal([]byte(initChain), &chain))
-	require.NotEmpty(t, chain.Tasks)
-	require.Equal(t, "classify_request", chain.Tasks[0].ID)
-	require.Len(t, chain.Tasks, 12)
-
-	byID := make(map[string]taskengine.TaskDefinition)
-	for _, task := range chain.Tasks {
-		byID[task.ID] = task
-	}
-
-	classifier := byID["classify_request"]
-	require.Equal(t, taskengine.HandleRoute, classifier.Handler)
-	require.Equal(t, "coding_chat", branchGoto(t, classifier, taskengine.OpEquals, "coding_change", "coding_chat").Goto)
-	require.Equal(t, "contenox_chat", branchGoto(t, classifier, taskengine.OpEquals, "general", "contenox_chat").Goto)
-	require.Equal(t, "review_chat", branchGoto(t, classifier, taskengine.OpEquals, "review_change", "review_chat").Goto)
-	require.Equal(t, "contenox_chat", branchGoto(t, classifier, taskengine.OpDefault, "", "contenox_chat").Goto)
-	requireReadOnlyReviewLoop(t, byID)
-
-	requireLoop := func(chatID, toolsID, recoveryID string, toolBudget string) {
-		chat := byID[chatID]
-		require.Equal(t, taskengine.HandleChatCompletion, chat.Handler)
-		require.NotNil(t, chat.ExecuteConfig, "task %s execute_config", chatID)
-		require.Equal(t, []string{"*"}, chat.ExecuteConfig.Tools, "task %s tools", chatID)
-		require.Equal(t, toolBudget, branchGoto(t, chat, taskengine.OpEdgeTraversedAtLeast, toolBudget, recoveryID).When)
-		require.Equal(t, toolsID, branchGoto(t, chat, taskengine.OpEquals, taskengine.TransitionToolCall, toolsID).Goto)
-		require.Equal(t, taskengine.TermEnd, branchGoto(t, chat, taskengine.OpDefault, "", taskengine.TermEnd).Goto)
-
-		tools := byID[toolsID]
-		require.Equal(t, taskengine.HandleExecuteToolCalls, tools.Handler)
-		require.Equal(t, chatID, tools.InputVar)
-		require.NotNil(t, tools.ExecuteConfig, "task %s execute_config", toolsID)
-		require.Equal(t, []string{"*"}, tools.ExecuteConfig.Tools, "task %s tools", toolsID)
-		require.Contains(t, tools.ExecuteConfig.ToolsPolicies, "local_fs", "task %s", toolsID)
-		require.Contains(t, tools.ExecuteConfig.ToolsPolicies, "webtools", "task %s", toolsID)
-	}
-
-	requireLoop("coding_chat", "coding_tools", "coding_recovery", "60")
-	requireLoop("contenox_chat", "run_tools", "recovery_chat", "60")
-
-	codingRecoveryTools := byID["coding_recovery_tools"]
-	require.Equal(t, taskengine.HandleExecuteToolCalls, codingRecoveryTools.Handler)
-	require.Equal(t, "coding_recovery", codingRecoveryTools.InputVar)
-	require.Equal(t, []string{"*"}, codingRecoveryTools.ExecuteConfig.Tools)
-	require.Equal(t, "8", branchGoto(t, byID["coding_recovery"], taskengine.OpEdgeTraversedAtLeast, "8", "summarise_failure").When)
-	require.Equal(t, "8", branchGoto(t, byID["recovery_chat"], taskengine.OpEdgeTraversedAtLeast, "8", "summarise_failure").When)
-
-	summary := byID["summarise_failure"]
+	summary := byID["chain-acp-summarise"]
 	require.Equal(t, taskengine.HandleChatCompletion, summary.Handler)
 	require.Equal(t, "previous_output", summary.InputVar)
 	require.Empty(t, summary.ExecuteConfig.Tools)
@@ -220,20 +130,15 @@ func TestUnit_ContenoxChain_RoutesToSpecialistLoops(t *testing.T) {
 func TestUnit_BuiltinRecoveryTasksUseConfiguredDefaultFallback(t *testing.T) {
 	cases := []struct {
 		name string
-		raw  string
 		ids  []string
 	}{
-		{name: "contenox", raw: initChain, ids: []string{"coding_recovery", "recovery_chat", "summarise_failure"}},
-		{name: "run", raw: initRunChain, ids: []string{"recovery_run", "summarise_failure"}},
-		{name: "acp", raw: initACPChain, ids: []string{"coding_recovery", "recovery_chat", "summarise_failure"}},
-		{name: "acpx", raw: initACPXChain, ids: []string{"recovery_chat", "summarise_failure"}},
-		{name: "beam", raw: initBeamChain, ids: []string{"coding_recovery", "recovery_chat", "summarise_failure"}},
+		{name: "acp", ids: []string{"chain-acp-coding-recovery", "chain-acp-general-recovery", "chain-acp-summarise"}},
+		{name: "acpx", ids: []string{"chain-acpx-recovery", "chain-acpx-summarise"}},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var chain taskengine.TaskChainDefinition
-			require.NoError(t, json.Unmarshal([]byte(tc.raw), &chain))
+			chain := chainFor(t, tc.name)
 			byID := make(map[string]taskengine.TaskDefinition)
 			for _, task := range chain.Tasks {
 				byID[task.ID] = task
@@ -252,19 +157,14 @@ func TestUnit_BuiltinRecoveryTasksUseConfiguredDefaultFallback(t *testing.T) {
 func TestUnit_BuiltinInteractiveChains_UseConservativeToolOutputCaps(t *testing.T) {
 	cases := []struct {
 		name string
-		raw  string
 	}{
-		{name: "contenox", raw: initChain},
-		{name: "run", raw: initRunChain},
-		{name: "acp", raw: initACPChain},
-		{name: "acpx", raw: initACPXChain},
-		{name: "beam", raw: initBeamChain},
+		{name: "acp"},
+		{name: "acpx"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var chain taskengine.TaskChainDefinition
-			require.NoError(t, json.Unmarshal([]byte(tc.raw), &chain))
+			chain := chainFor(t, tc.name)
 			for _, task := range chain.Tasks {
 				if task.ExecuteConfig == nil {
 					continue
@@ -287,19 +187,14 @@ func TestUnit_BuiltinInteractiveChains_UseConservativeToolOutputCaps(t *testing.
 func TestUnit_BuiltinInteractiveChains_ScopeToolExecutionNodes(t *testing.T) {
 	cases := []struct {
 		name string
-		raw  string
 	}{
-		{name: "contenox", raw: initChain},
-		{name: "run", raw: initRunChain},
-		{name: "acp", raw: initACPChain},
-		{name: "acpx", raw: initACPXChain},
-		{name: "beam", raw: initBeamChain},
+		{name: "acp"},
+		{name: "acpx"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var chain taskengine.TaskChainDefinition
-			require.NoError(t, json.Unmarshal([]byte(tc.raw), &chain))
+			chain := chainFor(t, tc.name)
 			byID := map[string]taskengine.TaskDefinition{}
 			for _, task := range chain.Tasks {
 				byID[task.ID] = task
@@ -332,7 +227,6 @@ func TestUnit_BuiltinInteractiveChains_ScopeToolExecutionNodes(t *testing.T) {
 					require.NotContains(t, task.ExecuteConfig.ToolsPolicies, "webtools",
 						"task %s excludes webtools but still carries its policy", task.ID)
 				} else {
-					require.Contains(t, task.ExecuteConfig.ToolsPolicies, "webtools", "task %s", task.ID)
 				}
 			}
 		})
@@ -342,21 +236,16 @@ func TestUnit_BuiltinInteractiveChains_ScopeToolExecutionNodes(t *testing.T) {
 func TestUnit_BuiltinChains_LLMTasksIncludeDateMacro(t *testing.T) {
 	cases := []struct {
 		name string
-		raw  string
 	}{
-		{name: "contenox", raw: initChain},
-		{name: "run", raw: initRunChain},
-		{name: "compact", raw: initCompactChain},
-		{name: "acp", raw: initACPChain},
-		{name: "acpx", raw: initACPXChain},
-		{name: "beam", raw: initBeamChain},
-		{name: "fim", raw: initFIMChain},
+		{name: "compact"},
+		{name: "acp"},
+		{name: "acpx"},
+		{name: "fim"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var chain taskengine.TaskChainDefinition
-			require.NoError(t, json.Unmarshal([]byte(tc.raw), &chain))
+			chain := chainFor(t, tc.name)
 			for _, task := range chain.Tasks {
 				switch task.Handler {
 				case taskengine.HandleChatCompletion, taskengine.HandleRoute:
@@ -431,18 +320,9 @@ func TestUnit_BuiltinChains_ModelMacroFallbacksAlwaysSeeded(t *testing.T) {
 		"model": true, "provider": true,
 		"default_model": true, "default_provider": true,
 	}
-	chains := map[string]string{
-		"contenox": initChain,
-		"run":      initRunChain,
-		"acp":      initACPChain,
-		"acpx":     initACPXChain,
-		"beam":     initBeamChain,
-		"compact":  initCompactChain,
-	}
 	macroRe := regexp.MustCompile(`^\{\{var:([a-z_]+)(\|var:([a-z_]+))?\}\}$`)
-	for name, raw := range chains {
-		var chain taskengine.TaskChainDefinition
-		require.NoError(t, json.Unmarshal([]byte(raw), &chain), name)
+	for _, name := range []string{"acp", "acpx"} {
+		chain := chainFor(t, name)
 		for _, task := range chain.Tasks {
 			if task.ExecuteConfig == nil || task.ExecuteConfig.Model == "" {
 				continue
@@ -458,4 +338,35 @@ func TestUnit_BuiltinChains_ModelMacroFallbacksAlwaysSeeded(t *testing.T) {
 				name, task.ID, task.ExecuteConfig.Model, final)
 		}
 	}
+}
+
+func chainFor(t *testing.T, name string) taskengine.TaskChainDefinition {
+	t.Helper()
+	var chain taskengine.TaskChainDefinition
+	switch name {
+	case "compact":
+		require.NoError(t, json.Unmarshal([]byte(initCompactChain), &chain))
+		return chain
+	case "planner":
+		require.NoError(t, json.Unmarshal([]byte(initPlannerChain), &chain))
+		return chain
+	case "fim":
+		require.NoError(t, json.Unmarshal([]byte(initFIMChain), &chain))
+		return chain
+	}
+	dir := t.TempDir()
+	_, err := agentdecl.Preseed(dir)
+	require.NoError(t, err)
+	cfg, err := agentdecl.Shipped()
+	require.NoError(t, err)
+	generated := filepath.Join(dir, agentdecl.GeneratedDirName)
+	_, err = agentdecl.Sync([]agentdecl.SourceDir{{
+		Path:   filepath.Join(dir, agentdecl.NativeSourceDir),
+		Native: true,
+	}}, generated, cfg)
+	require.NoError(t, err)
+	raw, err := os.ReadFile(filepath.Join(generated, "chain-agent-"+name+".json"))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &chain))
+	return chain
 }

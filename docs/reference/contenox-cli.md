@@ -23,18 +23,12 @@ Persistent flags on the root command (also shown under **Global Flags** on subco
 | `--context`                      | Context length hint for the tokenizer                                                                                             |
 | `--ollama`                       | Ollama base URL (default `http://127.0.0.1:11434`)                                                                                |
 | `--no-delete-models`             | Legacy compatibility flag; a no-op in the OSS runtime (model deletion is disabled). Defaults to **true**.                          |
-| `--chain <path>`                 | Chain JSON for injected `run` / chat when applicable                                                                              |
-| `--input <value>`                | Input string or `@file` (chat / bare run paths)                                                                                   |
 | `--trace`                        | Structured operation telemetry on stderr                                                                                          |
 | `--steps`                        | Print execution steps after the result                                                                                            |
 | `--think <level>`                | Set reasoning level for supported models: `auto`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`                              |
-| `--raw`                          | Print full structured output (e.g. entire chat JSON)                                                                              |
-| `--shell`                        | Enable `local_shell` tools (trusted environments only)                                                                             |
-| `--local-exec-allowed-dir <dir>` | Restrict local filesystem access and `local_shell` executable/script paths for this invocation                                    |
 | `--alt-model <name>`             | Alt model name (for chains referencing `{{var:alt_model}}`). Overrides `default-alt-model` config.                                  |
 | `--alt-provider <type>`          | Alt provider type (for chains referencing `{{var:alt_provider}}`). Overrides `default-alt-provider` config.                          |
 | `--max-tokens <N>`               | Response token cap (for chains referencing `{{var:max_tokens}}`). Overrides `default-max-tokens` config.                             |
-| `-e, --editor`                   | Open `$VISUAL`, then `$EDITOR`, then (inside VS Code's integrated terminal) `code --wait`, then `nano` to compose the prompt.     |
 
 ## Subcommands
 
@@ -47,41 +41,6 @@ contenox setup
 ```
 
 The wizard guides you through picking a provider (local Ollama, Ollama Cloud, OpenAI, Anthropic, Google Gemini, Vertex AI, AWS Bedrock, or self-hosted vLLM), entering an API key or base URL where needed, and setting your first default model. It needs a real terminal (reads answers from stdin) and will not guess a default from a closed or piped stdin.
-
-### `contenox` (bare — stateful `chat`)
-
-If the first token is **not** a reserved subcommand (`chat`, `init`, `run`, …), the CLI **prepends `chat`**. This starts or continues a stateful, session-backed conversation. It is the default, interactive mode.
-
-Running plain `contenox` with no prompt at all (and nothing piped on stdin) does not start a chat — it prints the version line and the full help text, then exits 0.
-
-The default chat chain is resolved by name: workspace `.contenox/chain-agent-contenox.json` wins when present, then `~/.contenox/chain-agent-contenox.json`, then the shipped copy in `~/.contenox/system/`. See [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) for the naming convention behind every shipped chain.
-
-```bash
-contenox "what can you do?"
-echo "summarise README.md" | contenox
-contenox --shell "list files here"
-contenox --local-exec-allowed-dir . "summarise the README"
-```
-
-### `contenox chat`
-
-Sends a message to the **active chat session** and prints the response. History is persisted across invocations in SQLite. This is the explicit version of the bare `contenox` command.
-
-```bash
-contenox chat "what can you do?"
-echo "summarise README.md" | contenox chat
-contenox chat --shell "list files here"
-contenox chat --attach ./screenshot.png "what is in this image?"
-```
-
-| Flag                             | Description                                                            |
-| -------------------------------- | ---------------------------------------------------------------------- |
-| `--trim N`                       | Only send last N messages from session history to the model (0 = all)  |
-| `--attach <path>`                | Attach an image to this message (repeatable). Routes the turn to a vision-capable model; a non-image file (sniffed from its bytes, not its extension) is rejected, and files over 10 MiB are refused. |
-| `--last N`                       | Print last N user/assistant turns after the reply (0 = only new reply) |
-| `--shell`                        | Enable `local_shell` tools                                              |
-| `--local-exec-allowed-dir <dir>` | Restrict local filesystem access and shell executable/script paths       |
-| `--auto`                         | Disable HITL prompts for this invocation. HITL is on by default.        |
 
 <h3 id="sessions"><code>contenox session</code></h3>
 
@@ -116,21 +75,6 @@ contenox session list --namespace <ns>   # sessions in a namespace (e.g. jetbrai
 ```
 
 A namespace is the session-name prefix before its generated id (e.g. `jetbrainsgoland`, `zed`, `default`). To recover a session an editor abandoned: find it with `session list --namespace <ns>`, then `session show <id>`.
-
-### `contenox run`
-
-Executes a chain non-interactively. Unlike `chat`, `run` does not use session history. It is for stateless, one-shot chain executions.
-
-```bash
-contenox run --chain .contenox/chain-nws.json --input-type chat "how is the weather?"
-contenox run --chain .contenox/my-chain.json --shell "refactor main.go"
-```
-
-- `--chain <path>`: Optional if `<resolved .contenox>/chain-agent-run.json` exists; otherwise required.
-- `--input-type <type>`: `string` (default), `chat`, `json`, `int` — see `contenox run --help`.
-- `--shell`: Enable shell execution for this invocation (use only in trusted environments).
-- `--auto`: Disable HITL approval prompts for non-interactive runs. Default is HITL on.
-- `--think` / `--trace` / `--steps`: Global flags (see table above).
 
 ### Workspace roots
 
@@ -388,27 +332,23 @@ contenox config set default-alt-model gemini-3.6-flash
 contenox config set default-alt-provider gemini
 contenox config set default-autocomplete-model qwen2.5-coder:7b
 contenox config set default-autocomplete-provider ollama
-contenox config set default-embed-model nomic-embed-text
-contenox config set default-embed-provider ollama
 contenox config set default-audio-model gemini-2.5-flash
 contenox config set default-audio-provider gemini
 contenox config set default-max-tokens 8192
 contenox config set default-think high
-contenox config set default-chain    .contenox/chain-agent-contenox.json
+contenox config set default-chain    .contenox/my-chain.json
 contenox config set hitl-policy-name hitl-policy-strict.json
 
 contenox config get default-model
 contenox config list
 ```
 
-Valid global keys: `default-model`, `default-provider`, `default-alt-model`, `default-alt-provider`, `default-autocomplete-model`, `default-autocomplete-provider`, `default-embed-model`, `default-embed-provider`, `default-audio-model`, `default-audio-provider`, `default-max-tokens`, `default-think`, `telemetry-enabled`, `update-check`, `opt-in-beta`, `default-mission-agent`, `default-mission-policy`, `default-oracle-chain`, `default-oracle-policy`, `oracle-approves-tool-calls`, `fleet-max-parallel`. `opt-in-beta` (`true`/`false`) enables the beta features — the `goja` and `shell_session` toolsets, the agent roster, and the [event tier](/docs/guide/events/) — which are otherwise absent entirely.
+Valid global keys: `default-model`, `default-provider`, `default-alt-model`, `default-alt-provider`, `default-autocomplete-model`, `default-autocomplete-provider`, `default-audio-model`, `default-audio-provider`, `default-max-tokens`, `default-think`, `telemetry-enabled`, `update-check`, `opt-in-beta`, `default-mission-agent`, `default-mission-policy`, `default-oracle-chain`, `default-oracle-policy`, `oracle-approves-tool-calls`, `fleet-max-parallel`. `opt-in-beta` (`true`/`false`) enables the beta features — the `shell_session` toolset, the agent roster, and the [event tier](/docs/guide/events/) — which are otherwise absent entirely.
 
 Valid workspace keys: `default-chain`, `hitl-policy-name`.
 
 | Key | Description |
 |---|---|
-| `default-embed-model` | Embedding model used by `contenox index` / `contenox search`. Unset falls back to `default-model`, which embeds only on some providers. |
-| `default-embed-provider` | Provider type for the embedding model, independent from `default-provider`. Unset uses `default-provider`. |
 | `default-audio-model` | Model preferred for requests carrying audio attachments, independent from `default-model`. Unset falls back to `default-model`; audio requests resolve only to audio-capable models either way. |
 | `default-audio-provider` | Provider type for the audio model, independent from `default-provider`. Unset uses `default-provider`. |
 | `default-mission-agent` | Declared agent the ACP `/mission <intent>` slash command falls back to when none is named. `contenox mission fire` always requires the agent name as a positional argument, so this key does not affect it. |
@@ -581,33 +521,6 @@ contenox events prune --keep-days 30      # drop whole day-partitions older than
 
 `dispatch` runs in the foreground and prints one line per firing; there is no daemon — keep it alive with tmux, systemd, or `nohup`. Each (trigger, event) pair fires at most once, including across restarts — with one recovery: a claim left `running` for two hours by a dead host is taken over on the next claim attempt and fired again. A chain failure is recorded on the firing and never stops the loop; events past hop 4 are refused so triggers cannot loop forever. `firings` lists the durable claim records both firing paths write — [the guide](/docs/guide/events/#inspecting-firings-events-firings) reads the statuses. `prune` is never automatic: retention runs only when you invoke it, as an O(1) table drop per day, leaving the dispatch cursor and firing records untouched.
 
-### `contenox index [dir]` / `contenox search <question>`
-
-Build a semantic index over a workspace, then ask it questions with file:line-range citations. The same index backs the agent's `workspace_search` tool.
-
-```bash
-contenox config set default-embed-model nomic-embed-text  # needed once; most chat models cannot embed
-
-contenox index                          # build/refresh the index for the current directory
-contenox index ~/src/project
-contenox index --force                  # re-embed every file, not just changed ones
-contenox index --yes                    # skip the cost confirmation (scripts, CI)
-
-contenox search "where is retry backoff configured"
-contenox search "how does the approval flow work" --top 3
-contenox search "session storage" --json | jq -r '.[].path'
-```
-
-| Flag (command)     | Description                                                                          |
-| -------------------- | ------------------------------------------------------------------------------------- |
-| `--force` (`index`) | Re-embed every file instead of only the changed ones                                 |
-| `--yes` (`index`)   | Skip the cost confirmation (required when stdin is not a terminal)                   |
-| `--top` (`search`)  | Maximum hits to return (default 8, ceiling 50)                                        |
-| `--json` (`search`) | Emit the hits as JSON for scripting (empty result is `[]`, never `null`)              |
-| `--dir` (`search`)  | Workspace directory to search (default: current directory)                           |
-
-Indexing costs one embedding call per chunk, so `contenox index` always plans and prints the cost — file, chunk, and embed-call counts — before spending it, and asks for confirmation unless `--yes` is passed or nothing changed. Refreshes are incremental: only changed files are re-embedded, and files that disappeared drop their chunks for free. `contenox search` reads only the existing index — it never touches the filesystem live, and a hit whose file changed since indexing is marked `STALE` rather than served as current.
-
 ### `contenox workspace`
 
 Grant or revoke **workspace roots** — the durable half of the one allowlist that bounds where a session may run. A granted root joins the launch directory and this run's `--workspace-root` flags to form the allowlist described under [Workspace roots](#workspace-roots); the three sources union, and a directory outside all of them is refused.
@@ -637,7 +550,7 @@ A grant that can no longer be honoured — one pointing inside the control plane
 
 ### `contenox shell-env`
 
-Manage the global environment variables contenox injects into the shells it spawns (`local_shell`, the `shell_session` PTY, and the interactive terminal), layered on top of the environment scrub so an injected value always wins. See [Least-privilege shell environment](/docs/guide/environment-scrubbing/) for the full design and current status.
+Manage the global environment variables contenox injects into the shells it spawns (`local_shell`, forwarded to the connected client's terminal), layered on top of the environment scrub so an injected value always wins. See [Least-privilege shell environment](/docs/guide/environment-scrubbing/) for the full design and current status.
 
 ```bash
 contenox shell-env set HTTP_PROXY=http://proxy:3128 GOCACHE=/var/cache/go
@@ -709,7 +622,7 @@ contenox state show <reqID> --raw   # print the raw captured state as JSON
 
 ### `contenox cache clear`
 
-Clears cached backend model lists so the next `chat`/`run` refetches them from the live backends. Use it after adding models to a backend that the runtime hasn't picked up yet.
+Clears cached backend model lists so they're refetched from the live backends next time they're needed. Use it after adding models to a backend that the runtime hasn't picked up yet.
 
 ```bash
 contenox cache clear
@@ -741,7 +654,7 @@ contenox acpx                # headless / untrusted-driver profile
 | `--setup`            | Run the interactive setup wizard to configure provider and model, then exit                    |
 | `--workspace-id <id>` | Workspace ID for new ACP sessions (default: the stable workspace from `~/.contenox/workspace.id`, same as the CLI) |
 
-The chain each profile loads is overridable via `CONTENOX_ACP_CHAIN_PATH` (acp) and `CONTENOX_ACPX_CHAIN_PATH` (acpx). See the [editor integration guides](/docs/integrations/editors/zed/) for client setup.
+Each profile's chain resolves in order: an operator copy at `~/.contenox/<name>.json`, then a compiled `~/.contenox/.generated/<name>.json`, then the shipped `~/.contenox/system/<name>.json` — first match wins. `CONTENOX_ACP_CHAIN_PATH` (acp) and `CONTENOX_ACPX_CHAIN_PATH` (acpx) override this for one run. See the [editor integration guides](/docs/integrations/editors/zed/) for client setup.
 
 ### `contenox serve [path]` / `contenox beam [path]`
 

@@ -83,7 +83,7 @@ func TestUnit_ExecuteToolCalls_WriteFileResultCompactButEventCarriesDiff(t *test
 
 	sink := &captureTaskEventSink{}
 	constructorCtx := taskengine.WithTaskEventSink(context.Background(), sink)
-	exec, err := taskengine.NewExec(constructorCtx, &mockModelRepo{}, localtools.NewLocalFSTools(dir, nil), libtracker.NoopTracker{})
+	exec, err := taskengine.NewExec(constructorCtx, &mockModelRepo{}, localtools.NewLocalFSToolsWith(dir, nil, hostFileIO{}, localtools.LocalFSToolsName, nil), libtracker.NoopTracker{})
 	require.NoError(t, err)
 
 	chainCtx := &taskengine.ChainContext{Tools: map[string]taskengine.ToolWithResolution{
@@ -285,4 +285,12 @@ func TestUnit_ExecuteToolCalls_ReportsRepeatedSameToolAndArguments(t *testing.T)
 	changes := rt.changesFor("tool_call")
 	require.Contains(t, changes, recordedChange{id: "repeat_index", data: 2})
 	require.Contains(t, changes, recordedChange{id: "repeated_call", data: true})
+}
+
+type hostFileIO struct{}
+
+func (hostFileIO) ReadFile(_ context.Context, path string) ([]byte, error) { return os.ReadFile(path) }
+
+func (hostFileIO) WriteFile(_ context.Context, path string, data []byte) error {
+	return os.WriteFile(path, data, 0o644)
 }

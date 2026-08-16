@@ -15,7 +15,7 @@ import (
 const ChainSchemaURL = "https://contenox.com/schema/task-chain.schema.json"
 
 // EmitChain renders one agent as a task chain, parameterizing the shipped
-// chain-run topology so a declared agent rides the same tool loop, retry
+// topology so a declared agent rides the same tool loop, retry
 // behaviour and test coverage as a native one.
 //
 // A single declaration states one prompt and one tool list, so this emits one
@@ -162,7 +162,7 @@ func recoveryPair(ir *AgentIR, cfg Config, id, terminalID string) []taskengine.T
 			Description:       "Bounded second attempt after the main stage exhausted its rounds or failed.",
 			Handler:           taskengine.HandleChatCompletion,
 			SystemInstruction: expandLoopMacros(systemInstruction(ir), id, cfg),
-			ExecuteConfig:     execConfig(ir, cfg, id, true),
+			ExecuteConfig:     withAltRouting(execConfig(ir, cfg, id, true), cfg),
 			InputVar:          agent,
 			Transition: taskengine.TaskTransition{
 				OnFailure: terminalID,
@@ -200,7 +200,7 @@ func terminalTask(id string, cfg Config, inputVar string) taskengine.TaskDefinit
 		ID:                id,
 		Description:       "States what was attempted and why it stopped.",
 		Handler:           taskengine.HandleChatCompletion,
-		SystemInstruction: "Report what was attempted and why it could not be completed. Be specific and brief; do not retry.",
+		SystemInstruction: "Current date: {{date}}.\n\nReport what was attempted and why it could not be completed. Be specific and brief; do not retry.",
 		ExecuteConfig:     summariseConfig(cfg),
 		InputVar:          inputVar,
 		Transition: taskengine.TaskTransition{
@@ -282,8 +282,8 @@ func appendToolSet(sets []string, name string) []string {
 
 func summariseConfig(cfg Config) *taskengine.LLMExecutionConfig {
 	return &taskengine.LLMExecutionConfig{
-		Model:             cfg.Routing.Model,
-		Provider:          cfg.Routing.Provider,
+		Model:             altModel(cfg),
+		Provider:          altProvider(cfg),
 		Think:             cfg.Chain.Think,
 		MaxTokensTemplate: cfg.Chain.MaxTokens,
 		PassClientsTools:  false,
@@ -332,4 +332,27 @@ func systemInstruction(ir *AgentIR) string {
 	}
 	b.WriteString("\n\nHost: os={{host:os}} arch={{host:arch}}")
 	return b.String()
+}
+
+func altModel(cfg Config) string {
+	if cfg.Routing.AltModel != "" {
+		return cfg.Routing.AltModel
+	}
+	return cfg.Routing.Model
+}
+
+func altProvider(cfg Config) string {
+	if cfg.Routing.AltProvider != "" {
+		return cfg.Routing.AltProvider
+	}
+	return cfg.Routing.Provider
+}
+
+func withAltRouting(ec *taskengine.LLMExecutionConfig, cfg Config) *taskengine.LLMExecutionConfig {
+	if ec == nil || cfg.Routing.PinModel {
+		return ec
+	}
+	ec.Model = altModel(cfg)
+	ec.Provider = altProvider(cfg)
+	return ec
 }

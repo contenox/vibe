@@ -22,7 +22,7 @@ func TestUnit_ReadFile_TruncateNamesExactNextLineAndPages(t *testing.T) {
 	// Six 6-char lines, no trailing newline.
 	writeFile(t, dir, "big.txt", "line01\nline02\nline03\nline04\nline05\nline06")
 
-	h := localtools.NewLocalFSTools(dir, nil)
+	h := localtools.NewLocalFSToolsForTest(dir, nil)
 	// _max_output_bytes=20 fits exactly three lines ("line01\nline02\nline03").
 	ctx := taskengine.WithToolsArgs(context.Background(), localtools.LocalFSToolsName, map[string]string{
 		"_max_output_bytes": "20",
@@ -56,7 +56,7 @@ func TestUnit_ReadFile_OverReadCapNamesNextStep(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "huge.txt", strings.Repeat("abcdefgh\n", 300)) // ~2.6 KiB
 
-	h := localtools.NewLocalFSTools(dir, nil)
+	h := localtools.NewLocalFSToolsForTest(dir, nil)
 	ctx := taskengine.WithToolsArgs(context.Background(), localtools.LocalFSToolsName, map[string]string{
 		"_max_read_bytes": "100",
 	})
@@ -78,7 +78,7 @@ func TestUnit_Severity_RecoverableMatrix(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "blob.bin"), append([]byte("\x00\x01\x02"), make([]byte, 100)...), 0o644))
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "sub"), 0o755))
 
-	h := localtools.NewLocalFSTools(dir, nil)
+	h := localtools.NewLocalFSToolsForTest(dir, nil)
 	ctx := context.Background()
 
 	cases := []struct {
@@ -91,7 +91,6 @@ func TestUnit_Severity_RecoverableMatrix(t *testing.T) {
 		{"binary refusal", "read_file", map[string]any{"path": "blob.bin"}},
 		{"list on a file", "list_dir", map[string]any{"path": "text.txt"}},
 		{"read a directory", "read_file", map[string]any{"path": "sub"}},
-		{"missing stat", "stat_file", map[string]any{"path": "gone.txt"}},
 		{"unknown arg", "read_file", map[string]any{"path": "text.txt", "bogus": true}},
 	}
 	for _, c := range cases {
@@ -117,28 +116,6 @@ func TestUnit_Severity_DenialIsRecoverable(t *testing.T) {
 }
 
 // TestUnit_DidYouMean_SuggestsSiblings pins that a missing path suggests similar sibling names.
-func TestUnit_DidYouMean_SuggestsSiblings(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "README.md", "docs\n")
-	writeFile(t, dir, "main.go", "package main\n")
-
-	h := localtools.NewLocalFSTools(dir, nil)
-	ctx := context.Background()
-
-	for _, tool := range []string{"read_file", "stat_file"} {
-		_, err := execTool(t, ctx, h, tool, map[string]any{"path": "readme.md"})
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "Did you mean", "%s should suggest siblings", tool)
-		require.Contains(t, err.Error(), "README.md", "%s should name the close sibling", tool)
-	}
-
-	require.NoError(t, os.Mkdir(filepath.Join(dir, "internal"), 0o755))
-	_, err := execTool(t, ctx, h, "list_dir", map[string]any{"path": "internl"})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "Did you mean")
-	require.Contains(t, err.Error(), "internal")
-}
-
 // TestUnit_Sed_NoMatchSuggestsAndDoesNotMutate pins that a no-match sed suggests the nearest lines and never mutates the file.
 func TestUnit_Sed_NoMatchSuggestsAndDoesNotMutate(t *testing.T) {
 	ctx, tools, dir := setupFSReadGuard(t)

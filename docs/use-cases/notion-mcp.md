@@ -29,9 +29,7 @@ contenox mcp auth notion
 
 ## Recipe 1: List recent pages
 
-```bash
-contenox run "Use the Notion MCP tools to list my recent Notion pages on the topic software development."
-```
+Ask for your recent Notion pages on a topic, and the model calls Notion's search tool and reports back.
 
 **Example output:**
 
@@ -44,11 +42,7 @@ contenox run "Use the Notion MCP tools to list my recent Notion pages on the top
 
 ## Recipe 2: Create a page with scaffolded content
 
-```bash
-contenox run "Use the Notion MCP tools to create a Notion page and scaffold an article on AI usage in software development."
-```
-
-The model calls `create_page`, writes the title, and populates the body with a structured outline covering introduction, key benefits, tooling, challenges, and conclusion — returning the live URL.
+Ask it to create a page and scaffold an article on a topic. The model calls `create_page`, writes the title, and populates the body with a structured outline covering introduction, key benefits, tooling, challenges, and conclusion — returning the live URL.
 
 **Example output:**
 
@@ -59,27 +53,13 @@ The model calls `create_page`, writes the title, and populates the body with a s
 
 ## Recipe 3: Search and summarize
 
-```bash
-contenox run "Use the Notion MCP tools to search my recent Notion pages for 'roadmap' and give me a bullet-point summary."
-```
-
-The model calls `search_pages`, fetches matching content, and summarizes it inline — no copy-pasting required.
-
----
-
-## Recipe 4: Pipe a draft into Notion
-
-```bash
-cat my-draft.md | contenox run "Use the Notion MCP tools to create a Notion page with this content, title it 'Draft: $(date +%F)'."
-```
-
-Combine stdin piping with Notion write access to push any local file directly into your workspace.
+Ask it to search your recent pages for a term and summarize. The model calls `search_pages`, fetches matching content, and summarizes it inline — no copy-pasting required.
 
 ---
 
 ## How it works
 
-These recipes work with `contenox run`. The default run chain (`.contenox/chain-agent-run.json`) is configured with `"tools": ["*"]`, so registered MCP servers such as Notion are available to the model automatically.
+Any chain or agent whose tool allowlist includes the server is handed its tools automatically:
 
 ```json
 {
@@ -95,11 +75,7 @@ These recipes work with `contenox run`. The default run chain (`.contenox/chain-
 ```
 
 - `tools: ["*"]` — exposes all registered MCP servers to the model. Add `"!name"` entries to exclude specific servers (e.g. `["*", "!filesystem"]`).
-- A bare `contenox "..."` command is session-backed chat (injected as `chat`) and uses `chain-agent-contenox.json`; only `contenox run` is the stateless path that uses `.contenox/chain-agent-run.json`.
 - The task engine handles the full tool-call loop automatically: model calls a tool → result appended to history → model continues.
-
-> **Tip:**
-> Add `--trace` to watch every Notion API call, its arguments, and the raw results in real time.
 
 ---
 
