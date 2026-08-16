@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -139,18 +140,25 @@ func Sync(sourceDirs []SourceDir, generatedDir string, cfg Config, opts ...SyncO
 	for _, src := range sources {
 		path := src.path
 		res := SyncResult{Source: path}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			res.Action, res.Reason = ActionRefused, err.Error()
-			results = append(results, res)
-			continue
-		}
-		// A native declaration is the format itself, not a file to identify.
 		var ir *AgentIR
-		if src.native {
-			ir, err = ParseClaudeCode(path, data, cfg)
+		var tree *AgentTree
+		var err error
+		if src.tree {
+			tree, err = LoadTree(path, cfg)
+			if err == nil {
+				ir = tree.MergedIR()
+			}
 		} else {
-			ir, err = Parse(path, data, cfg)
+			var data []byte
+			data, err = os.ReadFile(path)
+			if err == nil {
+				// A native declaration is the format itself, not a file to identify.
+				if src.native {
+					ir, err = ParseClaudeCode(path, data, cfg)
+				} else {
+					ir, err = Parse(path, data, cfg)
+				}
+			}
 		}
 		if err != nil {
 			res.Action, res.Reason = ActionRefused, err.Error()
@@ -176,7 +184,12 @@ func Sync(sourceDirs []SourceDir, generatedDir string, cfg Config, opts ...SyncO
 			results = append(results, res)
 			continue
 		}
-		chain, err := EmitChain(ir, agentCfg)
+		var chain *taskengine.TaskChainDefinition
+		if src.tree {
+			chain, err = EmitTree(tree, agentCfg)
+		} else {
+			chain, err = EmitChain(ir, agentCfg)
+		}
 		if err != nil {
 			res.Action, res.Reason = ActionRefused, err.Error()
 			results = append(results, res)
@@ -198,7 +211,11 @@ func Sync(sourceDirs []SourceDir, generatedDir string, cfg Config, opts ...SyncO
 
 		// The generated filename keeps the chain-agent- prefix because
 		// chainagents.eligible reads the basename, not the id.
-		stem := chain.ID
+		// The shipped files are chain-agent-acp.json for id chain-acp, so the
+		// stem drops the prefix the id carries. Without this a converted agent
+		// lands at chain-agent-chain-acp.json and chainagents, which reads the
+		// basename, stops recognising it.
+		stem := strings.TrimPrefix(chain.ID, "chain-")
 		rec := syncRecord{
 			SourcePath:   path,
 			SourceSHA256: ir.Source.SHA256,
@@ -287,6 +304,9 @@ func retireAll(generatedDir string) error {
 type sourceFile struct {
 	path   string
 	native bool
+	// tree marks a DIRECTORY that holds an agent.md: one chain for the whole
+	// subtree, rather than one per .md inside it.
+	tree bool
 }
 
 func collectSources(dirs []SourceDir) ([]sourceFile, error) {
@@ -297,7 +317,18 @@ func collectSources(dirs []SourceDir) ([]sourceFile, error) {
 			if walkErr != nil {
 				return walkErr
 			}
-			if entry.IsDir() || !strings.EqualFold(filepath.Ext(p), ".md") {
+			// A directory holding an agent.md is a TREE: the whole subtree is
+			// one chain, so it is collected here and not descended into. Without
+			// the skip, every declaration inside it would also be read as a
+			// standalone agent and emit a chain of its own.
+			if entry.IsDir() {
+				if _, err := os.Stat(filepath.Join(p, AgentFilename)); err == nil {
+					found = append(found, sourceFile{path: p, native: native, tree: true})
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if !strings.EqualFold(filepath.Ext(p), ".md") {
 				return nil
 			}
 			// A README beside the declarations is documentation — contenox init

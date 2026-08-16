@@ -107,6 +107,11 @@ func ParseClaudeCode(path string, data []byte, cfg Config) (*AgentIR, error) {
 	ir.Think = strings.TrimSpace(stringField(fields, "effort"))
 	delete(fields, "effort")
 
+	// Meaningful only on a router (a directory with children); a leaf that
+	// carries it is reported as unmapped rather than silently ignored.
+	ir.DefaultBranch = strings.TrimSpace(stringField(fields, "default"))
+	delete(fields, "default")
+
 	if turns, ok := intField(fields, "maxTurns"); ok {
 		ir.Budgets.MaxTurns = &turns
 	}

@@ -241,12 +241,17 @@ func TestUnit_Preseed_EstablishesTheConvention(t *testing.T) {
 	if err != nil {
 		t.Fatalf("preseed: %v", err)
 	}
-	if len(created) != len(agentdecl.Preseeded) {
-		t.Errorf("created %d files, want %d", len(created), len(agentdecl.Preseeded))
+	// Every flat entry, PLUS the tree example — which is files rather than a
+	// list, so it is checked by name below rather than by count.
+	if len(created) < len(agentdecl.Preseeded) {
+		t.Errorf("created %d files, want at least %d", len(created), len(agentdecl.Preseeded))
 	}
 	for _, rel := range []string{
 		agentdecl.ConfigFilename,
 		filepath.Join(agentdecl.NativeSourceDir, "reviewer.md"),
+		// The convention this command recommends is now the convention it ships.
+		filepath.Join(agentdecl.NativeSourceDir, "triage", agentdecl.AgentFilename),
+		filepath.Join(agentdecl.NativeSourceDir, "triage", "code", agentdecl.AgentFilename),
 	} {
 		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
 			t.Errorf("%s was not seeded: %v", rel, err)
