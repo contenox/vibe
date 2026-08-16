@@ -1,6 +1,7 @@
 ---
-title: Guardrails — scoping what an agent may do
+title: "Scoping what an agent may do"
 description: Six declarations decide what an LLM can reach, touch, spend and act on, and which of those need a human first. Each is a file, each fails closed, and none of them depends on the model behaving.
+order: 2
 ---
 
 # Guardrails — scoping what an agent may do
@@ -16,7 +17,7 @@ each is a file you write, diff and review like any other change.
 |---|---|
 | Which model answers | `model:` in the [agent declaration](/docs/guide/agents/); `execute_config.model` / `provider` in an authored chain |
 | Which tools exist at all | `tools:` in the declaration; `execute_config.tools` allowlist in an authored chain |
-| Where it may act | workspace roots, and the [sandbox](/docs/guide/agent-sandbox/) |
+| Where it may act | workspace roots, and the [sandbox](/docs/guide/confinement/sandbox/) |
 | What runs, asks, or is refused | the envelope — [HITL policy](/docs/guide/hitl/) |
 | What content gets through | a `route` task — [moderation gate](/docs/use-cases/moderation-gate/) |
 | What it may spend | `compute` bounds in the envelope |
@@ -57,9 +58,9 @@ directory, roots granted with `contenox workspace add`, and any passed for that
 run. Never the runtime's own config, database or policies.
 
 Every agent-reachable shell gets a
-[scrubbed environment](/docs/guide/environment-scrubbing/), so credentials in
+[scrubbed environment](/docs/guide/confinement/environment/), so credentials in
 your shell are not credentials in the agent's. The reasoning is in the
-[threat model](/docs/guide/agent-threat-model/): the process on the other end of
+[threat model](/docs/guide/confinement/why/): the process on the other end of
 an external agent connection is not one you can trust.
 
 ## 4. What runs, asks, or is refused
@@ -124,7 +125,7 @@ instructions.
 ## Next
 
 - [HITL policies](/docs/guide/hitl/) — the envelope format in full.
-- [The agent sandbox](/docs/guide/agent-sandbox/) — the filesystem and exec fence.
-- [The threat model](/docs/guide/agent-threat-model/) — why the fence exists.
+- [The agent sandbox](/docs/guide/confinement/sandbox/) — the filesystem and exec fence.
+- [The threat model](/docs/guide/confinement/why/) — why the fence exists.
 - [Nested permission bomb](/docs/use-cases/nested-permission-bomb/) — why
   inheriting your own permissions is the bug.

@@ -1,7 +1,3 @@
-// inbox_cmd.go holds the `contenox inbox` verbs: a thin read/ack surface over
-// internal/services/operatorinbox — durable reports (and blocker questions)
-// that reached no live session to answer them. Distinct from `contenox
-// approvals`, the live ask queue still waiting on a verdict.
 package contenoxcli
 
 import (
@@ -70,8 +66,6 @@ func init() {
 	rootCmd.AddCommand(inboxCmd)
 }
 
-// openInboxService opens the shared database and returns an
-// operatorinbox.Service over it.
 func openInboxService(cmd *cobra.Command) (io.Closer, operatorinbox.Service, error) {
 	dbPath, err := resolveDBPath(cmd)
 	if err != nil {
@@ -218,7 +212,6 @@ func renderInboxItem(w io.Writer, it *operatorinbox.Item, now time.Time) {
 	fmt.Fprintf(w, "\nFull mission record: contenox mission show %s\n", it.MissionID)
 }
 
-// inboxReasonLabel renders operatorinbox.Reason in plain words.
 func inboxReasonLabel(r operatorinbox.Reason) string {
 	switch r {
 	case operatorinbox.ReasonOperatorFired:

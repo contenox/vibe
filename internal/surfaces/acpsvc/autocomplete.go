@@ -17,11 +17,7 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-// extMethodAutocomplete is the FIM (fill-in-the-middle) extension method. It
-// is read-only (a single completion, no tools), so it never enters the
-// HITL/permission path, and it never sets PromptRequest.SessionID, so it
-// never touches the session
-// transcript.
+// extMethodAutocomplete is the fill-in-the-middle extension method.
 const extMethodAutocomplete = "_contenox/autocomplete"
 
 type autocompleteParams struct {
@@ -38,11 +34,6 @@ type autocompleteResult struct {
 	Completion string `json:"completion"`
 }
 
-// handleAutocomplete answers a `_contenox/autocomplete` request. ctx is the
-// per-request context libacp derives for every inbound request (see
-// conn.go's dispatch); a "$/cancel_request" for this request's id cancels it
-// the same way it would any other extension request, so a superseded
-// keystroke aborts the in-flight completion without extra bookkeeping here.
 func (t *Transport) handleAutocomplete(ctx context.Context, params json.RawMessage) (json.RawMessage, *libacp.Error) {
 	if t.deps.Engine == nil {
 		if lerr, ok := errSetupRequired().(*libacp.Error); ok {
@@ -66,8 +57,7 @@ func (t *Transport) handleAutocomplete(ctx context.Context, params json.RawMessa
 	res, err := t.autocomplete(ctx, p)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-			// A superseded keystroke: the client already stopped waiting via
-			// $/cancel_request. Answer cleanly rather than as an error.
+			// A superseded keystroke: answer cleanly rather than as an error.
 			out, _ := json.Marshal(autocompleteResult{})
 			return out, nil
 		}
@@ -80,11 +70,8 @@ func (t *Transport) handleAutocomplete(ctx context.Context, params json.RawMessa
 	return out, nil
 }
 
-// autocomplete runs one FIM completion: build the
-// fim_prefix/fim_suffix/fim_middle prompt,
-// resolve the completion model (independent of the chat model), run it
-// through the FIM chain, and fall back to the chat-default model once if an
-// auto-routed guess failed.
+// autocomplete runs one FIM completion, falling back to the chat-default model
+// once if an auto-routed guess failed.
 func (t *Transport) autocomplete(ctx context.Context, p autocompleteParams) (autocompleteResult, error) {
 	maxTokens := p.MaxTokens
 	if maxTokens <= 0 {
@@ -103,10 +90,8 @@ func (t *Transport) autocomplete(ctx context.Context, p autocompleteParams) (aut
 	return autocompleteResult{Completion: strings.TrimRightFunc(extractAssistantText(resp.Output), unicode.IsSpace)}, nil
 }
 
-// autocompleteAgent returns the agentservice.Agent used for FIM completions.
-// Production builds a fresh, session-less agent scoped to no contenox
-// session (so PromptRequest.SessionID stays empty and nothing is persisted);
-// acAgent lets tests substitute a fake without a real engine/DB.
+// autocompleteAgent returns the session-less agentservice.Agent used for FIM
+// completions.
 func (t *Transport) autocompleteAgent() agentservice.Agent {
 	if t.acAgent != nil {
 		return t.acAgent
@@ -119,10 +104,8 @@ func (t *Transport) autocompleteAgent() agentservice.Agent {
 	})
 }
 
-// promptAutocomplete runs the FIM chain once. Bounded by a 20s timeout on
-// top of ctx, so a stuck
-// completion cannot outlive a reasonable keystroke-to-suggestion budget; ctx
-// cancellation (a superseded request) still wins immediately either way.
+// promptAutocomplete runs the FIM chain once, bounded by a 20s timeout on top of
+// ctx.
 func (t *Transport) promptAutocomplete(
 	ctx context.Context,
 	ag agentservice.Agent,
@@ -131,9 +114,8 @@ func (t *Transport) promptAutocomplete(
 ) (*agentservice.PromptResponse, error) {
 	execCtx, cancel := context.WithTimeout(libtracker.WithNewRequestID(ctx), 20*time.Second)
 	defer cancel()
-	// SessionID is intentionally left empty: agentservice.Prompt only persists
-	// to the chat transcript when it is set (agent.go's `if req.SessionID != ""`
-	// guards). No session, no ToolsAllowlist: nothing here can trigger HITL.
+	// SessionID stays empty: agentservice.Prompt only persists to the transcript
+	// when it is set. No session and no ToolsAllowlist, so nothing triggers HITL.
 	return ag.Prompt(execCtx, agentservice.PromptRequest{
 		Input:        prompt,
 		Chain:        t.deps.FIMChainRegistry.Default(),
@@ -142,11 +124,8 @@ func (t *Transport) promptAutocomplete(
 }
 
 // autocompleteTemplateVars resolves the completion model, in priority order:
-// explicit request params, the operator-configured default (clikv), then an
-// auto-routed guess (the chat model if it already looks like a FIM/code
-// model, else a discovered mistral backend). autoRouted reports the last
-// case, so the caller knows a failure is worth retrying against the plain
-// chat-default vars rather than surfacing immediately.
+// request params, the configured default, then an auto-routed guess. autoRouted
+// reports the last case, whose failure is worth one retry.
 func (t *Transport) autocompleteTemplateVars(
 	ctx context.Context,
 	p autocompleteParams,
@@ -179,18 +158,12 @@ func (t *Transport) autocompleteTemplateVars(
 	return vars, false
 }
 
-// defaultAutocompleteTemplateVars is the chat-default vars (model/provider
-// come from the transport's live /model /provider selection, not any
-// session) with max_tokens pinned to this request's budget.
 func (t *Transport) defaultAutocompleteTemplateVars(maxTokens int) map[string]string {
 	vars := t.chainTemplateVars(nil)
 	vars["max_tokens"] = fmt.Sprintf("%d", maxTokens)
 	return vars
 }
 
-// configuredAutocompleteModel reads the operator-set autocomplete
-// model/provider from the shared clikv keys, so a setting made on one surface
-// carries over to the other.
 func (t *Transport) configuredAutocompleteModel(ctx context.Context) (string, string, bool) {
 	if t.deps.DB == nil {
 		return "", "", false
@@ -201,9 +174,7 @@ func (t *Transport) configuredAutocompleteModel(ctx context.Context) (string, st
 	return provider, model, provider != "" || model != ""
 }
 
-// preferredAutocompleteModel guesses a completion model when none is
-// configured: the chat-default model if it already looks like a FIM/code
-// model, else the first registered mistral backend's FIM model.
+// preferredAutocompleteModel guesses a completion model when none is configured.
 func (t *Transport) preferredAutocompleteModel(ctx context.Context) (string, string, bool) {
 	if isCodeAutocompleteModel(t.provider(), t.model()) {
 		return t.provider(), t.model(), true
@@ -224,9 +195,6 @@ func (t *Transport) preferredAutocompleteModel(ctx context.Context) (string, str
 	return "", "", false
 }
 
-// isCodeAutocompleteModel reports whether provider/model already looks like
-// a FIM/code-completion model, so the chat default can double as the
-// autocomplete default without a separate configured one.
 func isCodeAutocompleteModel(provider, model string) bool {
 	if !strings.EqualFold(strings.TrimSpace(provider), "mistral") {
 		return false
@@ -235,8 +203,6 @@ func isCodeAutocompleteModel(provider, model string) bool {
 	return strings.Contains(model, "fim") || strings.Contains(model, "codestral") || strings.Contains(model, "code")
 }
 
-// extractAssistantText pulls the completion text out of a chain's final
-// output: a bare string, or the last assistant message of a ChatHistory.
 func extractAssistantText(output any) string {
 	switch v := output.(type) {
 	case string:

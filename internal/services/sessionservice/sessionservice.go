@@ -225,7 +225,6 @@ func (s *service) EnsureDefault(ctx context.Context, identity string) (string, e
 	return newID, nil
 }
 
-// setKV writes id as a JSON string to the KV table using the given executor.
 func (s *service) setKV(ctx context.Context, exec libdb.Exec, id string) error {
 	raw, err := json.Marshal(id)
 	if err != nil {

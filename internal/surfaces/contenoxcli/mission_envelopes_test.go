@@ -49,10 +49,9 @@ func TestUnit_MissionEnvelopes_LookupResolvesAndRefusesTraversal(t *testing.T) {
 	}
 }
 
-// TestUnit_EnvelopeSummary_StatesCharacter asserts the one-line sketch names the fall-through, the tool-call ceiling, and who may answer a unit's questions.
-// The ceiling carries "declared, not enforced": maxToolCalls' one enforcement
-// seam is the unattended permission answerer, which no shipped host wires, so
-// the picker must not assert a bound the host does not hold.
+// TestUnit_EnvelopeSummary_StatesCharacter asserts the one-line sketch names
+// the fall-through, the tool-call ceiling, and who may answer a unit's
+// questions.
 func TestUnit_EnvelopeSummary_StatesCharacter(t *testing.T) {
 	t.Parallel()
 

@@ -1,9 +1,7 @@
-// Package missionservice stores mission records: the durable,
-// agent-reportable half of the fleet manager. An
-// operator fires a one-line intent at a declared agent; the resulting unit
-// runs unattended inside a permission envelope (a named HITL policy bound to
-// the mission) and reports back through tools it holds only while on the
-// mission. One mission binds exactly one session and one instance.
+// Package missionservice stores mission records: the durable, agent-reportable
+// half of the fleet manager. A unit runs unattended inside a permission envelope
+// and reports back through tools it holds only while on the mission. One mission
+// binds exactly one session and one instance.
 package missionservice
 
 import (
@@ -302,7 +300,6 @@ func (s *service) store() runtimetypes.Store {
 	return runtimetypes.New(s.db.WithoutTransaction())
 }
 
-// Create validates m, assigns an id when absent, forces the status to open, stamps timestamps, and persists it; a mission with no HITLPolicyName is rejected, since the envelope is what bounds an unattended unit.
 func (s *service) Create(ctx context.Context, m *Mission) error {
 	if m == nil {
 		return fmt.Errorf("mission is required")
@@ -342,7 +339,6 @@ func (s *service) getWithSnapshot(ctx context.Context, id string) (*Mission, jso
 
 const scanPageSize = 200
 
-// GetByInstance scans mission records newest-first and returns the first whose InstanceID matches; ties (two missions claiming one instance) resolve to the newest, deterministically.
 func (s *service) GetByInstance(ctx context.Context, instanceID string) (*Mission, error) {
 	if instanceID == "" {
 		return nil, fmt.Errorf("instanceId is required")
@@ -369,7 +365,6 @@ func (s *service) GetByInstance(ctx context.Context, instanceID string) (*Missio
 	}
 }
 
-// List returns missions newest-first via the store's prefix scan; the slice is always non-nil.
 func (s *service) List(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*Mission, error) {
 	if limit <= 0 {
 		limit = 100
@@ -399,7 +394,6 @@ func (s *service) listPage(ctx context.Context, createdAtCursor *time.Time, limi
 	return missions, next, nil
 }
 
-// Update validates m and persists changes to an existing mission; an unknown id surfaces as libdb.ErrNotFound, and the caller owns m's CreatedAt.
 func (s *service) Update(ctx context.Context, m *Mission) error {
 	if m == nil {
 		return fmt.Errorf("mission is required")
@@ -421,7 +415,6 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	return s.store().DeleteKV(ctx, missionKVPrefix+id)
 }
 
-// Bind attaches sessionID and/or instanceID to mission id; setting an id not yet carried succeeds, re-setting the same id is a no-op, and setting a different id over one already bound is errdefs.Conflict.
 func (s *service) Bind(ctx context.Context, id string, sessionID, instanceID string) (*Mission, error) {
 	if sessionID == "" && instanceID == "" {
 		return nil, fmt.Errorf("bind requires a sessionId or instanceId")
@@ -472,7 +465,6 @@ func (s *service) Bind(ctx context.Context, id string, sessionID, instanceID str
 	return nil, errdefs.Conflict(fmt.Sprintf("mission %q is being written concurrently; bind gave up after %d attempts", id, casAttempts))
 }
 
-// Heartbeat stamps LastHeartbeat to now, sets LastError to lastErr (empty clears it), and persists; a terminal mission is returned untouched, and an unknown mission id surfaces as libdb.ErrNotFound.
 func (s *service) Heartbeat(ctx context.Context, id string, lastErr string) (*Mission, error) {
 	for attempt := 0; attempt < casAttempts; attempt++ {
 		m, snapshot, err := s.getWithSnapshot(ctx, id)
@@ -520,7 +512,6 @@ func (s *service) putIfUnchanged(ctx context.Context, m *Mission, snapshot json.
 
 const casAttempts = 5
 
-// AddReport validates report, assigns an id and CreatedAt when absent, binds it to missionID (overriding any MissionID the caller supplied), and persists it, surfacing libdb.ErrNotFound for an unknown mission.
 func (s *service) AddReport(ctx context.Context, missionID string, report *Report) error {
 	if missionID == "" {
 		return fmt.Errorf("missionId is required")
@@ -583,7 +574,6 @@ func (s *service) publishReportAdded(ctx context.Context, m *Mission, report *Re
 	}
 }
 
-// ListReports returns missionID's reports newest-first; the slice is always non-nil.
 func (s *service) ListReports(ctx context.Context, missionID string, limit int) ([]*Report, error) {
 	if missionID == "" {
 		return nil, fmt.Errorf("missionId is required")
@@ -606,7 +596,6 @@ func (s *service) ListReports(ctx context.Context, missionID string, limit int) 
 	return reports, nil
 }
 
-// Finish moves mission id to a terminal status; a retried Finish naming the same status is a no-op, and a different terminal status over an already-finished mission is a conflict.
 func (s *service) Finish(ctx context.Context, id string, status Status, reason string) (*Mission, error) {
 	if !isTerminalStatus(status) {
 		return nil, fmt.Errorf("cannot finish mission %q as %q: a terminal status is required (landed|derailed|stuck|abandoned)", id, status)
@@ -641,7 +630,6 @@ func (s *service) Finish(ctx context.Context, id string, status Status, reason s
 	return nil, errdefs.Conflict(fmt.Sprintf("mission %q is being written concurrently; finishing as %q gave up after %d attempts", id, status, casAttempts))
 }
 
-// SetPlan normalizes the incoming snapshot (trims content, assigns ids to entries lacking one), validates shape, enforces the completed-work immutability guard against the prior revision, then replaces the plan and bumps the revision.
 func (s *service) SetPlan(ctx context.Context, id string, entries []PlanEntry, explanation string) (*Mission, error) {
 	normalized := make([]PlanEntry, len(entries))
 	for i, e := range entries {

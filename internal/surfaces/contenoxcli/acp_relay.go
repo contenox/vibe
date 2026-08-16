@@ -41,15 +41,10 @@ func routedAskApproval(router approvalRouter, local func() *acpsvc.Transport) lo
 	}
 }
 
-// routedTransport resolves which connection a proxied tool call acts through,
-// the same way routedAskApproval resolves who to ask: the transport holding
-// this call's session first, then the process's local connection.
-//
-// The session lookup is what makes a host correct. One process may be driving
-// several sessions at once — a stdio editor alongside every relay attachment —
-// so "the current transport" is a property of the call, not of the process. A
-// host with no local connection at all resolves to nil for an unattached
-// session, and the file and shell tools fall back to the operating system.
+// routedTransport resolves which connection a proxied tool call acts through:
+// the transport holding this call's session first, then the process's local
+// connection. One process may be driving several sessions at once, so the
+// transport is a property of the call, not of the process.
 func routedTransport(router *acpsvc.SessionRouter, local func() *acpsvc.Transport) acpsvc.TransportResolver {
 	return func(ctx context.Context) *acpsvc.Transport {
 		if t := router.TransportForContext(ctx); t != nil {
@@ -131,7 +126,8 @@ func startRelayTunnel(
 		tunnel.Close()
 		return noop, err
 	}
-	// Connector first: its close cancels in-flight chain contexts, so trig.wait joins promptly and no new frame can start one.
+	// Connector first: its close cancels in-flight chain contexts, so trig.wait
+	// joins promptly.
 	return func() {
 		_ = connector.Close()
 		tunnel.Close()

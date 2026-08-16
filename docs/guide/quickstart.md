@@ -1,6 +1,7 @@
 ---
 title: Quickstart
 description: Install Contenox and connect a model.
+order: 1
 ---
 
 # Quickstart
@@ -14,10 +15,6 @@ curl -fsSL https://contenox.com/install.sh | sh
 ```
 
 Or download the binary directly from [GitHub Releases](https://github.com/contenox/contenox/releases/latest).
-
-The whole path — install, setup, first prompt — in one take:
-
-![Install demo: install.sh, contenox setup, and a first answer](/install.gif)
 
 ---
 
@@ -118,10 +115,10 @@ If you're not sure, start with [Ollama](/docs/integrations/providers/ollama/) fo
 
 ## Next steps
 
-- [**Tutorial: your first agent**](/docs/guide/tutorial-first-agent/) — one file, what contenox builds behind it, and where the knobs are
+- [**Your first agent**](/docs/guide/tutorials/first-agent/) — one file, what contenox builds behind it, and where the knobs are
 - [Declaring agents](/docs/guide/agents/) — the full frontmatter, skills, and the tools an agent brings with it
 - [Core concepts](/docs/guide/concepts/) — how agents, chains, tasks, and tools fit together
-- [Writing a chain by hand](/docs/guide/first-chain/) — for the agent that has outgrown a declaration
+- [Writing a chain by hand](/docs/guide/chains/writing-a-chain/) — for the agent that has outgrown a declaration
 - [How contenox compares](/docs/guide/comparison/) — what it shares with the coding agents, and the three things that are built differently
 - [MCP integration](/docs/integrations/tools/mcp/) — connect external tools
 - [Pairing a machine with a relay](/docs/guide/pairing/) — reach a running session from your phone: one typed key, optional always, free for you and three teammates (one machine each)

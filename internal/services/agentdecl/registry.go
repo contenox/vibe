@@ -19,12 +19,8 @@ func (e *ErrUnknownTool) Error() string {
 }
 
 // MapTools resolves declaration tool names to connected tools, preserving order
-// and dropping duplicates. A name containing a dot is an MCP tool and passes
-// through unchanged.
-//
-// An unresolved name is dropped and reported, matching how the declaration
-// format behaves elsewhere; only a list where nothing at all resolves is an
-// error, since that agent has no way to act.
+// and dropping duplicates. An unresolved name is dropped and reported; only a
+// list where nothing resolves is an error.
 func (c Config) MapTools(names []string) ([]string, []Unmapped, error) {
 	var (
 		out     []string

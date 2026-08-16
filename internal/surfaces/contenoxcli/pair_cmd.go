@@ -11,14 +11,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Pairing from the CLI, not only from inside a session: a pairing describes
-// the machine and is stored in ~/.contenox, so whichever surface writes it,
-// every later process finds it and dials with it. Requiring an editor session
-// to type /pair into made the hosted app unreachable for anyone who does not
-// drive contenox from an editor — which is most first-time users.
-//
-// The session command stays: answering "am I paired?" without leaving the
-// session is worth its own entry point. Both call the same relaypair.Redeem.
 var pairCmd = &cobra.Command{
 	Use:   "pair [key] [relay-endpoint]",
 	Short: "Attach this machine to a relay so the contenox app can reach it.",
@@ -74,7 +66,6 @@ func runPair(cmd *cobra.Command, args []string) error {
 	endpoint := relaypair.Endpoint(explicit)
 
 	// The hostname, never a typed name: a pairing identifies this machine.
-	// Collisions are uniquified by the relay.
 	name, err := os.Hostname()
 	if err != nil || name == "" {
 		return fmt.Errorf("cannot determine this machine's hostname, so it has no name to pair under")
@@ -84,9 +75,6 @@ func runPair(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		switch {
 		case errors.Is(err, relaypair.ErrKeyRejected):
-			// The relay's message verbatim: it already names the remedy, and
-			// it does not resolve unknown from expired from spent, so neither
-			// does this.
 			return err
 		case errors.Is(err, relaypair.ErrRelayUnusable):
 			return err
@@ -108,8 +96,7 @@ func runPair(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(out, "\nOpen %s to reach this machine.\n", origin)
 	}
 	// Pairing alone attaches the machine; something has to be running for the
-	// app to attach to. Say so here rather than leaving a paired-but-silent
-	// machine looking broken.
+	// app to attach to.
 	fmt.Fprintf(out, "Keep it reachable with: contenox serve\n")
 	return nil
 }
@@ -135,9 +122,7 @@ func runUnpair(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// writePairingStatus renders the stored pairing, never the credential. Shared
-// with the serve screen so the two cannot drift into describing the same state
-// differently.
+// writePairingStatus renders the stored pairing, never the credential.
 func writePairingStatus(w io.Writer, dir string) {
 	creds, err := relaycreds.Load(dir)
 	if err != nil {

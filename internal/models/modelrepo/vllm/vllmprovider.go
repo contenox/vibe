@@ -106,7 +106,6 @@ func (p *vLLMProvider) CanVision() bool {
 	return p.SupportsVision
 }
 
-// CanAudio always reports false; audio input is refused, not dropped.
 func (p *vLLMProvider) CanAudio() bool {
 	return false
 }

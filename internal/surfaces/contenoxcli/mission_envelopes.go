@@ -1,8 +1,3 @@
-// mission_envelopes.go discovers the HITL policy files a mission may name as
-// its envelope. It reads the same search path the policy loader reads
-// (policyDirs: the resolved .contenox dir first, then ~/.contenox, first
-// match wins) and the same hitl-policy-*.json convention `contenox vet`
-// classifies by name, so what a session offers is what a unit would load.
 package contenoxcli
 
 import (
@@ -20,22 +15,18 @@ import (
 // missionEnvelopeGlob matches the policy files offered as mission envelopes.
 const missionEnvelopeGlob = "hitl-policy-*.json"
 
-// missionEnvelopes is an acpsvc.MissionEnvelopeSource over a policy search
-// path. It stats the filesystem on every call rather than caching a startup
-// snapshot: an envelope written while a session is open is offered without a
-// restart, and one deleted stops being offered.
+// missionEnvelopes is an acpsvc.MissionEnvelopeSource over a policy search path.
+// It stats the filesystem on every call rather than caching a startup snapshot.
 type missionEnvelopes struct{ dirs []string }
 
 var _ acpsvc.MissionEnvelopeSource = missionEnvelopes{}
 
-// newMissionEnvelopes builds the source for a surface rooted at contenoxDir.
 func newMissionEnvelopes(contenoxDir string) missionEnvelopes {
 	return missionEnvelopes{dirs: policyDirs(contenoxDir)}
 }
 
 // ListEnvelopes returns every hitl-policy-*.json on the search path, sorted
-// within each directory and deduplicated by name, so a workspace copy
-// shadows the home one exactly as the loader resolves it.
+// within each directory and deduplicated by name.
 func (m missionEnvelopes) ListEnvelopes() []acpsvc.MissionEnvelope {
 	var out []acpsvc.MissionEnvelope
 	seen := map[string]bool{}
@@ -69,8 +60,7 @@ func (m missionEnvelopes) ListEnvelopes() []acpsvc.MissionEnvelope {
 }
 
 // LookupEnvelope resolves one envelope name against the search path. A name
-// carrying a path separator is refused outright: /mission takes a file NAME,
-// and a traversal must not reach outside the config dirs.
+// carrying a path separator is refused outright.
 func (m missionEnvelopes) LookupEnvelope(name string) (acpsvc.MissionEnvelope, bool) {
 	name = strings.TrimSpace(name)
 	if name == "" || name != filepath.Base(name) || strings.ContainsAny(name, `/\`) {
@@ -83,9 +73,6 @@ func (m missionEnvelopes) LookupEnvelope(name string) (acpsvc.MissionEnvelope, b
 	return acpsvc.MissionEnvelope{Name: name, Path: path, Summary: envelopeSummary(raw)}, true
 }
 
-// envelopeDoc is the minimal shape a one-line character sketch needs. Parsing
-// is deliberately tolerant: an envelope that does not parse gets no summary,
-// never a wrong one about someone's security boundary.
 type envelopeDoc struct {
 	DefaultAction string `json:"default_action"`
 	Compute       struct {
@@ -97,13 +84,9 @@ type envelopeDoc struct {
 	} `json:"attention"`
 }
 
-// envelopeSummary renders an envelope's character in one line: what an
-// unruled call does, the declared tool-call ceiling, and who may answer the
-// unit's questions. maxToolCalls is labelled "declared, not enforced" because
-// its one enforcement seam is the unattended permission answerer, which no
-// shipped host wires (hitlservice.ComputeBounds) — a picker must not assert a
-// ceiling the host does not hold. Empty when the file cannot be read as an
-// envelope.
+// envelopeSummary renders an envelope's character in one line: what an unruled
+// call does, the declared tool-call ceiling, and who may answer the unit's
+// questions. Empty when the file cannot be read as an envelope.
 func envelopeSummary(raw []byte) string {
 	var doc envelopeDoc
 	if err := json.Unmarshal(raw, &doc); err != nil {
@@ -126,8 +109,6 @@ func envelopeSummary(raw []byte) string {
 }
 
 // envelopeDefaultActionPhrase states what happens to a call no rule matches.
-// An empty default_action is the loader's fail-closed approve (hitlservice
-// policy.go), the same reading staleFallthrough takes.
 func envelopeDefaultActionPhrase(action string) string {
 	switch strings.TrimSpace(action) {
 	case "", "approve":

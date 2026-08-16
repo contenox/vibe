@@ -1,6 +1,6 @@
 # Code of Conduct
 
-Contenox is a place to build practical, auditable AI workflow tooling. The community works best when people can bring bugs, rough ideas, questions, and careful criticism without needing to perform expertise first.
+Contenox is a place to build a practical, auditable agent server. The community works best when people can bring bugs, rough ideas, questions, and careful criticism without needing to perform expertise first.
 
 ## How We Work Together
 

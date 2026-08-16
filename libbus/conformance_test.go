@@ -14,18 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file is the shared conformance suite for the Messenger interface.
-//
-// Every backend (InMem, SQLiteBus, NATS) runs the SAME matrix of behavioural
-// tests, because callers treat the backends as interchangeable. Anything the
-// suite asserts is a guarantee the Messenger doc comment makes for all
-// backends; anything that legitimately differs lives in the divergence
-// section at the bottom, where the *expected difference* is asserted per
-// backend so the documentation cannot silently rot.
-//
-// InMem and SQLiteBus always run. NATS needs a container and is SKIPPED (never
-// silently passed) when Docker is unavailable; set LIBBUS_REQUIRE_NATS=1 to
-// turn that skip into a hard failure in CI.
+// This file is the shared conformance suite for the Messenger interface: every
+// backend runs the same matrix, with legitimate differences asserted per backend
+// in the divergence section at the bottom. NATS is skipped when Docker is
+// unavailable; set LIBBUS_REQUIRE_NATS=1 to turn that skip into a failure.
 
 // newBusFunc builds a fresh Messenger. It registers its own cleanup on t and
 // skips the test if the backend's infrastructure is unavailable.

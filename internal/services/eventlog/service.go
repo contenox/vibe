@@ -1,18 +1,7 @@
 // Package eventlog is the service tier over the durable, append-only domain
-// event log behind the beta event-dispatch tier. The log itself — its
-// date-partitioned tables, its NID sequence, and every statement that touches
-// them — lives one layer down in internal/store/runtimetypes (events.go);
-// this package holds the behavior around it: validated append with best-effort
-// live fan-out on the bus, the in-process trigger seam, the dual-write
-// publisher producers wrap their bus with, and the memo of which partitions
-// this process has already had created.
-//
-// The store is the source of truth; the bus is a best-effort live fan-out
-// (Service.Append publishes only after the row is durable). Consumers that
-// miss a live publish catch up from their NID cursor, so nothing is lost. Bus
-// subjects stay exactly the unscoped event types: the bus is a nudge-only live
-// optimization, the log carries the workspace dimension, and filtering happens
-// at the drain.
+// event log, which itself lives in internal/store/runtimetypes. The store is the
+// source of truth; the bus is a best-effort live fan-out, and consumers that
+// miss a publish catch up from their NID cursor.
 package eventlog
 
 import (
@@ -30,15 +19,11 @@ import (
 )
 
 // Service is the event-source surface: durable append with best-effort live
-// fan-out, the cursor reads, the time-range query set, and the live
-// subscription. The bus subject is the event's Type verbatim — no workspace
-// namespacing, no parallel naming scheme; the log carries the workspace
-// dimension.
+// fan-out, cursor reads, time-range queries, and the live subscription. The bus
+// subject is the event's Type verbatim.
 type Service interface {
 	// Append validates and durably stores event, then publishes the stored
-	// envelope (NID assigned) on subject event.Type. The store is the source
-	// of truth: a failed publish is reported, never returned — subscribers
-	// that miss it catch up via ListEventsSince.
+	// envelope on subject event.Type. A failed publish is reported, never returned.
 	Append(ctx context.Context, event *runtimetypes.Event) error
 	ListEventsSince(ctx context.Context, workspaceID string, afterNID int64, limit int) ([]runtimetypes.Event, error)
 	ListRecentEvents(ctx context.Context, workspaceID string, beforeNID int64, limit int) ([]runtimetypes.Event, error)
@@ -47,16 +32,12 @@ type Service interface {
 	GetEventsBySubject(ctx context.Context, workspaceID, eventType string, from, to time.Time, subject string, limit int) ([]runtimetypes.Event, error)
 	GetEventTypesInRange(ctx context.Context, workspaceID string, from, to time.Time, limit int) ([]string, error)
 	DeleteEventsByTypeInRange(ctx context.Context, workspaceID, eventType string, from, to time.Time) error
-	// PrunePartitionsBefore drops every partition older than t's period (the
-	// store's O(1) retention path) and returns the dropped periods, forgetting
-	// them so a later append re-creates a period this service had cached as
-	// ensured.
+	// PrunePartitionsBefore drops every partition older than t's period and
+	// returns the dropped periods, forgetting them so a later append re-creates one.
 	PrunePartitionsBefore(ctx context.Context, t time.Time) ([]string, error)
-	// Subscribe attaches ch to the live stream for eventType. Payload shapes
-	// vary by producer (Append publishes the Event envelope, dual-writing
-	// producers publish their own domain payload) and the subject carries no
-	// workspace, so consumers needing ordering, dedup, or scoping must treat
-	// a delivery as a nudge and read the log.
+	// Subscribe attaches ch to the live stream for eventType. Payload shapes vary
+	// by producer and the subject carries no workspace, so a consumer needing
+	// ordering, dedup or scoping must treat a delivery as a nudge and read the log.
 	Subscribe(ctx context.Context, eventType string, ch chan<- []byte) (libbus.Subscription, error)
 }
 
@@ -68,11 +49,6 @@ type service struct {
 	partitions partitionCache
 }
 
-// partitionCache records the periods this service has already had the store
-// create — kept at the layer that owns the decision. The store holds no such
-// state: its DDL is idempotent, so an entry here only elides a round trip,
-// never a correctness check. PrunePartitionsBefore forgets the periods it
-// drops, so no entry outlives its partition.
 type partitionCache struct {
 	mu      sync.Mutex
 	ensured map[string]bool
@@ -90,7 +66,6 @@ func (c *partitionCache) mark(period string) {
 	c.ensured[period] = true
 }
 
-// forget invalidates periods, so the next append ensures them again.
 func (c *partitionCache) forget(periods []string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -102,10 +77,8 @@ func (c *partitionCache) forget(periods []string) {
 // ServiceOption configures NewService.
 type ServiceOption func(*service)
 
-// WithTrigger installs the optional in-process trigger hook: Append hands
-// every stored event to it after the durable write and bus publish,
-// asynchronously — a firing error is the trigger's to record and never aborts
-// the append.
+// WithTrigger installs the optional in-process trigger hook, which Append calls
+// asynchronously after the durable write. A firing error never aborts the append.
 func WithTrigger(t Trigger) ServiceOption {
 	return func(s *service) {
 		if t != nil {
@@ -142,16 +115,12 @@ func (s *service) Append(ctx context.Context, event *runtimetypes.Event) error {
 	if err := s.store.AppendEvent(ctx, event); err != nil {
 		return err
 	}
-	// In-process trigger firing rides after the durable write (and past the
-	// publish below via the goroutine), never on the append's error path.
+	// Fires after the durable write, never on the append's error path.
 	defer fireTrigger(ctx, s.trigger, event)
 	if s.bus == nil {
 		return nil
 	}
-	// Publish after the durable write, best-effort: the row already exists,
-	// so a failed publish only delays consumers until their next catch-up.
-	// Synchronous: deterministic ordering for tests and shutdown, still never
-	// fails the append.
+	// Publish after the durable write, best-effort and synchronous.
 	payload, err := json.Marshal(event)
 	if err == nil {
 		err = s.bus.Publish(ctx, event.Type, payload)
@@ -164,9 +133,6 @@ func (s *service) Append(ctx context.Context, event *runtimetypes.Event) error {
 	return nil
 }
 
-// ensurePartition creates t's partition unless this service already had it
-// created. Times the store would reject (outside EventAcceptanceWindow) are
-// left to it — no partition is created for an event that will not be stored.
 func (s *service) ensurePartition(ctx context.Context, t time.Time) error {
 	now := time.Now().UTC()
 	if t.IsZero() {
@@ -188,8 +154,7 @@ func (s *service) ensurePartition(ctx context.Context, t time.Time) error {
 
 func (s *service) PrunePartitionsBefore(ctx context.Context, t time.Time) ([]string, error) {
 	dropped, err := s.store.PruneEventPartitionsBefore(ctx, t)
-	// Invalidate on the error path too: dropped names the periods whose tables
-	// are already gone, whatever failed after them.
+	// Invalidate on the error path too: dropped names the periods already gone.
 	s.partitions.forget(dropped)
 	return dropped, err
 }
@@ -247,8 +212,6 @@ func (s *service) Subscribe(ctx context.Context, eventType string, ch chan<- []b
 	return s.bus.Stream(ctx, eventType, ch)
 }
 
-// validateQuery is the service-level query guard; the store re-checks the
-// workspace on every read regardless.
 func validateQuery(workspaceID string, from, to time.Time, limit int) error {
 	if err := requireWorkspace(workspaceID); err != nil {
 		return err

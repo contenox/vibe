@@ -1,10 +1,7 @@
 // Package relaylink is the runtime half of the relay connection: it dials a
 // relay, completes the [librelay] handshake, holds the connection, proves the
-// peer is alive with heartbeats, and redials with backoff when it is not.
-// Every exported call returns in bounded time regardless of the relay's
-// state, and [Connector.Send] fails immediately with [ErrNotConnected]
-// instead of waiting for a link to come back. The connector only ever opens
-// outbound connections; it never listens.
+// peer is alive with heartbeats, and redials with backoff when it is not. It
+// only ever opens outbound connections; it never listens.
 package relaylink
 
 import (
@@ -23,12 +20,10 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-// MinProtocolVersion is the oldest envelope version this build will speak; the
-// connector refuses a negotiated version outside what it can honour.
+// MinProtocolVersion is the oldest envelope version this build will speak.
 const MinProtocolVersion = 1
 
-// Connector failures a caller can act on; everything else stays internal to
-// the retry loop.
+// Connector failures a caller can act on.
 var (
 	// ErrNotConnected is returned by Send when no link is currently held.
 	ErrNotConnected = errors.New("relaylink: not connected to a relay")
@@ -37,20 +32,18 @@ var (
 	// ErrClosed is returned by Start or Send after Close.
 	ErrClosed = errors.New("relaylink: connector is closed")
 	// ErrVersionNegotiation is the handshake refusing a version outside
-	// [MinProtocolVersion]..[librelay.ProtocolVersion]; fatal, not retried.
+	// [MinProtocolVersion]..[librelay.ProtocolVersion]; fatal.
 	ErrVersionNegotiation = errors.New("relaylink: relay selected an unsupported protocol version")
 	// ErrUnauthorized is a relay refusing the credentials; fatal.
 	ErrUnauthorized = errors.New("relaylink: relay refused the credentials")
-	// ErrRelayIdentity is the peer failing to prove it is the paired relay
-	// against [Credentials.RelayPublicKey]; fatal.
+	// ErrRelayIdentity is the peer failing to prove it is the paired relay; fatal.
 	ErrRelayIdentity = errors.New("relaylink: relay did not prove its identity")
 	// ErrHeartbeatTimeout ends a connection whose peer stopped answering a
 	// heartbeat probe.
 	ErrHeartbeatTimeout = errors.New("relaylink: peer did not answer a heartbeat")
 )
 
-// State is where the connector is in its lifecycle; diagnostic only, nothing
-// may branch on it.
+// State is where the connector is in its lifecycle; diagnostic only.
 type State int
 
 // Connector states.
@@ -61,8 +54,7 @@ const (
 	StateConnecting
 	// StateConnected means a handshake completed and the link is held.
 	StateConnected
-	// StateFatal means the retry loop gave up; negotiation or credentials
-	// failing cannot be fixed by retrying.
+	// StateFatal means the retry loop gave up.
 	StateFatal
 	// StateClosed is after Close.
 	StateClosed
@@ -89,14 +81,13 @@ func (s State) String() string {
 type Status struct {
 	// State is the connector's lifecycle position.
 	State State
-	// Attempts is the number of consecutive failed dial-or-handshake
-	// cycles; it returns to zero once a link has been held long enough to
-	// count as healthy (see [Backoff.ResetAfter]).
+	// Attempts is the number of consecutive failed dial-or-handshake cycles,
+	// reset once a link has been held for [Backoff.ResetAfter].
 	Attempts int
 	// LastError is why the last connection ended or the last dial failed.
 	LastError error
-	// ConnectedSince is when the current link completed its handshake,
-	// zero when there is no link.
+	// ConnectedSince is when the current link completed its handshake, zero
+	// when there is no link.
 	ConnectedSince time.Time
 	// Connections counts completed handshakes over the connector's life.
 	Connections int
@@ -109,29 +100,24 @@ type Status struct {
 // block, since it runs on the read loop.
 type Handler func(context.Context, librelay.Frame)
 
-// Credentials are what the relay authenticates the instance with; opaque
-// here, only passed to [DialFunc].
+// Credentials are what the relay authenticates the instance with.
 type Credentials struct {
 	// Token is the paired instance's secret, presented by [DialTLS] as a
 	// bearer credential and never placed in a frame.
 	Token string
-	// RelayPublicKey is the relay's long-lived Ed25519 key pinned at
-	// pairing time; when set, the handshake fatally refuses any peer that
-	// cannot sign the connector's nonce with it.
+	// RelayPublicKey is the relay's Ed25519 key pinned at pairing time; when
+	// set, the handshake refuses any peer that cannot sign the nonce with it.
 	RelayPublicKey string
 }
 
-// Config is everything the connector needs; Endpoint and Credentials are
-// assumed already established.
+// Config is everything the connector needs.
 type Config struct {
-	// Endpoint is the relay address to dial, in whatever form Dial
-	// understands; required.
+	// Endpoint is the relay address to dial; required.
 	Endpoint string
 	// Instance identifies this runtime to the relay and is the routing key
 	// on every frame; required.
 	Instance string
-	// Credentials authenticate the instance; empty is legal, refusal is
-	// the relay's decision.
+	// Credentials authenticate the instance; empty is legal.
 	Credentials Credentials
 	// Agent names this build for operator diagnosis.
 	Agent string
@@ -139,19 +125,16 @@ type Config struct {
 	Dial DialFunc
 	// Handler receives routed frames; nil drops them.
 	Handler Handler
-	// Backoff governs redial timing; the zero value means
-	// [DefaultBackoff].
+	// Backoff governs redial timing; the zero value means [DefaultBackoff].
 	Backoff Backoff
-	// Heartbeat governs liveness probing; the zero value means
-	// [DefaultHeartbeat].
+	// Heartbeat governs liveness probing; the zero value means [DefaultHeartbeat].
 	Heartbeat Heartbeat
-	// HandshakeTimeout bounds hello→welcome; zero means
-	// DefaultHandshakeTimeout.
+	// HandshakeTimeout bounds hello→welcome; zero means DefaultHandshakeTimeout.
 	HandshakeTimeout time.Duration
 	// Backlog is the outbound queue depth; zero means DefaultBacklog.
 	Backlog int
-	// Tracker instruments connect, disconnect and refusals; nil degrades
-	// to [libtracker.NoopTracker].
+	// Tracker instruments connect, disconnect and refusals; nil means
+	// [libtracker.NoopTracker].
 	Tracker libtracker.ActivityTracker
 }
 
@@ -161,9 +144,8 @@ const (
 	DefaultBacklog          = 256
 )
 
-// Connector holds at most one relay connection and rebuilds it when it
-// breaks; the zero value is unusable — call [New] — and it is safe for
-// concurrent use.
+// Connector holds at most one relay connection and rebuilds it when it breaks.
+// Use [New]; it is safe for concurrent use.
 type Connector struct {
 	cfg      Config
 	tracker  libtracker.ActivityTracker
@@ -183,8 +165,7 @@ type Connector struct {
 	status Status
 }
 
-// New validates cfg and returns a connector that has not dialed anything; it
-// performs no I/O.
+// New validates cfg and returns a connector that has not dialed anything.
 func New(cfg Config) (*Connector, error) {
 	if cfg.Endpoint == "" {
 		return nil, errors.New("relaylink: Endpoint is required")
@@ -229,8 +210,8 @@ func New(cfg Config) (*Connector, error) {
 	}, nil
 }
 
-// Start begins dialing in the background and returns immediately; calling it
-// more than once returns an error rather than starting a second loop.
+// Start begins dialing in the background and returns immediately. Calling it
+// more than once returns an error.
 func (c *Connector) Start(ctx context.Context) error {
 	if c.closed.Load() {
 		return ErrClosed
@@ -246,8 +227,7 @@ func (c *Connector) Start(ctx context.Context) error {
 	c.mu.Unlock()
 	c.setState(StateConnecting)
 	go c.run(runCtx)
-	// Re-read after launch: a Close racing Start may have seen c.cancel nil
-	// and returned early, so whoever observes closed second cleans up.
+	// A Close racing Start may have seen c.cancel nil and returned early.
 	if c.closed.Load() {
 		cancel()
 		<-c.stopped
@@ -257,7 +237,7 @@ func (c *Connector) Start(ctx context.Context) error {
 }
 
 // Close stops the retry loop, drops any held connection, and waits for every
-// goroutine this connector owns to exit; idempotent.
+// goroutine this connector owns to exit. It is idempotent.
 func (c *Connector) Close() error {
 	c.closed.Store(true)
 	c.closeOnce.Do(func() {
@@ -284,7 +264,7 @@ func (c *Connector) Status() Status {
 }
 
 // Send puts f on the relay if a link is currently held, reporting
-// [ErrNotConnected] immediately if not; it never blocks on the network.
+// [ErrNotConnected] immediately if not. It never blocks on the network.
 func (c *Connector) Send(f librelay.Frame) error {
 	if c.closed.Load() {
 		return ErrClosed
@@ -303,8 +283,6 @@ func (c *Connector) run(ctx context.Context) {
 	defer close(c.stopped)
 	b := newBackoffState(c.cfg.Backoff)
 	timer := time.NewTimer(time.Hour)
-	// Created stopped and drained; reused across every backoff so a
-	// long-lived connector does not accumulate timers.
 	if !timer.Stop() {
 		<-timer.C
 	}
@@ -320,7 +298,6 @@ func (c *Connector) run(ctx context.Context) {
 			return
 		}
 		if healthy {
-			// Reset only once the link proved healthy, not merely handshaken.
 			b.reset()
 		}
 		if isFatal(err) {
@@ -330,8 +307,7 @@ func (c *Connector) run(ctx context.Context) {
 			c.setFatal(err)
 			return
 		}
-		// Consumed once: a stale hint must not govern a dial the relay
-		// never sent it to.
+		// Consumed once: a stale hint must not govern a later dial.
 		d := b.nextHinted(time.Duration(c.retryHint.Swap(0)))
 		timer.Reset(d)
 		select {
@@ -456,15 +432,12 @@ func (c *Connector) noteBadFrame() {
 }
 
 func (c *Connector) handshake(conn net.Conn) (*librelay.Reader, *librelay.Writer, error) {
-	// Cleared afterwards: a live connection must not inherit the handshake
-	// deadline.
 	if err := conn.SetDeadline(time.Now().Add(c.cfg.HandshakeTimeout)); err != nil {
 		return nil, nil, fmt.Errorf("relaylink: set handshake deadline: %w", err)
 	}
 	rd, w := librelay.NewReader(conn), librelay.NewWriter(conn)
 	const helloID = "hello"
-	// Fresh nonce every handshake, even when nothing is pinned, so the
-	// relay's answer never varies with local verification intent.
+	// Fresh nonce every handshake, even when nothing is pinned.
 	nonce, err := librelay.NewNonce()
 	if err != nil {
 		return nil, nil, err
@@ -486,16 +459,12 @@ func (c *Connector) handshake(conn net.Conn) (*librelay.Reader, *librelay.Writer
 		f, err := rd.ReadFrame()
 		if err != nil {
 			if isMalformed(err) {
-				// A garbled line does not prove the peer cannot
-				// answer the handshake.
 				c.noteBadFrame()
 				continue
 			}
 			return nil, nil, fmt.Errorf("relaylink: await welcome: %w", err)
 		}
 		if f.ReplyTo != helloID {
-			// Not yet ours to route, but an owed control reply still
-			// must be sent.
 			if reply, owed := librelay.Unsupported(f); owed && librelay.IsControl(f.Type) {
 				_ = w.WriteFrame(reply)
 			}
@@ -511,15 +480,12 @@ func (c *Connector) handshake(conn net.Conn) (*librelay.Reader, *librelay.Writer
 				return nil, nil, fmt.Errorf("%w: relay chose %d, this build speaks %d..%d",
 					ErrVersionNegotiation, wel.ProtocolVersion, MinProtocolVersion, librelay.ProtocolVersion)
 			}
-			// Checked against the version the relay selected, after
-			// that version is accepted — meaningless before then.
 			if c.relayKey != nil {
 				if err := librelay.VerifyWelcome(c.relayKey, nonce, wel.ProtocolVersion, c.cfg.Instance, wel.Signature); err != nil {
 					return nil, nil, fmt.Errorf("%w: %w", ErrRelayIdentity, err)
 				}
 			}
-			// Recorded for the NEXT dial; this connection has only just
-			// been established.
+			// Recorded for the next dial.
 			c.retryHint.Store(int64(time.Duration(wel.RetryAfterSeconds) * time.Second))
 			if err := conn.SetDeadline(time.Time{}); err != nil {
 				return nil, nil, fmt.Errorf("relaylink: clear handshake deadline: %w", err)
@@ -571,8 +537,6 @@ func (c *Connector) dispatch(ctx context.Context, s *session, f librelay.Frame) 
 	case librelay.TypeAck:
 		s.ack(f.ReplyTo)
 	case librelay.TypeError:
-		// Concerns something this end sent, not the connection; the link
-		// carries on.
 		var e librelay.Error
 		_ = f.DecodePayload(&e)
 		s.note0("peer_error", map[string]string{
@@ -581,11 +545,8 @@ func (c *Connector) dispatch(ctx context.Context, s *session, f librelay.Frame) 
 			"re":      f.ReplyTo,
 		})
 	case librelay.TypeWelcome:
-		// A second welcome is not owed an answer; mid-connection
-		// renegotiation is not a protocol thing.
+		// A second welcome is not owed an answer.
 	default:
-		// Includes an inbound hello, which librelay's rules — not this
-		// package's — forbid a relay from sending.
 		if reply, owed := librelay.Unsupported(f); owed {
 			_ = s.enqueue(reply)
 		}
@@ -618,8 +579,6 @@ func (c *Connector) heartbeatLoop(s *session) {
 		id, waitCh := s.arm()
 		probe := librelay.Frame{Type: librelay.TypeHeartbeat, Instance: c.cfg.Instance, ID: id}
 		if err := s.enqueue(probe); err != nil {
-			// A full backlog is the same liveness failure as a missing
-			// ack.
 			s.stop(fmt.Errorf("%w: %w", ErrHeartbeatTimeout, err))
 			return
 		}

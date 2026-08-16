@@ -27,17 +27,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file is the composed acceptance for fleet mission-mode: a live session
-// fires /mission, fleetservice dispatches a real unit that files a report
-// through mission_report, and the report-router delivers it back onto the
-// firing session's stream (or the operator inbox when fired directly), through
-// the same components `contenox serve` wires. The firing session must be a
-// kernel-hosted unit, not a synthetic id, since the router only delivers to
-// sessions a live kernel instance owns. Assertion (a) drives the unit's own
-// report through /mission end to end; assertion (b) adds a report on the same
-// edge through the publisher-wired mission service, since a unit's own filed
-// report does not yet emit a routing event (closed by the sibling test below).
-
 // mrtChainReply is the byte-exact reply the firing session's fixture chain
 // streams, confirming the firing unit is fully up before the mission fires.
 const mrtChainReply = "contenox mission roundtrip firing-session fixture reply"
@@ -45,7 +34,6 @@ const mrtChainReply = "contenox mission roundtrip firing-session fixture reply"
 // mrtMissionReportChain is the deterministic, model-free chain the dispatched
 // reporter unit runs: a `tools` task calling mission_report with static args,
 // then a noop terminator, proving the report path rather than inference.
-// Mirrors e2e_mission_report_test.go so both acceptances file identical reports.
 const mrtMissionReportChain = `{
   "id": "e2e-mission-roundtrip-report",
   "tasks": [
@@ -137,9 +125,8 @@ func TestFleetE2E_MissionRoundTrip(t *testing.T) {
 
 	fleet := fleetservice.New(kernel, agentRegistry, missions, nil, home, libtracker.NoopTracker{})
 
-	// The firing/supervising session is a chain unit declared by convention
-	// (the agent-*.json filename), discovered the way serve discovers operator
-	// chains.
+	// The firing/supervising session is a chain unit declared by convention (the
+	// agent-*.json filename), discovered the way serve discovers operator chains.
 	mrtWriteChainAgentFixture(t, contenoxDir)
 	res, err := chainagents.Discover(ctx, agentRegistry, contenoxDir)
 	require.NoError(t, err)
@@ -275,10 +262,7 @@ func TestFleetE2E_MissionRoundTrip(t *testing.T) {
 // TestFleetE2E_MissionRoundTrip_UnitReportRoutesToSupervisor closes the loop
 // the composed acceptance above splits into (a)+(b): the unit's own filed
 // report, through mission_report over a real subprocess, routes back into its
-// firing session's viewer with no control-published stand-in anywhere. This
-// pins the fix in runtime/contenoxcli/acp_cmd.go for a seam gap where a
-// dispatched unit's mission tools were wired against a publisher-less mission
-// service, so a filed report was stored but never emitted a routing event.
+// firing session's viewer with no control-published stand-in anywhere.
 func TestFleetE2E_MissionRoundTrip_UnitReportRoutesToSupervisor(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping mission round-trip e2e: builds the contenox binary and spawns real ACP subprocesses")

@@ -7,21 +7,16 @@ import (
 	"sync/atomic"
 )
 
-// ErrControlPlane is the sentinel every control-plane refusal wraps: a path
-// at or under the runtime's own governing state (config, database, HITL
-// policies, chains, agents, models) is never a workspace, session cwd, or
-// resolvable subpath — even under a granted root, even via a symlink. This
-// holds unconditionally; there is no flag to disable it.
+// ErrControlPlane is the sentinel every control-plane refusal wraps: a path at
+// or under the runtime's own governing state is never a workspace, session cwd
+// or resolvable subpath, even under a granted root and even via a symlink.
 var ErrControlPlane = errors.New("path is inside the runtime control plane")
 
-// controlPlaneDenied is the process-global, symlink-resolved denylist. A nil
-// or empty value means nothing is denied.
 var controlPlaneDenied atomic.Pointer[[]string]
 
-// SetControlPlaneDenied registers the runtime's control-plane directories.
-// Each path is absolutized, symlink-resolved, and de-duplicated. Calling it
-// with no paths clears the denylist. The denylist is process-global and
-// survives every SetRoots hot-reload.
+// SetControlPlaneDenied registers the runtime's control-plane directories;
+// calling it with no paths clears the denylist. The denylist is process-global
+// and survives every SetRoots hot-reload.
 func SetControlPlaneDenied(paths ...string) error {
 	resolved := make([]string, 0, len(paths))
 	seen := map[string]struct{}{}
@@ -84,8 +79,6 @@ func IsControlPlanePath(candidate string) (string, bool) {
 	return WithinControlPlane(ControlPlaneDenied(), candidate)
 }
 
-// deniedResolved checks an already-resolved absolute path against the
-// global denylist; it does no further I/O.
 func deniedResolved(resolvedAbs string) (string, bool) {
 	p := controlPlaneDenied.Load()
 	if p == nil {
@@ -99,8 +92,6 @@ func deniedResolved(resolvedAbs string) (string, bool) {
 	return "", false
 }
 
-// controlPlaneError builds the teaching refusal, naming the boundary plainly so a
-// model or operator learns WHY rather than decoding a status code.
 func controlPlaneError(requested, deniedDir string) error {
 	return fmt.Errorf("%w: %s is inside the runtime's control plane (%s), which is never a workspace — the runtime never lets an agent reach its own governing config, database, or policies", ErrControlPlane, requested, deniedDir)
 }

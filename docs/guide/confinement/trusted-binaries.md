@@ -1,6 +1,7 @@
 ---
-title: Trusted Binaries
+title: "Trusted binaries"
 description: Pin the allowlisted commands in a HITL policy to a real path and a SHA256, so a name cannot be substituted underneath it.
+order: 4
 ---
 
 # Trusted Binaries
@@ -193,7 +194,7 @@ Linux-shaped guarantees are not promised to all three platforms. What each layer
 | **Identity** — name resolved to an absolute real path, checked against `dirs` | yes | yes | yes (`PATHEXT` search, matching `where.exe`; case-insensitive comparison) |
 | **Integrity** — SHA256 pin, refusal on mismatch | yes | yes | yes |
 | **Structural shell reading** — compound lines like `git status && go build` read instead of blanket-refused | yes (POSIX `sh`) | yes (POSIX `sh`) | **no** — `local_shell` spawns PowerShell or `cmd`, which the analyzer does not parse and deliberately refuses to guess at |
-| **Kernel-enforced sandbox** (see [Agent sandbox](/docs/guide/agent-sandbox/)) | yes (Landlock) | no | no |
+| **Kernel-enforced sandbox** (see [Agent sandbox](/docs/guide/confinement/sandbox/)) | yes (Landlock) | no | no |
 
 The Windows row on structural reading is a floor, not a hole: an unread line keeps the tokenizer's verdict, which is the stricter one. Identity and integrity apply on Windows through the plain-argv path, so an allowlisted `go build` there is still pinned to a real binary.
 
@@ -211,6 +212,6 @@ The assumption this rests on is stated rather than defended: **a properly set up
 ## See also
 
 - [HITL Policies](/docs/guide/hitl/) — the policy file, its rules and tiers
-- [Agent sandbox](/docs/guide/agent-sandbox/) — kernel-enforced confinement, and where it is available
-- [Environment scrubbing](/docs/guide/environment-scrubbing/) — keeping credentials out of the shell an agent drives
-- [Agent threat model](/docs/guide/agent-threat-model/) — what the whole envelope is and is not for
+- [Agent sandbox](/docs/guide/confinement/sandbox/) — kernel-enforced confinement, and where it is available
+- [Environment scrubbing](/docs/guide/confinement/environment/) — keeping credentials out of the shell an agent drives
+- [Agent threat model](/docs/guide/confinement/why/) — what the whole envelope is and is not for

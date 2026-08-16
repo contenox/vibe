@@ -9,9 +9,7 @@ import (
 )
 
 // The kernel is store-free by design, so taskengine carries its own copy of the
-// declaration-scope prefix rather than importing this package. This test is the
-// join: if the prefix here changes, a wildcard would start reaching one agent's
-// private sources from every other agent's chain, silently.
+// declaration-scope prefix rather than importing this package.
 func TestUnit_DeclaredPrefixMatchesTheKernelsCopy(t *testing.T) {
 	scoped := runtimetypes.DeclaredToolName("reviewer", "filesystem")
 

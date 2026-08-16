@@ -110,7 +110,7 @@ type oracleDriver struct {
 	policy        string
 	templateVars  map[string]string
 	contextLength int
-	// approves gates the permission half; the question half needs no switch of its own.
+	// approves gates the permission half only.
 	approves bool
 	missions missionservice.Service
 	out      io.Writer
@@ -128,7 +128,8 @@ func (d *oracleDriver) Adjudicate(ctx context.Context, ask hitlservice.Adjudicat
 	if ask.Kind == hitlservice.AskKindPermission && !d.approves {
 		return
 	}
-	// The oracle chain runs on the same engine and the same hitl instance, so an ask it raises itself must never re-enter here.
+	// The oracle chain runs on the same engine and hitl instance, so an ask it
+	// raises itself must never re-enter here.
 	if !d.claim(ask.AskID) {
 		return
 	}
@@ -161,7 +162,8 @@ func (d *oracleDriver) Adjudicate(ctx context.Context, ask hitlservice.Adjudicat
 	case oracletools.OutcomeApproved:
 		d.tracef("oracle: APPROVED %s.%s for subagent %s in %s", ask.ToolsName, ask.ToolName, ask.MissionID, elapsed)
 	case oracletools.OutcomeDenied:
-		// The guidance rides the ask row, not a mission report: a report here would read as the unit reaching its operator and mute the drive loop's next turn.
+		// The guidance rides the ask row, not a mission report: a report here would
+		// read as the unit reaching its operator.
 		d.tracef("oracle: DENIED %s.%s for subagent %s in %s: %s", ask.ToolsName, ask.ToolName, ask.MissionID, elapsed, binding.Guidance())
 	case oracletools.OutcomeWait:
 		d.tracef("oracle: WAIT for ask %s (%s) — it stays with a human", ask.AskID, elapsed)
@@ -231,7 +233,8 @@ func askHeadline(ask hitlservice.Adjudication) string {
 	return fmt.Sprintf("%s.%s %s", ask.ToolsName, ask.ToolName, ask.ArgsSummary)
 }
 
-// oracleInput is what the chain receives: the whole ask, plus the intent it must be judged against.
+// oracleInput is what the chain receives: the whole ask, plus the intent it must
+// be judged against.
 type oracleInput struct {
 	AskID       string `json:"askId"`
 	Kind        string `json:"kind"`

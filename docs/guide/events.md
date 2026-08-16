@@ -1,6 +1,7 @@
 ---
 title: Events & triggers (beta)
 description: The durable local event log, operator-authored trigger files that fire chains from it, and the exact guarantees the dispatcher makes — and does not make.
+order: 12
 ---
 
 # Events & triggers (beta)
@@ -91,7 +92,7 @@ A trigger is a `trigger-*.json` file:
 
 A trigger grants timing, never capability — the fired chain runs under an operator-authored envelope like any other run. What the chain may do is decided by its tool allowlist and its policy, exactly as if you had started it by hand; the trigger only decides *when* it starts.
 
-`chain` and `policy` are resolved by name, workspace-first: the workspace `.contenox/` copy wins, `~/.contenox/` is the fallback, and a same-named workspace file shadows the home copy. Trigger files themselves are discovered the same way. See [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) for the full resolution story.
+`chain` and `policy` are resolved by name, workspace-first: the workspace `.contenox/` copy wins, `~/.contenox/` is the fallback, and a same-named workspace file shadows the home copy. Trigger files themselves are discovered the same way. See [Chain files: naming, roles, and resolution](/docs/guide/chains/naming/) for the full resolution story.
 
 `contenox vet` validates trigger files — the shape above, plus that the named chain and policy actually resolve on the search path. At dispatch start, a malformed trigger file is skipped with a printed warning and never fires; `contenox doctor` lists what loaded and what was skipped.
 
@@ -205,8 +206,8 @@ Each firing executes its chain the same way any other chain run does, under a re
 
 ## Next
 
-- [Event-driven chains: three stories (beta)](/docs/use-cases/event-driven-chains/) — the trigger tier in use: a phone buzz on `attention_asked`, a completion summary on `status_changed`, and the firing record as an audit trail
+- [Event-driven chains: three stories](/docs/rnd/event-driven-chains/) — the trigger tier in use: a phone buzz on `attention_asked`, a completion summary on `status_changed`, and the firing record as an audit trail
 - [The oracle](/docs/use-cases/auto-attention/) — an in-process adjudicator rules on a subagent's routine asks (no trigger, no dispatcher involved)
 - [HITL policies](/docs/guide/hitl/) — the envelopes fired chains run under
-- [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) — how the referenced files resolve
+- [Chain files: naming, roles, and resolution](/docs/guide/chains/naming/) — how the referenced files resolve
 - [`contenox events` reference](/docs/reference/contenox-cli/#contenox-events) — every flag

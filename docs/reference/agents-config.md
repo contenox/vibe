@@ -1,6 +1,7 @@
 ---
 title: agents.toml
 description: The config file behind agent declarations — budgets, loop bounds, shell allowlists, how a permission setting widens into rules, and what each tool name resolves to.
+order: 1
 ---
 
 # `agents.toml`

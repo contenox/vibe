@@ -19,21 +19,16 @@ import (
 
 const defaultKillGrace = 2 * time.Second
 
-// ChainACPSubcommand, ChainPathEnvVar, ChainHopEnvVar, ChainDBEnvVar, and
-// ChainWorkspaceFlag describe this binary's own ACP server for a chain-kind spawn: its ACP
-// subcommand, the env var naming the chain file, the env var carrying the dispatch hop, the
-// env var naming the database the dispatching host opened, and the flag carrying the
-// dispatching host's workspace id.
+// ChainACPSubcommand, ChainPathEnvVar, ChainHopEnvVar, ChainDBEnvVar and
+// ChainWorkspaceFlag describe this binary's own ACP server for a chain-kind
+// spawn.
 const (
 	ChainACPSubcommand = "acp"
 	ChainPathEnvVar    = "CONTENOX_ACP_CHAIN_PATH"
 	ChainHopEnvVar     = "CONTENOX_EVENT_HOP"
-	// ChainDBEnvVar hands the child the database its parent is actually using. A
-	// subagent's report, plan and verdict are writes against the mission row the
-	// parent created, so a child that resolved its own default database would find
-	// no such row and fail every mission tool with a not-found. It is an internal
-	// handoff between two contenox processes, not a user-facing knob: an explicit
-	// --db always wins over it.
+	// ChainDBEnvVar hands the child the database its parent is using, since a
+	// subagent writes against the mission row the parent created. An explicit --db
+	// always wins over it.
 	ChainDBEnvVar      = "CONTENOX_ACP_DB"
 	ChainWorkspaceFlag = "workspace-id"
 )
@@ -110,9 +105,8 @@ func (e FleetEntry) Running() bool { return len(e.Instances) > 0 }
 // Manager owns the lifecycle of running agent instances; every method is safe for
 // concurrent use and returns ErrNotFound for an unknown instanceID.
 type Manager interface {
-	// Start resolves agentName via the registry and brings up an instance bound to the
-	// Manager's root context (cwd is the sandbox workspace); prefer StartResolved if
-	// already resolved.
+	// Start resolves agentName via the registry and brings up an instance bound to
+	// the Manager's root context; prefer StartResolved if already resolved.
 	Start(ctx context.Context, agentName, cwd string) (instanceID string, err error)
 
 	// StartResolved spawns an instance from an already-resolved agent with no registry
@@ -353,8 +347,7 @@ func (m *manager) chainSpawner(ctx context.Context, agent *runtimetypes.Agent, c
 		env[ChainHopEnvVar] = strconv.Itoa(hop)
 	}
 	// Without this the child opens its own default database, where the mission row
-	// the dispatcher just wrote does not exist, and every mission tool it calls
-	// fails not-found until the run times out.
+	// the dispatcher just wrote does not exist.
 	if m.selfDBPath != "" {
 		env[ChainDBEnvVar] = m.selfDBPath
 	}
@@ -366,7 +359,7 @@ func (m *manager) chainSpawner(ctx context.Context, agent *runtimetypes.Agent, c
 			Cwd:       cwd,
 			Env:       env,
 		},
-		// Contenox spawning contenox runs outside the sandbox (SelfSpawn); the in-process
+		// Contenox spawning contenox runs outside the sandbox; the in-process
 		// capability grants and the HITL gate still govern it.
 		SelfSpawn: true,
 		Stderr:    m.stderr,
@@ -489,8 +482,6 @@ func (m *manager) Prompt(ctx context.Context, instanceID string, sessionID libac
 	return inst.promptSession(ctx, sessionID, prompt)
 }
 
-// DeliverToSession scans for the instance that owns sessionID and injects n into its
-// fan-out; ErrNotFound if none does.
 func (m *manager) DeliverToSession(ctx context.Context, sessionID libacp.SessionID, n libacp.SessionNotification) error {
 	if sessionID == "" {
 		return fmt.Errorf("agentinstance: sessionID is required")
@@ -550,8 +541,6 @@ func (m *manager) AvailableCommands(instanceID string, sessionID libacp.SessionI
 	return inst.availableCommands(sessionID), nil
 }
 
-// SessionAgentText returns the concatenated agent-message text retained in sessionID's
-// replay journal on instanceID; ok is false for an unknown instance or unowned session.
 func (m *manager) SessionAgentText(instanceID string, sessionID libacp.SessionID) (string, bool) {
 	inst, err := m.instance(instanceID)
 	if err != nil {
@@ -560,9 +549,6 @@ func (m *manager) SessionAgentText(instanceID string, sessionID libacp.SessionID
 	return inst.agentText(sessionID)
 }
 
-// SessionJournal returns a raw snapshot of sessionID's replay journal on instanceID
-// together with its working directory; ok is false for an unknown instance or unowned
-// session.
 func (m *manager) SessionJournal(instanceID string, sessionID libacp.SessionID) ([]libacp.SessionNotification, string, bool) {
 	inst, err := m.instance(instanceID)
 	if err != nil {

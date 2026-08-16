@@ -16,44 +16,31 @@ var (
 	ErrRequestTimeout = errors.New("request timed out")
 )
 
-// Handler is a function that processes a request and returns a response.
-// It is used by the Serve method to handle incoming requests.
+// Handler processes a request and returns a response for [Messenger.Serve].
 type Handler func(ctx context.Context, data []byte) ([]byte, error)
 
-// Messenger is a high-level pub-sub/request-reply interface for real-time
-// notifications and distributing lightweight messages between services.
-//
-// Guaranteed by every backend (enforced by conformance_test.go): Publish to a
-// subject with no subscribers is a no-op and never blocks; Stream delivers in
-// publish order until Unsubscribe or context cancel; a handler error still
-// yields a reply — Request returns a non-nil error only on transport
-// failure, never on handler failure; and after Close, every method returns
-// ErrConnectionClosed.
-//
-// Backends differ in ways callers must tolerate: NATS/InMem are at-most-once
-// under backpressure (drop once a subscriber's buffer fills) while SQLiteBus
-// is durable; NATS/InMem require Serve to return before Request is called,
-// SQLiteBus does not; handler concurrency and delivery latency (SQLiteBus is
-// poll-driven) vary per backend. Always give Request a deadline.
+// Messenger is a pub-sub/request-reply interface for distributing lightweight
+// messages between services. Every backend guarantees that Publish to a subject
+// with no subscribers never blocks, Stream delivers in publish order, a handler
+// error still yields a reply, and every method returns ErrConnectionClosed after
+// Close. Backends differ in durability, backpressure and latency, so always give
+// Request a deadline.
 type Messenger interface {
 	// Publish sends a fire-and-forget message to a given subject.
 	Publish(ctx context.Context, subject string, data []byte) error
 
-	// Stream creates a subscription to a subject and delivers messages asynchronously
-	// to the provided channel. The subscription is automatically managed and will
-	// be closed when the provided context is canceled.
+	// Stream subscribes to a subject and delivers messages to ch until ctx is
+	// cancelled.
 	Stream(ctx context.Context, subject string, ch chan<- []byte) (Subscription, error)
 
 	// Request sends a request message and waits for a reply. The context can be
 	// used to set a timeout or to cancel the request.
 	Request(ctx context.Context, subject string, data []byte) ([]byte, error)
 
-	// Serve registers a handler for a given subject to respond to requests.
-	// It starts a worker that listens for requests and executes the handler.
-	// The returned Subscription can be used to stop serving.
+	// Serve registers a handler for a subject; the returned Subscription stops it.
 	Serve(ctx context.Context, subject string, handler Handler) (Subscription, error)
 
-	// Close disconnects from the messaging server and cleans up any underlying resources.
+	// Close disconnects from the messaging server and releases its resources.
 	Close() error
 }
 

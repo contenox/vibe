@@ -12,7 +12,8 @@ type carveoutDoc struct {
 	Network    []NetCarveout `json:"network"`
 }
 
-// LoadCarveouts decodes and validates a JSON carve-out document (filesystem/network holes) into fs and net, rejecting unknown fields and wrapping errors in ErrInvalidCarveout; paths are not resolved here.
+// LoadCarveouts decodes and validates a JSON carve-out document into fs and net,
+// rejecting unknown fields and wrapping errors in ErrInvalidCarveout.
 func LoadCarveouts(r io.Reader) (fs []FSCarveout, net []NetCarveout, err error) {
 	dec := json.NewDecoder(r)
 	dec.DisallowUnknownFields()

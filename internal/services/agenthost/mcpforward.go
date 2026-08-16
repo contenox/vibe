@@ -37,10 +37,9 @@ func ResolveForwardedMcpServers(ctx context.Context, resolver McpServerResolver,
 	return out, nil
 }
 
-// McpServerForACP maps a registered MCP server row to its ACP session/new
-// wire shape. Only reachability data is forwarded (argv, URL, explicit
-// headers); auth synthesis (authToken, oauth, injectParams) is never
-// translated — credentials reach the agent only via explicit headers.
+// McpServerForACP maps a registered MCP server row to its ACP session/new wire
+// shape. Only reachability data is forwarded; credentials reach the agent only
+// via explicit headers.
 func McpServerForACP(row *runtimetypes.MCPServer) (libacp.McpServer, error) {
 	srv := libacp.McpServer{Name: row.Name}
 	switch row.Transport {
@@ -69,8 +68,6 @@ func McpServerForACP(row *runtimetypes.MCPServer) (libacp.McpServer, error) {
 	return srv, nil
 }
 
-// filterMcpServersByCapabilities drops servers the agent's mcpCapabilities
-// cannot consume (stdio always passes) and returns kept and dropped names.
 func filterMcpServersByCapabilities(servers []libacp.McpServer, caps libacp.McpCapabilities) (kept []libacp.McpServer, dropped []string) {
 	for _, srv := range servers {
 		switch srv.Kind() {

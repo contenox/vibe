@@ -1,8 +1,6 @@
 // hitl_workspace_scope_test.go pins the CLI end of the writer/reader scope
 // agreement: the service every `contenox` command gates on must resolve
 // cli.hitl-policy-name at the SAME workspace `contenox config set` writes it.
-// Constructing hitlservice without binding the workspace is what made the
-// documented policy switch silently inert.
 package contenoxcli
 
 import (

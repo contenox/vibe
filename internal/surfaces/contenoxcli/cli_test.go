@@ -202,10 +202,7 @@ func TestUnit_resolveContenoxDir(t *testing.T) {
 		t.Fatalf("Failed to write workspace.id: %v", err)
 	}
 
-	// 1. Test from sub2Dir. It should walk up and find it in projectDir.
-	// t.Chdir restores the original cwd on cleanup — a plain os.Chdir would
-	// leave the whole test process inside a deleted temp dir, breaking any
-	// later test in the package that spawns a subprocess (getwd fails).
+	// 1. Test from sub2Dir.
 	t.Chdir(sub2Dir)
 
 	resolvedDir, err := ResolveContenoxDir(nil)

@@ -10,7 +10,6 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// activityTrackerDecorator implementation
 type activityTrackerDecorator struct {
 	service Service
 	tracker libtracker.ActivityTracker

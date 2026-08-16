@@ -6,15 +6,18 @@ import (
 	"unicode"
 )
 
-// EnvPolicy is the operator-facing whitelist (exact names or simple globs) deciding which parent environment variables a confined process may inherit, with Deny always winning over Allow.
+// EnvPolicy is the operator-facing whitelist deciding which parent environment
+// variables a confined process may inherit; Deny always wins over Allow.
 type EnvPolicy struct {
-	// Allow lists names or globs to pass through (a glob has a single leading or trailing "*"; a bare "*" passes everything Deny does not veto).
+	// Allow lists names or globs to pass through; a glob has a single leading
+	// or trailing "*".
 	Allow []string
-	// Deny lists names or globs that are never passed even when Allow matches — Deny always wins.
+	// Deny lists names or globs that are never passed even when Allow matches.
 	Deny []string
 }
 
-// DefaultEnvAllow is the sane baseline (POSIX-shell essentials, nothing that carries a secret); HOME is deliberately absent since scrubEnv always forces the scoped HOME.
+// DefaultEnvAllow is the baseline of POSIX-shell essentials. HOME is absent
+// because scrubEnv always forces the scoped HOME.
 func DefaultEnvAllow() []string {
 	return []string{
 		"PATH",
@@ -32,13 +35,13 @@ func DefaultEnvAllow() []string {
 }
 
 // ControlPlaneEnvDeny is the non-negotiable veto for contenox's own
-// control-plane variables — unlike credential-shape patterns, no wider
-// Allow should ever be able to re-permit these.
+// control-plane variables; no Allow may re-permit these.
 func ControlPlaneEnvDeny() []string {
 	return []string{"CONTENOX_*"}
 }
 
-// SecretEnvDeny is the common credential name-shape veto, letting a loose "pass everything" allow still strip obvious secrets.
+// SecretEnvDeny is the common credential name-shape veto, letting a loose
+// "pass everything" allow still strip obvious secrets.
 func SecretEnvDeny() []string {
 	return []string{
 		"*_TOKEN",
@@ -79,8 +82,7 @@ func DefaultEnvPolicy() EnvPolicy {
 	return EnvPolicy{Allow: DefaultEnvAllow(), Deny: DefaultEnvDeny()}
 }
 
-// Allowing returns a copy of p with names appended to Allow; it copies
-// rather than mutates so DefaultEnvPolicy's shared slices are never aliased.
+// Allowing returns a copy of p with names appended to Allow.
 func (p EnvPolicy) Allowing(names ...string) EnvPolicy {
 	return EnvPolicy{Allow: concat(p.Allow, names), Deny: clone(p.Deny)}
 }
@@ -90,7 +92,8 @@ func (p EnvPolicy) Denying(names ...string) EnvPolicy {
 	return EnvPolicy{Allow: clone(p.Allow), Deny: concat(p.Deny, names)}
 }
 
-// Resolve expands the policy against a parent environment into the sorted, de-duplicated names (matching Allow, not Deny) that are present in parentEnv; malformed entries (no "=") are skipped.
+// Resolve expands the policy against parentEnv into the sorted, de-duplicated
+// names that are present and match Allow but not Deny.
 func (p EnvPolicy) Resolve(parentEnv []string) []string {
 	kept := make(map[string]struct{}, len(p.Allow))
 	for _, kv := range parentEnv {
@@ -106,7 +109,8 @@ func (p EnvPolicy) Resolve(parentEnv []string) []string {
 	return names
 }
 
-// Apply is Resolve's counterpart for native shell-exec sites, returning surviving "KEY=VALUE" entries (last occurrence wins, sorted) instead of names; unlike scrubEnv it does not force a scoped HOME.
+// Apply is Resolve's counterpart returning surviving "KEY=VALUE" entries rather
+// than names. Unlike scrubEnv it does not force a scoped HOME.
 func (p EnvPolicy) Apply(parentEnv []string) []string {
 	kept := make(map[string]string, len(parentEnv))
 	for _, kv := range parentEnv {
@@ -147,7 +151,8 @@ func (p EnvPolicy) passes(name string) bool {
 	return !vetoesAny(p.Deny, name) && matchesAny(p.Allow, name)
 }
 
-// ParseEnvList splits an operator-supplied allow/deny list (comma/semicolon/whitespace separated) into trimmed entries, returning nil for empty or all-blank input; it does not validate glob syntax, so a typo simply matches nothing.
+// ParseEnvList splits a comma/semicolon/whitespace separated allow/deny list
+// into trimmed entries, returning nil for empty input.
 func ParseEnvList(s string) []string {
 	fields := strings.FieldsFunc(s, func(r rune) bool {
 		return r == ',' || r == ';' || unicode.IsSpace(r)

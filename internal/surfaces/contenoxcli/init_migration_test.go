@@ -133,8 +133,7 @@ func TestUnit_RunLocalInit_SeedsOnlyConventionNames(t *testing.T) {
 	require.NoError(t, RunLocalInit(&out, false, false, workspace, ""))
 
 	// contenox, run, acp, acpx and beam are no longer seeded as JSON: they are
-	// declarations under agents/, transpiled into .generated. What remains is
-	// the set a declaration cannot describe.
+	// declarations under agents/, transpiled into .generated.
 	wantChains := []string{
 		"chain-fim-default.json",
 		"chain-compact-default.json",

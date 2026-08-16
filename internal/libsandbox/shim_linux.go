@@ -19,7 +19,9 @@ const (
 	envShimSpec = "CONTENOX_SANDBOX_SPEC"
 )
 
-// ShimMain is the sandbox shim entrypoint, called at the top of main(); it returns (false, nil) when not invoked as the shim, otherwise it does not return except with (true, err) wrapping ErrIsolation, which the caller must treat as fatal.
+// ShimMain is the sandbox shim entrypoint, called at the top of main(). It
+// returns (false, nil) when not invoked as the shim; otherwise it does not
+// return except with (true, err) wrapping ErrIsolation, which is fatal.
 func ShimMain() (handled bool, err error) {
 	if os.Getenv(envShimSentinel) == "" {
 		return false, nil
@@ -29,7 +31,7 @@ func ShimMain() (handled bool, err error) {
 		return true, fmt.Errorf("%w: shim: decode plan: %v", ErrIsolation, e)
 	}
 
-	// netns setup is process-wide, so raising "lo" here (before thread pinning) is safe; failure fails closed.
+	// netns setup is process-wide, so raising "lo" before thread pinning is safe.
 	if plan.Loopback {
 		if e := bringLoopbackUp(); e != nil {
 			return true, fmt.Errorf("%w: shim: %w", ErrIsolation, e)
@@ -43,10 +45,11 @@ func ShimMain() (handled bool, err error) {
 		}
 	}
 
-	// Landlock's domain is per-thread and execve inherits only the calling thread's domain, so NO_NEW_PRIVS/landlock_restrict_self/execve must run pinned to one thread; never unlocked since exec follows.
+	// Landlock's domain is per-thread and execve inherits only the calling
+	// thread's domain, so the rest must run pinned to one thread.
 	runtime.LockOSThread()
 
-	// Seccomp filter is per-thread like Landlock, so this must run after LockOSThread and before execve to cover every syscall the target makes.
+	// Seccomp is per-thread like Landlock: after LockOSThread, before execve.
 	if plan.Tap {
 		if e := installSyscallTap(plan.TapSockFD); e != nil {
 			return true, fmt.Errorf("%w: shim: %w", ErrIsolation, e)
@@ -57,7 +60,6 @@ func ShimMain() (handled bool, err error) {
 		return true, fmt.Errorf("%w: shim: %w", ErrIsolation, e)
 	}
 
-	// Strip the transport vars — the agent must not see how it was confined.
 	childEnv := stripTransportEnv(os.Environ())
 	if e := syscall.Exec(plan.Exec, plan.Args, childEnv); e != nil {
 		return true, fmt.Errorf("%w: shim: exec %q: %w", ErrIsolation, plan.Exec, e)

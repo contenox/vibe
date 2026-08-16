@@ -15,20 +15,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file drives the failure the re-offer closes: an approval was raised,
-// nobody answered inside localtools.ApprovalParkWindow, the run parked with a
-// durable checkpoint — and every client showed a session that had simply
-// stopped, with no card and no way to answer.
-//
 // The asks here are written straight to the store rather than raised through a
-// turn, because what is under test is what an ATTACH does with a row that
-// outlived its asker. A live turn cannot produce that state without waiting
-// out the park window.
+// turn: what is under test is what an attach does with a row that outlived its
+// asker, and a live turn cannot produce that state without waiting out the park
+// window.
 
 // parkedAskFleet is a fleet whose transports carry a real hitlservice over the
-// fleet's own store, plus the resume hook a verdict must reach. Keeping the
-// hook's log is what lets a test assert the durable outcome rather than the
-// RPC.
+// fleet's own store, plus the resume hook a verdict must reach.
 type parkedAskFleet struct {
 	*fleet
 
@@ -61,9 +54,7 @@ func (pf *parkedAskFleet) resumedRuns() []string {
 }
 
 // parkAsk writes the state a park leaves behind: a pending ask naming its
-// session, and the chain checkpoint the run suspended into. Both halves
-// matter — the checkpoint is what makes hitlservice refuse a verdict from a
-// process that cannot resume it.
+// session, and the chain checkpoint the run suspended into.
 func (pf *parkedAskFleet) parkAsk(t *testing.T, askID, contenoxSessionID string) *runtimetypes.HITLApproval {
 	t.Helper()
 	row := &runtimetypes.HITLApproval{
@@ -127,9 +118,8 @@ func awaitCard(t *testing.T, peer *fleetPeer, askID string) libacp.RequestPermis
 	return found
 }
 
-// cardsFor counts how many cards this client was shown for one approval —
-// the number that must stay at one no matter how many connections hold the
-// session.
+// cardsFor counts how many cards this client was shown for one approval — the
+// number that must stay at one no matter how many connections hold the session.
 func cardsFor(peer *fleetPeer, askID string) int {
 	peer.lc.permMu.Lock()
 	defer peer.lc.permMu.Unlock()
@@ -142,14 +132,7 @@ func cardsFor(peer *fleetPeer, askID string) int {
 	return n
 }
 
-// TestFleet_AttachingToAParkedSessionIsShownTheApproval is the incident. A run
-// parked on an approval nobody answered; the ask survives as a pending row and
-// the run is resumable, but the asking goroutine is gone, so no live card
-// exists for a client to be handed. Attaching must raise it again.
-//
-// The card is asserted to carry the ask's own id — the answer has to land on
-// the same durable row — and the recovery envelope, so the operator sees the
-// deadline and the terminal command even here.
+// TestFleet_AttachingToAParkedSessionIsShownTheApproval is the incident.
 func TestFleet_AttachingToAParkedSessionIsShownTheApproval(t *testing.T) {
 	pf := newParkedAskFleet(t)
 	phone := pf.attach(t, "att-phone")
@@ -182,14 +165,7 @@ func TestFleet_AttachingToAParkedSessionIsShownTheApproval(t *testing.T) {
 }
 
 // TestFleet_AnsweringAReofferedAskResolvesTheDurableRow is the constraint that
-// decides whether any of this is worth showing. The goroutine that raised the
-// original ask was abandoned when the park window elapsed, so a verdict that
-// stops at this surface unblocks nothing — it would tell the operator they
-// released a run that is still parked.
-//
-// The assertion is therefore on the row and on the resume hook, not on the
-// RPC: the ask must end approved, and the hook that restarts the checkpointed
-// run must have been called with its id.
+// decides whether any of this is worth showing.
 func TestFleet_AnsweringAReofferedAskResolvesTheDurableRow(t *testing.T) {
 	pf := newParkedAskFleet(t)
 	phone := pf.attach(t, "att-phone")
@@ -216,14 +192,8 @@ func TestFleet_AnsweringAReofferedAskResolvesTheDurableRow(t *testing.T) {
 	}, 10*time.Second, 10*time.Millisecond, "the verdict must reach the resume hook the checkpointed run waits on")
 }
 
-// TestFleet_AnsweredAndExpiredAsksAreNotReoffered pins the two rows that are
-// not live questions. An answered ask is decided; an ask past expires_at is a
-// decided question waiting for the sweeper to record on_timeout, and answering
-// it would be refused. Re-offering either puts a card in front of an operator
-// that can change nothing.
-//
-// A third row is parked alongside them so the assertion is "these were
-// filtered", not "nothing happened".
+// TestFleet_AnsweredAndExpiredAsksAreNotReoffered pins the two rows that are not
+// live questions.
 func TestFleet_AnsweredAndExpiredAsksAreNotReoffered(t *testing.T) {
 	pf := newParkedAskFleet(t)
 	phone := pf.attach(t, "att-phone")
@@ -260,16 +230,7 @@ func TestFleet_AnsweredAndExpiredAsksAreNotReoffered(t *testing.T) {
 }
 
 // TestFleet_ReattachingDoesNotRaiseASecondCardForOneApproval pins where the
-// idempotency lives. A session is held by every attached connection, so the
-// same approval showing on a phone and a desk is the intended state — each of
-// them is a screen someone may be looking at. What must never happen is ONE
-// connection being asked twice about one approval, which is exactly what a
-// client reloading a session it already holds would otherwise produce.
-//
-// Both halves are asserted. The desk loads the session twice — the card it is
-// already showing must not be stacked behind itself — and the phone then loads
-// it once, being shown the ask for the first time, because a second connection
-// is a second screen and not a duplicate.
+// idempotency lives.
 func TestFleet_ReattachingDoesNotRaiseASecondCardForOneApproval(t *testing.T) {
 	pf := newParkedAskFleet(t)
 	phone := pf.attach(t, "att-phone")

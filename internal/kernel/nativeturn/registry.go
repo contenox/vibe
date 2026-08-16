@@ -89,8 +89,7 @@ func (t *Turn) Cancel() { t.ts.teardown() }
 
 // Start ensures a turn is running for sid and attaches viewer to it: an in-flight
 // turn is joined (started false), otherwise a fresh turn is started on a
-// serve-rooted, hard-deadline-bounded context (belt 2, started true); returns
-// ErrClosed once the Registry is Closed.
+// serve-rooted, deadline-bounded context (started true).
 func (r *Registry) Start(sid libacp.SessionID, fn TurnFunc, viewer Viewer) (*Turn, bool, error) {
 	r.mu.Lock()
 	if r.closed {

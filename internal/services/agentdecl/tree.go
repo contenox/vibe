@@ -12,43 +12,25 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
-// TreeDialect is how a tree's declarations are read. contenox's own
-// frontmatter — name, description, tools, model, permissionMode — is the
-// claude-code vocabulary, which is why files written for that tool run here
-// unchanged; a tree node states the dialect instead of guessing it.
+// TreeDialect is the dialect a tree's declarations are read as.
 const TreeDialect = DialectClaudeCode
 
 // AgentFilename is the declaration at a tree node. A directory holding one is a
 // node; a directory holding subdirectories as well is a router over them.
 const AgentFilename = "agent.md"
 
-// RecoveryFilename is the OPTIONAL second attempt beside a leaf's agent.md.
-//
-// A file rather than a flag because a recovery prompt is a different prompt: it
-// is written for an agent that has already failed once, and the shipped chains
-// prove the need — their recovery stages carry their own instructions, and the
-// review branch deliberately has none at all.
+// RecoveryFilename is the optional second attempt beside a leaf's agent.md.
 const RecoveryFilename = "recovery.md"
 
-// FailureFilename is the OPTIONAL terminal prompt at a tree's ROOT: what the
-// chain says when every branch has given up. Absent takes a plain default.
-//
-// One per tree, not per leaf, because there is one terminal: a reader wants to
-// know what was attempted, and which branch attempted it is already in the
-// transcript.
+// FailureFilename is the optional terminal prompt at a tree's root: what the
+// chain says when every branch has given up.
 const FailureFilename = "failure.md"
 
 // AgentTree is a directory of declarations: one agent, or a router over the
 // agents beneath it.
-//
-// THE TREE IS THE BRANCHING. A chain that routes between a coding loop, a
-// review loop and a general loop is a directory with three subdirectories, and
-// the classifier that chooses between them is the agent.md at their parent.
-// Nothing in the declaration format had to grow a "branches" field, and nesting
-// composes without any further concept.
 type AgentTree struct {
-	// Name is the directory's name, and for a child it is ALSO the branch label
-	// the router matches on. They cannot drift because they are one string.
+	// Name is the directory's name, and for a child also the branch label the
+	// router matches on.
 	Name string
 	// Agent is this node's declaration: a leaf's agent, or a router's classifier.
 	Agent *AgentIR
@@ -57,17 +39,16 @@ type AgentTree struct {
 	// Children are the branches, sorted by name so emission is deterministic.
 	Children []*AgentTree
 	// Default names the child a router falls back to when the classifier answers
-	// something unmapped. Taken from the router declaration's `default:` field.
+	// something unmapped.
 	Default string
 	// Failure is the tree's terminal prompt, read from failure.md at the root.
-	// Nil anywhere else.
 	Failure *AgentIR
 }
 
 // IsRouter reports whether this node branches.
 func (t *AgentTree) IsRouter() bool { return len(t.Children) > 0 }
 
-// Labels are the branch labels this router accepts, in emission order.
+// Labels returns the branch labels this router accepts, in emission order.
 func (t *AgentTree) Labels() []string {
 	out := make([]string, 0, len(t.Children))
 	for _, c := range t.Children {
@@ -76,21 +57,16 @@ func (t *AgentTree) Labels() []string {
 	return out
 }
 
-// LoadTree reads a directory as an agent tree.
-//
-// A directory qualifies when it holds an agent.md. Subdirectories that hold one
-// become branches; anything else in the directory is ignored, so a tree can
-// carry a README or fixtures without becoming part of the chain.
+// LoadTree reads a directory as an agent tree. A directory qualifies when it
+// holds an agent.md; subdirectories that hold one become branches.
 func LoadTree(dir string, cfg Config) (*AgentTree, error) {
 	agentPath := filepath.Join(dir, AgentFilename)
 	data, err := os.ReadFile(agentPath)
 	if err != nil {
 		return nil, fmt.Errorf("agentdecl: %s: %w", agentPath, err)
 	}
-	// Parsed AS the native dialect rather than sniffed: a file at a tree node is
-	// contenox's own declaration by construction, and DetectDialect refuses a
-	// file that carries no vendor-specific field and sits outside a known
-	// vendor directory — which every tree file does.
+	// Parsed as the native dialect rather than sniffed: a file at a tree node is
+	// contenox's own declaration by construction.
 	ir, err := ParseAs(TreeDialect, agentPath, data, cfg)
 	if err != nil {
 		return nil, err
@@ -145,11 +121,6 @@ func LoadTree(dir string, cfg Config) (*AgentTree, error) {
 	return node, nil
 }
 
-// validateDefault refuses a router whose fallback names no child.
-//
-// Refused rather than guessed: a classifier answering something unmapped is
-// ordinary, and silently routing it to whichever branch sorted first is how a
-// request ends up in the wrong loop with nothing saying so.
 func (t *AgentTree) validateDefault(dir string) error {
 	if t.Default == "" {
 		if len(t.Children) == 1 {
@@ -168,24 +139,14 @@ func (t *AgentTree) validateDefault(dir string) error {
 		dir, t.Default, strings.Join(t.Labels(), ", "))
 }
 
-// EmitTree renders a tree as ONE task chain: a router per branching node, the
+// EmitTree renders a tree as one task chain: a router per branching node, the
 // five-task loop per leaf, and a single terminal they all fall back to.
-//
-// The emitted chain is the same shape as the hand-written ones it replaces —
-// see the equivalence test, which diffs this against the shipped ACP chain.
 func EmitTree(root *AgentTree, cfg Config) (*taskengine.TaskChainDefinition, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	// A tree node's identity is its PATH, not its dialect. ScopedName exists to
-	// keep an agent imported out of another tool's directory from colliding with
-	// a native one; a tree is native by construction and its directory names are
-	// already unique among their siblings, so prefixing here would only make the
-	// task ids depend on which vocabulary the file happened to be written in.
-	// The declaration's own name wins, and the directory is the fallback. A
-	// shipped agent is looked up BY NAME — chain-acp — so the
-	// emitted id has to be the name it is already known by, or converting an
-	// agent silently renames it and every reference to it stops resolving.
+	// The declaration's own name wins over the directory: a shipped agent is
+	// looked up by name, so emitting anything else would rename it.
 	id := root.Agent.Name
 	if id == "" {
 		id = root.Name
@@ -197,10 +158,8 @@ func EmitTree(root *AgentTree, cfg Config) (*taskengine.TaskChainDefinition, err
 	if err != nil {
 		return nil, err
 	}
-	// The terminal reads whatever ran last, not a named task: several branches
-	// reach it and they do not share a stage — the review branch has no recovery
-	// at all, so naming one would point at a task that does not exist on the
-	// path that got here. The shipped chains use the same "previous_output".
+	// The terminal reads whatever ran last, not a named task: branches reaching
+	// it do not share a stage.
 	_ = lastLoop
 	term := terminalTask(terminal, cfg, "previous_output")
 	if root.Failure != nil {
@@ -208,7 +167,7 @@ func EmitTree(root *AgentTree, cfg Config) (*taskengine.TaskChainDefinition, err
 	}
 	tasks = append(tasks, term)
 
-	// The engine enters at the first task, so the entry has to lead.
+	// The engine enters at the first task.
 	if tasks[0].ID != entry {
 		for i, t := range tasks {
 			if t.ID == entry {
@@ -225,8 +184,6 @@ func EmitTree(root *AgentTree, cfg Config) (*taskengine.TaskChainDefinition, err
 	}, nil
 }
 
-// emitNode appends a node's tasks and reports the id to enter it by, plus the
-// id of the last loop emitted — which the terminal reads its input from.
 func emitNode(node *AgentTree, cfg Config, prefix, terminal string, tasks *[]taskengine.TaskDefinition) (string, string, error) {
 	if err := refuseUnsafe(node.Agent); err != nil {
 		return "", "", err
@@ -263,10 +220,7 @@ func emitNode(node *AgentTree, cfg Config, prefix, terminal string, tasks *[]tas
 		SystemInstruction: routerInstruction(node),
 		ExecuteConfig:     routerConfig(cfg),
 		Transition: taskengine.TaskTransition{
-			// A classifier that FAILS falls through to the default branch. The
-			// alternative is a chain that dies because the cheap model used to
-			// pick a lane was briefly unavailable — the work is still doable,
-			// just not sorted, so it goes where unsorted work goes.
+			// A classifier that fails falls through to the default branch.
 			OnFailure: defaultGoto,
 			Branches:  branches,
 		},
@@ -277,14 +231,6 @@ func emitNode(node *AgentTree, cfg Config, prefix, terminal string, tasks *[]tas
 	return routeID, lastLoop, nil
 }
 
-// routerInstruction is the classifier prompt with the labels APPENDED FROM THE
-// DIRECTORY NAMES.
-//
-// This is the whole reason the tree is worth having. In the hand-written chains
-// the prompt names its labels in prose while the branches match the same
-// strings by equality, and nothing checks that the two agree — a renamed branch
-// silently stops being reachable. Here one string is both, so they cannot
-// disagree, and an author cannot forget to update the prompt.
 func routerInstruction(node *AgentTree) string {
 	body := strings.TrimRight(systemInstruction(node.Agent), "\n")
 	labels := node.Labels()
@@ -301,9 +247,6 @@ func routerInstruction(node *AgentTree) string {
 		strings.Join(lines, "\n") + "\n\nIf none clearly applies, answer " + node.Default + "."
 }
 
-// routerConfig runs classification on the alt model when one is configured:
-// choosing a branch is a one-word answer and does not need the model the branch
-// itself will use. It carries NO tools — a router decides, it does not act.
 func routerConfig(cfg Config) *taskengine.LLMExecutionConfig {
 	model, provider := cfg.Routing.RouterModel, cfg.Routing.RouterProvider
 	if model == "" {
@@ -320,16 +263,9 @@ func routerConfig(cfg Config) *taskengine.LLMExecutionConfig {
 	}
 }
 
-// MergedIR is the tree seen as one agent, for the things that are decided per
-// CHAIN rather than per task: its name, and the HITL policy generated beside
-// it.
-//
-// Tools are the UNION of every leaf's. A policy is written once for the chain
-// and any branch may run, so a policy narrowed to the router — which holds no
-// tools at all — would refuse the work the branches exist to do. The posture is
-// the broadest any leaf declares, for the same reason.
-//
-// The hash covers every node, so editing any file in the tree regenerates.
+// MergedIR is the tree seen as one agent, for what is decided per chain rather
+// than per task. Tools are the union of every leaf's, the posture the broadest,
+// and the hash covers every node.
 func (t *AgentTree) MergedIR() *AgentIR {
 	out := &AgentIR{
 		Name:        t.Name,
@@ -360,8 +296,7 @@ func (t *AgentTree) MergedIR() *AgentIR {
 	}
 	walk(t)
 	out.Tools.Allow = dedupeSorted(out.Tools.Allow)
-	// A tool is denied for the chain only when EVERY leaf denies it: one branch
-	// that may use it means the policy has to allow it through.
+	// A tool is denied for the chain only when every leaf denies it.
 	out.Tools.Deny = commonDeny(t)
 	out.Source.SHA256 = hex.EncodeToString(sum.Sum(nil))
 	return out

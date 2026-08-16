@@ -13,9 +13,6 @@ import (
 	"github.com/contenox/contenox/libkvstore"
 )
 
-// observedModelCachePrefix is the KV key prefix under which each backend's
-// observed model list is cached (see loadObservedModelCache /
-// storeObservedModelCache). Distinct from ProviderKeyPrefix ("cloud-provider:").
 const observedModelCachePrefix = "prov:"
 
 func observedModelCacheKey(backendID string) string {

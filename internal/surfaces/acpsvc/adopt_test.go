@@ -36,9 +36,8 @@ func dispatchLike(t *testing.T, mgr agentinstance.Manager, agentName, cwd string
 	return instanceID, sessionID
 }
 
-// denyRecorder collects the kernel's EventUnsupervisedDeny events, so a test
-// can assert whether a permission request was auto-denied for lack of a
-// controller.
+// denyRecorder collects the kernel's EventUnsupervisedDeny events, so a test can
+// assert whether a permission request was auto-denied for lack of a controller.
 type denyRecorder struct {
 	mu   sync.Mutex
 	dens []libacp.SessionID
@@ -59,15 +58,12 @@ func (d *denyRecorder) count() int {
 	return len(d.dens)
 }
 
-// cancelPermission is the permission answer the adopting client gives in
-// these tests: the stub agent's callbacks scenario ends the turn as a
-// cancelled refusal without an fs/* round trip. What matters is that the
-// request reached the adopter at all.
+// cancelPermission is the permission answer the adopting client gives in these
+// tests: the stub agent's callbacks scenario ends the turn as a cancelled
+// refusal without an fs/* round trip.
 var cancelPermission = libacp.RequestPermissionResponse{
 	Outcome: libacp.RequestPermissionOutcome{Outcome: libacp.PermissionOutcomeCancelled},
 }
-
-// parseAdoptMeta — the defensive `_meta` decode.
 
 func TestAdopt_ParseAdoptMeta(t *testing.T) {
 	for _, tc := range []struct {
@@ -441,9 +437,6 @@ func TestLoopback_Adopt_SecondAdopterObservesWithoutControl(t *testing.T) {
 	require.False(t, gotSecond, "the observer (second adopter) is never asked")
 }
 
-// Rejections below: every one is a clean session/new failure with no session
-// created and nothing stopped — the instance belongs to whoever dispatched it.
-
 func TestLoopback_Adopt_NilInstancesRefused(t *testing.T) {
 	h := newLoopbackHarness(t)
 	require.Nil(t, h.tr.deps.Instances)
@@ -658,10 +651,9 @@ func TestAdopt_HoldRelayQueuesThenFlushesInOrder(t *testing.T) {
 	require.Equal(t, []string{"one", "two", "three", "live"}, texts)
 }
 
-// fakeAdoptManager is an agentinstance.Manager whose Get answer a test
-// dictates, for the one state a real kernel won't hand back on demand
-// (registered but not Running). Counts the two calls a refused adopt must
-// never make.
+// fakeAdoptManager is an agentinstance.Manager whose Get answer a test dictates,
+// for the one state a real kernel won't hand back on demand (registered but not
+// Running).
 type fakeAdoptManager struct {
 	status agentinstance.InstanceStatus
 

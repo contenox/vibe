@@ -37,8 +37,6 @@ func (s *service) store() runtimetypes.Store {
 	return runtimetypes.New(s.db.WithoutTransaction())
 }
 
-// Create validates agent and persists it. A colliding name surfaces as
-// libdb.ErrUniqueViolation (checked via errors.Is).
 func (s *service) Create(ctx context.Context, agent *runtimetypes.Agent) error {
 	if err := validate(agent); err != nil {
 		return err
@@ -66,8 +64,6 @@ func (s *service) GetByName(ctx context.Context, name string) (*runtimetypes.Age
 	return s.store().GetAgentByName(ctx, name)
 }
 
-// Update validates agent like Create, requires an ID, and re-checks name
-// uniqueness excluding agent's own ID.
 func (s *service) Update(ctx context.Context, agent *runtimetypes.Agent) error {
 	if agent.ID == "" {
 		return fmt.Errorf("id is required for update")
@@ -96,7 +92,6 @@ func (s *service) List(ctx context.Context, createdAtCursor *time.Time, limit in
 // disabled agent; callers branch on it via errors.Is.
 var ErrAgentDisabled = errors.New("agentregistryservice: agent is disabled")
 
-// disabledAgentError pairs ErrAgentDisabled with a message naming the remedy.
 type disabledAgentError struct{ name string }
 
 func (e *disabledAgentError) Error() string {
@@ -118,7 +113,6 @@ func ResolveForSpawn(ctx context.Context, svc Service, agentName string) (*runti
 	return agent, nil
 }
 
-// checkNameAvailable errors with libdb.ErrUniqueViolation if name is taken by another ID.
 func (s *service) checkNameAvailable(ctx context.Context, name, excludeID string) error {
 	existing, err := s.store().GetAgentByName(ctx, name)
 	if err != nil {
@@ -133,7 +127,6 @@ func (s *service) checkNameAvailable(ctx context.Context, name, excludeID string
 	return fmt.Errorf("agent: name %q already exists: %w", name, libdb.ErrUniqueViolation)
 }
 
-// validate checks agent-level fields and the per-kind config's own Validate().
 func validate(agent *runtimetypes.Agent) error {
 	if agent.Name == "" {
 		return fmt.Errorf("name is required")

@@ -60,12 +60,7 @@ func SetAdjudicator(svc Service, adj Adjudicator) {
 }
 
 // offer hands ask to this process's adjudicator at most once. Both seams that
-// can raise an ask call it, because neither one always runs: a dispatched unit
-// records the row (RecordPendingApproval) but mounts no adjudicator, while the
-// host that holds the envelope only ever adopts that row (RequestApproval).
-// Gating the host's offer on having created the row leaves such an ask offered
-// to nobody. Dedup is per service instance and keyed by ask, so the same row
-// crossing both seams in one process is still judged once.
+// can raise an ask call it, because neither one always runs.
 func (s *service) offer(ctx context.Context, ask Adjudication) {
 	s.mu.Lock()
 	adj := s.adjudicator
@@ -86,8 +81,6 @@ func (s *service) offer(ctx context.Context, ask Adjudication) {
 	go adj.Adjudicate(context.WithoutCancel(ctx), ask)
 }
 
-// forgetOffer drops a resolved ask's dedup entry; a terminal row is never
-// offered again, so keeping it would only grow the map for the process's life.
 func (s *service) forgetOffer(askID string) {
 	s.mu.Lock()
 	delete(s.offered, askID)
@@ -132,7 +125,6 @@ var ErrAgentApprovalBoundSpent = errors.New("hitlservice: mission agent-approval
 
 const agentApprovalResolutionLike = `%"decidedBy":%`
 
-// RespondAsAgentBounded records a permission verdict attributed to agentName, conditional on the mission holding fewer than max agent-decided asks. guidance is optional and is what the denial tells the unit to do instead.
 func (s *service) RespondAsAgentBounded(ctx context.Context, askID, agentName string, approved bool, guidance string, max int) error {
 	if s.approvals == nil {
 		return fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
@@ -240,7 +232,6 @@ func GuidanceOf(row *runtimetypes.HITLApproval) string {
 	return strings.TrimSpace(*res.Guidance)
 }
 
-// AgentApprovalCount reports how many of missionID's gated tool calls an agent decided.
 func (s *service) AgentApprovalCount(ctx context.Context, missionID string) (int, error) {
 	if s.approvals == nil {
 		return 0, fmt.Errorf("hitlservice: durable approval store not configured")
@@ -261,10 +252,6 @@ func (s *service) AgentApprovalCount(ctx context.Context, missionID string) (int
 	return count, nil
 }
 
-// AgentGuidanceFor returns what an adjudicating agent told missionID's unit to
-// do instead of the calls it refused, oldest first. A denial the unit could not
-// see the reason for is what leaves it stalled, so this is the text the drive
-// loop hands back on its next turn.
 func (s *service) AgentGuidanceFor(ctx context.Context, missionID string) ([]GuidanceNote, error) {
 	if s.approvals == nil {
 		return nil, fmt.Errorf("hitlservice: durable approval store not configured")
@@ -301,9 +288,6 @@ type GuidanceNote struct {
 	Guidance  string
 }
 
-// AskGuidance reports who ruled on askID when it was not a human, and the
-// redirect they attached. Both empty for a human verdict, a pending row, or an
-// unreadable one — the caller then says only that the call was denied.
 func (s *service) AskGuidance(ctx context.Context, approvalID string) (string, string) {
 	if s.approvals == nil {
 		return "", ""

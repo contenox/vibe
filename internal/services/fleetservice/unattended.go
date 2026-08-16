@@ -65,8 +65,7 @@ func (a *unattendedAnswerer) answer(ctx context.Context, req agentinstance.Unatt
 		reportChange("mission_id", missionID)
 	}
 
-	// Checked before the action rules: a call crossing maxToolCalls is
-	// refused and the mission finished stuck.
+	// Checked before the action rules.
 	if reason, refuse := a.toolCallBudgetRefusal(ctx, policyName, missionID); refuse {
 		reportChange("compute_bound", reason)
 		if _, err := a.deps.Missions.Finish(ctx, missionID, missionservice.StatusStuck, reason); err != nil {

@@ -4,10 +4,8 @@ import "context"
 
 type sessionCwdContextKey struct{}
 
-// WithSessionCwd stamps the session's own workspace root onto ctx. cwd should
-// be the absolute directory the session's relative tool paths are meant to
-// resolve against — e.g. the ACP session's negotiated cwd, or the CLI
-// process's cwd at the moment a run was started.
+// WithSessionCwd stamps the session's own workspace root onto ctx: the absolute
+// directory the session's relative tool paths resolve against.
 func WithSessionCwd(ctx context.Context, cwd string) context.Context {
 	if cwd == "" {
 		return ctx

@@ -70,15 +70,8 @@ func applyAllowlist(allowlist []string, all []string) []string {
 	return result
 }
 
-// declarationScopedPrefix mirrors runtimetypes.DeclaredToolNamePrefix, which
-// the kernel may not import: it is store-free by design. Kept a bare literal
-// rather than a dependency, and pinned by a test in that package.
 const declarationScopedPrefix = "decl-"
 
-// isDeclarationScopedToolset reports a toolset one agent declaration brought
-// with it. A wildcard means "every tool this machine offers"; a source private
-// to another agent is not that, so "*" never reaches one. The agent that
-// declared it names it exactly, which its emitted chain does.
 func isDeclarationScopedToolset(name string) bool {
 	return strings.HasPrefix(name, declarationScopedPrefix)
 }

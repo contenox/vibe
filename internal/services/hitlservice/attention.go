@@ -79,9 +79,6 @@ func AnswerOf(row *runtimetypes.HITLApproval) string {
 	return *res.Answer
 }
 
-// RequestAttention records a unit's question as a durable ask and blocks
-// until an operator answers it, the serve-level ceiling expires it, or ctx
-// ends, returning the operator's own words.
 func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, sink taskengine.TaskEventSink) (string, error) {
 	if s.approvals == nil {
 		return "", fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
@@ -202,8 +199,6 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 
 const attentionPollInterval = time.Second
 
-// Answer resolves an attention ask with the operator's text, waking the unit
-// parked on it; refuses a permission ask by design.
 func (s *service) Answer(ctx context.Context, askID, text string) error {
 	return s.answerAttention(ctx, askID, text, "", nil)
 }
@@ -294,21 +289,14 @@ const answeredByAgent = "agent"
 
 const agentResolutionLike = `%"answeredBy":%`
 
-// AnswerAsAgent resolves an attention ask exactly as Answer does, but
-// records that an agent answered; enforces no cap itself.
 func (s *service) AnswerAsAgent(ctx context.Context, askID, text string) error {
 	return s.answerAttention(ctx, askID, text, answeredByAgent, nil)
 }
 
-// AnswerAsAgentNamed is AnswerAsAgent with the answering agent's name as the
-// recorded actor; a blank name degrades to the generic marker.
 func (s *service) AnswerAsAgentNamed(ctx context.Context, askID, agentName, text string) error {
 	return s.answerAttention(ctx, askID, text, agentActor(agentName), nil)
 }
 
-// AnswerAsAgentBounded implements Service: the same write AnswerAsAgentNamed
-// makes, but conditional on the mission holding fewer than max
-// agent-answered asks, counted atomically.
 func (s *service) AnswerAsAgentBounded(ctx context.Context, askID, agentName, text string, max int) error {
 	return s.answerAttention(ctx, askID, text, agentActor(agentName), &max)
 }
@@ -335,7 +323,6 @@ func AnsweredByOf(row *runtimetypes.HITLApproval) string {
 	return strings.TrimSpace(*res.AnsweredBy)
 }
 
-// PendingAttentionAsks returns missionID's unanswered questions, newest first.
 func (s *service) PendingAttentionAsks(ctx context.Context, missionID string) ([]*runtimetypes.HITLApproval, error) {
 	if s.approvals == nil {
 		return nil, fmt.Errorf("hitlservice: durable approval store not configured")
@@ -353,8 +340,6 @@ func (s *service) PendingAttentionAsks(ctx context.Context, missionID string) ([
 	return out, nil
 }
 
-// AgentAnswerCount reports how many of missionID's questions were answered
-// by a supervising agent, a durable counter that survives a restart.
 func (s *service) AgentAnswerCount(ctx context.Context, missionID string) (int, error) {
 	if s.approvals == nil {
 		return 0, fmt.Errorf("hitlservice: durable approval store not configured")

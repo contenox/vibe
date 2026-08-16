@@ -49,8 +49,6 @@ func (b AttentionBounds) EffectiveMaxAgentApprovals() int {
 	return b.MaxAgentApprovals
 }
 
-// AttentionBoundsFor reads an envelope's attention half; a policy that
-// declares none, or fails to load, yields the zero (human-only) bounds.
 func (s *service) AttentionBoundsFor(ctx context.Context, policyName string) (AttentionBounds, error) {
 	policyPath := strings.TrimSpace(policyName)
 	if policyPath == "" {

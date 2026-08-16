@@ -19,19 +19,15 @@ var (
 	missionAnswerToolName    = missiontools.ToolNameAnswer
 )
 
-// sessionPrompter runs one out-of-band turn on a live session; satisfied by
-// both *acpsvc.Transport and *acpsvc.SessionRouter.
+// sessionPrompter runs one out-of-band turn on a live session.
 type sessionPrompter interface {
 	PromptContenoxSession(ctx context.Context, contenoxSessionID, text string) error
 }
 
 // agentAnswerOffer decides whether a unit's question should go to the agent
-// driving the session that fired it, and does it.
-//
-// Requires, in order: the mission's envelope permits agent answers (default:
-// it does not), the per-mission answer cap is not spent (counted on durable
-// rows, survives restarts), and the parent session is live and idle. Any
-// refusal is silent — the question stays queued for the human either way.
+// driving the session that fired it, and does it. It requires that the
+// envelope permits agent answers, the per-mission cap is unspent, and the parent
+// session is live and idle; any refusal is silent.
 type agentAnswerOffer struct {
 	hitl     hitlservice.Service
 	missions missionservice.Service
@@ -69,8 +65,7 @@ func (a agentAnswerOffer) OfferToSupervisingAgent(ctx context.Context, ev missio
 		return nil
 	}
 	if cap := bounds.EffectiveMaxAgentAnswers(); used >= cap {
-		// cap reached: a supervisor that hasn't unstuck the unit by now should
-		// yield to a human.
+		// Cap reached: yield to a human.
 		reportChange("declined", fmt.Sprintf("cap_reached(%d/%d)", used, cap))
 		return nil
 	}
@@ -91,8 +86,7 @@ func (a agentAnswerOffer) OfferToSupervisingAgent(ctx context.Context, ev missio
 }
 
 // agentAnswerPrompt frames the unit's question for its supervisor, naming the
-// tool and ask id explicitly since the model cannot see the client's `_meta`
-// question card.
+// tool and ask id explicitly since the model cannot see the question card.
 func agentAnswerPrompt(ev missionservice.AttentionAskedEvent) string {
 	unit := ev.AgentName
 	if unit == "" {

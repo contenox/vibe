@@ -1,8 +1,6 @@
-// Package presence lets an editor-spawned contenox process (`contenox acp`,
-// `serve` itself) self-register into the shared store so the fleet board can
-// show it. A presence entry is observation only: the kernel owns no
-// lifecycle over these processes, so it carries no Stop/Cancel verbs.
-// Registration is crash-safe (TTL + heartbeat) and always best-effort.
+// Package presence lets an editor-spawned contenox process self-register into
+// the shared store so the fleet board can show it. An entry is observation only,
+// crash-safe via TTL and heartbeat, and always best-effort.
 package presence
 
 import (
@@ -175,10 +173,8 @@ func (s *Store) Register(ctx context.Context, rec Record) error {
 	return nil
 }
 
-// List returns every live presence record, annotated External and Stale
-// (LastSeen against the staleness TTL). A row whose KV TTL has lapsed is
-// already absent; a corrupt or vanished-mid-read row is skipped rather than
-// failing the whole listing. Sorted for a deterministic order.
+// List returns every live presence record, annotated External and Stale, in a
+// deterministic order. A corrupt or vanished-mid-read row is skipped.
 func (s *Store) List(ctx context.Context) ([]Entry, error) {
 	exec, err := s.kv.Executor(ctx)
 	if err != nil {

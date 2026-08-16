@@ -8,16 +8,12 @@ import (
 )
 
 // ErrSessionBusy reports that a session already has a turn in flight, so an
-// out-of-band prompt was not started. It is a "not now", not a failure: the
-// caller's human-in-the-loop fallback still applies.
+// out-of-band prompt was not started.
 var ErrSessionBusy = fmt.Errorf("acpsvc: the session already has a turn in flight")
 
-// PromptContenoxSession runs an out-of-band turn on a live session, addressed
-// by its contenox (internal) id, as if the operator had typed it themselves —
-// used when a mission unit's supervisor agent answers on the operator's
-// behalf. It refuses a session with a turn already in flight (ErrSessionBusy,
-// one turn per session is the invariant) and runs through the ordinary Prompt
-// path, so the turn streams into the operator's transcript like any other.
+// PromptContenoxSession runs an out-of-band turn on a live session, addressed by
+// its internal id, as if the operator had typed it. It refuses a session with a
+// turn already in flight and runs through the ordinary Prompt path.
 func (t *Transport) PromptContenoxSession(ctx context.Context, contenoxSessionID, text string) error {
 	sid, ok := t.acpSessionForContenoxID(contenoxSessionID)
 	if !ok {
@@ -33,7 +29,6 @@ func (t *Transport) PromptContenoxSession(ctx context.Context, contenoxSessionID
 	return err
 }
 
-// hasInflightPrompt reports whether a turn is currently running for sid.
 func (t *Transport) hasInflightPrompt(sid libacp.SessionID) bool {
 	t.promptCancelMu.Lock()
 	defer t.promptCancelMu.Unlock()
@@ -42,7 +37,7 @@ func (t *Transport) hasInflightPrompt(sid libacp.SessionID) bool {
 }
 
 // PromptContenoxSession routes an out-of-band turn to whichever live connection
-// owns the session — serve's half, mirroring DeliverToContenoxSession.
+// owns the session.
 func (r *SessionRouter) PromptContenoxSession(ctx context.Context, contenoxSessionID, text string) error {
 	tr, ok := r.transportFor(contenoxSessionID)
 	if !ok {

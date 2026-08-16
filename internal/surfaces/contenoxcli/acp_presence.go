@@ -7,10 +7,9 @@ import (
 	"github.com/contenox/contenox/libacp"
 )
 
-// presenceAgent decorates the ACP transport to feed the fleet-presence
-// reporter the attached client name and open session count; other methods
-// promote to the real transport unchanged. The session count is an
-// approximation from counting opens/closes, self-correcting over time.
+// presenceAgent decorates the ACP transport to feed the fleet-presence reporter
+// the attached client name and open session count. The count is an
+// approximation from counting opens and closes.
 type presenceAgent struct {
 	libacp.Agent
 	reporter *presence.Reporter

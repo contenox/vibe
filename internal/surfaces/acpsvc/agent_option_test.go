@@ -12,12 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file pins the agent config option: the only way a client that speaks
-// nothing but ACP learns which agents this machine can run. The desktop shell
-// listed them over an Electron IPC bus; a browser reaching the relay has no
-// such bus, so the catalogue rides the same SessionConfigOption channel the
-// workspace-root picker does, under the same contract.
-
 // agentOptionTransport builds a transport over a real registry database, plus
 // a natively-driven session entry, so the option is reached through the same
 // driver dispatch a live session uses.
@@ -149,11 +143,7 @@ func TestUnit_AgentOptionReportsTheSessionsBoundAgent(t *testing.T) {
 		"the bound agent must be a value of its own option, or the select renders no label for it")
 }
 
-// TestUnit_SetAgentConfigOptionRefused pins immutability on both drivers. The
-// agent is chosen at session/new and a session cannot change what it is
-// mid-flight; a silent no-op would read to a client as a switch that took, and
-// forwarding the id downstream would ask a foreign agent about an option
-// contenox owns.
+// TestUnit_SetAgentConfigOptionRefused pins immutability on both drivers.
 func TestUnit_SetAgentConfigOptionRefused(t *testing.T) {
 	ctx, tr, reg, sess := agentOptionTransport(t)
 	registerChainAgent(t, ctx, reg, "agent-reviewer", true)
@@ -187,10 +177,7 @@ func TestUnit_AgentNativeValueRoundTripsToTheNativePath(t *testing.T) {
 
 // TestUnit_AgentOptionOfferedValuesAreBindable closes the loop between the two
 // halves: every value the picker offers is one session/new resolves, and it
-// resolves to exactly the agent whose name was picked. This is the assertion
-// that would fail if the option ever advertised a name the bind path cannot
-// see — a listing built from a second source, or an id shape the `_meta` key
-// does not accept.
+// resolves to exactly the agent whose name was picked.
 func TestUnit_AgentOptionOfferedValuesAreBindable(t *testing.T) {
 	ctx, tr, reg, sess := agentOptionTransport(t)
 	registerChainAgent(t, ctx, reg, "agent-reviewer", true)

@@ -2,11 +2,9 @@ package libtracker
 
 import "context"
 
-// ActivityTracker instruments an operation's lifecycle (start, optional
-// error, optional state change, end) without coupling core logic to a
-// specific monitoring backend. Start returns reportErr, reportChange, and
-// end: end must be called exactly once, typically via defer; reportErr and
-// reportChange are called at most once each, depending on outcome.
+// ActivityTracker instruments an operation's lifecycle without coupling core
+// logic to a monitoring backend. Start returns reportErr, reportChange and end;
+// end must be called exactly once, the other two at most once each.
 type ActivityTracker interface {
 	Start(
 		ctx context.Context,
@@ -20,8 +18,7 @@ type ActivityTracker interface {
 	)
 }
 
-// NoopTracker is a null-object ActivityTracker for tests and environments
-// where tracking is disabled.
+// NoopTracker is a null-object ActivityTracker.
 type NoopTracker struct{}
 
 func (NoopTracker) Start(

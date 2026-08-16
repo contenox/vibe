@@ -6,7 +6,8 @@ import (
 	"strings"
 )
 
-// SystemExecDirs returns the confined PATH's stock binary locations in precedence order (earliest wins), each a subtree of the Landlock-granted system runtime.
+// SystemExecDirs returns the confined PATH's stock binary locations in
+// precedence order, each a subtree of the Landlock-granted system runtime.
 func SystemExecDirs() []string {
 	return []string{
 		"/usr/local/sbin",

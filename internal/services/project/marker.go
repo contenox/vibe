@@ -1,8 +1,6 @@
-// Package project owns a project's portable identity marker —
-// <projectRoot>/.contenox/workspace.id — read and written the same way by
-// serve, the CLI, and the /workspace/roots API. The marker carries a stable
-// UUID (the DB workspace-scoping token) plus an optional friendly Name,
-// which travels with the directory rather than the host-local grant list.
+// Package project owns a project's portable identity marker at
+// <projectRoot>/.contenox/workspace.id: a stable UUID plus an optional friendly
+// Name, travelling with the directory rather than the host-local grant list.
 package project
 
 import (
@@ -44,8 +42,6 @@ func markerPath(contenoxDir string) string {
 	return filepath.Join(contenoxDir, MarkerFileName)
 }
 
-// parseMarker parses JSON {id,name}; a value that is not JSON with a non-empty id
-// is treated as a legacy bare-UUID string (the whole trimmed content is the ID).
 func parseMarker(data []byte) Marker {
 	trimmed := strings.TrimSpace(string(data))
 	if trimmed == "" {
@@ -97,10 +93,8 @@ func MarkerName(projectRoot string) string {
 	return ""
 }
 
-// Register makes projectRoot a registered, named project. An empty name
-// defaults to the directory's basename, but only onto a fresh or unnamed
-// marker — re-registering without a name never clobbers a chosen one. An
-// explicit non-empty name renames.
+// Register makes projectRoot a registered, named project. An empty name defaults
+// to the directory's basename, but never clobbers an already-chosen one.
 func Register(projectRoot, name string) (Marker, error) {
 	if strings.TrimSpace(name) == "" {
 		if m, ok := ReadFromProjectRoot(projectRoot); ok && m.Name != "" {
@@ -130,10 +124,9 @@ func NormalizeName(raw string) (string, error) {
 	return name, nil
 }
 
-// EnsureInContenoxDir makes contenoxDir a project: absent creates a marker
-// with a fresh UUID and name; present returns the existing marker, with a
-// non-empty differing name replacing the stored one (an explicit rename).
-// An empty name never clears an existing one; the ID is never rewritten.
+// EnsureInContenoxDir makes contenoxDir a project, creating a marker when absent
+// and otherwise returning the existing one. An empty name never clears an
+// existing one, and the ID is never rewritten.
 func EnsureInContenoxDir(contenoxDir, name string) (Marker, error) {
 	name = strings.TrimSpace(name)
 	if m, ok := ReadFromContenoxDir(contenoxDir); ok {

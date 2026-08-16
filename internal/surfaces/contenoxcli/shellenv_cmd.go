@@ -114,7 +114,7 @@ func runShellEnvList(cmd *cobra.Command, _ []string) error {
 }
 
 // withShellEnv opens the database, builds the shell-env service, runs fn, and
-// closes the database — the one place the CLI's shell-env verbs touch storage.
+// closes the database.
 func withShellEnv(cmd *cobra.Command, fn func(context.Context, shellenvservice.Service) error) error {
 	db, _, err := openConfigDB(cmd)
 	if err != nil {

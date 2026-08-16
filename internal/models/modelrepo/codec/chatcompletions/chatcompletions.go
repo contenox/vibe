@@ -1,9 +1,6 @@
 // Package chatcompletions is a transport-agnostic codec for the OpenAI Chat
-// Completions wire format (request/response and SSE streaming). It maps
-// between neutral modelrepo types and the OpenAI-compatible JSON shape,
-// handling tool-name sanitization and round-tripping. It does no I/O:
-// callers build a Request, POST it through their own transport, and hand the
-// raw response back here to decode.
+// Completions wire format. It maps between neutral modelrepo types and the
+// OpenAI-compatible JSON shape, and does no I/O.
 package chatcompletions
 
 import (
@@ -15,10 +12,8 @@ import (
 	"github.com/contenox/contenox/internal/models/modelrepo"
 )
 
-// Request is the OpenAI-compatible chat/completions request body.
-//
-// Note: this codec emits `max_tokens` (the field every OpenAI-compatible
-// endpoint accepts), not the newer `max_completion_tokens`.
+// Request is the OpenAI-compatible chat/completions request body. This codec
+// emits max_tokens, not the newer max_completion_tokens.
 type Request struct {
 	Model       string        `json:"model"`
 	Messages    []wireMessage `json:"messages"`
@@ -31,9 +26,6 @@ type Request struct {
 	Stream      bool          `json:"stream,omitempty"`
 }
 
-// wireMessage.Content is `any` so it can carry either a plain string (the
-// common case, and null for tool-only assistant messages) or the OpenAI
-// content-parts array when the message has image attachments.
 type wireMessage struct {
 	Role       string         `json:"role"`
 	Content    any            `json:"content"`
@@ -41,9 +33,6 @@ type wireMessage struct {
 	ToolCalls  []wireToolCall `json:"tool_calls,omitempty"`
 }
 
-// wireContentPart is one element of the chat/completions content-parts array,
-// used only when a message carries image attachments (a text part plus one
-// image_url part per image).
 type wireContentPart struct {
 	Type     string        `json:"type"`
 	Text     string        `json:"text,omitempty"`
@@ -76,12 +65,9 @@ type wireToolDecl struct {
 	Parameters  any    `json:"parameters,omitempty"`
 }
 
-// Build converts neutral messages + config into a chat/completions Request.
-// It returns a nameMap (sanitized tool name -> original) so DecodeResponse /
-// the StreamDecoder can translate tool-call names back to what the caller used.
-//
-// model is placed verbatim in the body; the transport decides the exact string
-// (e.g. "gpt-5-mini", or whatever id the provider expects).
+// Build converts neutral messages and config into a chat/completions Request.
+// It returns a map of sanitized tool name to original so decoders can translate
+// tool-call names back.
 func Build(model string, messages []modelrepo.Message, cfg *modelrepo.ChatConfig) (Request, map[string]string) {
 	req := Request{Model: model}
 	if cfg != nil {
@@ -157,9 +143,6 @@ func Build(model string, messages []modelrepo.Message, cfg *modelrepo.ChatConfig
 	return req, nameMap
 }
 
-// wireImageContent renders a message's text plus its image attachments as the
-// content-parts array: a leading text part (when there is text), then one
-// image_url part per image, each an inline base64 data URI in attachment order.
 func wireImageContent(msg modelrepo.Message) []wireContentPart {
 	parts := make([]wireContentPart, 0, len(msg.Images)+1)
 	if msg.Content != "" {
@@ -174,8 +157,6 @@ func wireImageContent(msg modelrepo.Message) []wireContentPart {
 	return parts
 }
 
-// imageDataURI builds the data:<mime>;base64,<payload> URI that every
-// OpenAI-compatible vision endpoint accepts for inline image bytes.
 func imageDataURI(mimeType string, data []byte) string {
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
@@ -193,11 +174,6 @@ type Response struct {
 	Usage *wireUsage `json:"usage"`
 }
 
-// wireUsage is the chat-completions usage report. prompt_tokens already
-// includes cached tokens on OpenAI (no normalization needed); the cached
-// count is broken out under prompt_tokens_details.cached_tokens. vLLM's V1
-// engine reports the details object as null (vllm#44961), which decodes to
-// zero — its warm signal is server-side metrics, not per-request usage.
 type wireUsage struct {
 	PromptTokens        int `json:"prompt_tokens"`
 	CompletionTokens    int `json:"completion_tokens"`
@@ -268,8 +244,6 @@ func decodeToolCalls(in []wireToolCall, nameMap map[string]string) []modelrepo.T
 	return out
 }
 
-// newToolCall builds a neutral ToolCall. The Function field is an anonymous
-// struct on modelrepo.ToolCall, so it is constructed via this helper.
 func newToolCall(id, typ, name, args string) modelrepo.ToolCall {
 	tc := modelrepo.ToolCall{ID: id, Type: typ}
 	tc.Function.Name = name
@@ -277,9 +251,6 @@ func newToolCall(id, typ, name, args string) modelrepo.ToolCall {
 	return tc
 }
 
-// streamChunk is one SSE chunk of a streamed chat/completions response.
-// The Reasoning field is a vLLM variant spelling of reasoning_content; both
-// map to a Thinking delta.
 type streamChunk struct {
 	Choices []struct {
 		Index int `json:"index"`
@@ -304,11 +275,8 @@ type streamChunk struct {
 }
 
 // StreamDecoder translates streamed chat/completions chunks into raw-delta
-// parcels (per the modelrepo.StreamParcel contract); it does not assemble —
-// tool-call fragments are emitted as ToolCallDelta parcels and assembly is
-// left to the engine-side modelrepo.StreamAssembler. The finish reason and
-// usage are held back and surfaced by Finish, since the wire can deliver a
-// trailing usage-only chunk after the finish_reason chunk.
+// parcels. It does not assemble tool calls; that is left to
+// modelrepo.StreamAssembler. Finish reason and usage are surfaced by Finish.
 type StreamDecoder struct {
 	nameMap      map[string]string
 	finishReason string
@@ -380,8 +348,6 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
-// sanitizeToolName replaces characters outside OpenAI's allowed set
-// (^[a-zA-Z0-9_-]+$) with '_' and trims leading/trailing separators.
 func sanitizeToolName(in string) string {
 	if in == "" {
 		return ""

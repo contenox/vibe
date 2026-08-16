@@ -88,7 +88,7 @@ classify_request → review_chat → review_tools → review_chat → review_too
 
 ## What this is really about
 
-The gap was not the model's and not the user's. It was the workflow's, and it was fixed where workflows are written — [in the router](/docs/guide/request-routing/), once, for every session and every surface that shares the chain.
+The gap was not the model's and not the user's. It was the workflow's, and it was fixed where workflows are written — [in the router](/docs/guide/chains/routing/), once, for every session and every surface that shares the chain.
 
 That is the trade contenox is built around. You can spend the effort every time, in the prompt, where it is invisible and unversioned and only as good as what the user remembered to say. Or you can spend it once, in a file you can read, diff, review and ship — and let people go on writing ordinary sentences.
 

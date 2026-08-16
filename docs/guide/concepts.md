@@ -1,6 +1,7 @@
 ---
 title: Core Concepts
 description: How agents, chains, tasks, tools, transitions, and macros fit together in Contenox.
+order: 4
 ---
 
 # Core Concepts
@@ -37,7 +38,7 @@ contenox mission fire my-chain "input" --wait
 contenox config set default-chain ./my-chain.json
 ```
 
-Fallback chain files are resolved by name: the workspace `.contenox/` copy wins when present, then `~/.contenox/`, then the shipped copies in `~/.contenox/system/`. The shipped files follow the `chain-<role>-<variant>.json` convention — see [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) for every role and the full resolution story.
+Fallback chain files are resolved by name: the workspace `.contenox/` copy wins when present, then `~/.contenox/`, then the shipped copies in `~/.contenox/system/`. The shipped files follow the `chain-<role>-<variant>.json` convention — see [Chain files: naming, roles, and resolution](/docs/guide/chains/naming/) for every role and the full resolution story.
 
 ```json
 {
@@ -111,7 +112,7 @@ After a task runs, the chain evaluates **transition branches** to decide the nex
 
 Branches are evaluated top to bottom. `"goto": "end"` terminates the chain.
 
-The same branches are what build the agentic loop — a `tool_call` branch into an execute step and a back-edge — walked through in [The agentic loop](/docs/guide/agentic-loop/). Branches on a `route` task do something else: they pick which loop runs at all, which is how one chain serves requests that need different methods and different tools. See [Request routing](/docs/guide/request-routing/).
+The same branches are what build the agentic loop — a `tool_call` branch into an execute step and a back-edge — walked through in [The agentic loop](/docs/guide/chains/agentic-loop/). Branches on a `route` task do something else: they pick which loop runs at all, which is how one chain serves requests that need different methods and different tools. See [Request routing](/docs/guide/chains/routing/).
 
 ## Data flow
 

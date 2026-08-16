@@ -1,11 +1,12 @@
 ---
-title: "Tutorial: a mission agent"
+title: "A mission agent"
 description: Declare an agent in a file, fire it at an intent, and walk away. What makes an unattended agent different from an interactive one, why each difference exists, and what it looks like when you get one wrong.
+order: 2
 ---
 
 # Tutorial: a mission agent
 
-In [the vault tutorial](/docs/guide/tutorial-vault-agent/) you fired an agent and
+In [the vault tutorial](/docs/guide/tutorials/vault-agent/) you fired an agent and
 stood there waiting for it. This one you fire and leave:
 
 ```bash
@@ -60,7 +61,7 @@ ID                                    NAME              SOURCE      KIND    ENAB
 
 `discovered` means it came from a file on disk, not from a manual registration.
 Rename the file later and the agent keeps its name; change the `id` and you have
-renamed the agent. See [chain naming](/docs/guide/chain-naming/).
+renamed the agent. See [chain naming](/docs/guide/chains/naming/).
 
 ## 2. Grant the mission toolset
 
@@ -356,5 +357,5 @@ guessing.
 - [Declaring agents](/docs/guide/agents/) — the one-file road; a declared agent is dispatchable the moment it lands.
 - [Missions](/docs/guide/missions/) — sessions, missions and runs compared.
 - [The oracle](/docs/use-cases/auto-attention/) — the reviewer in step 8.
-- [Chain naming](/docs/guide/chain-naming/) — the file-to-agent rule in full.
+- [Chain naming](/docs/guide/chains/naming/) — the file-to-agent rule in full.
 - [HITL policies](/docs/guide/hitl/) — the envelope grammar.

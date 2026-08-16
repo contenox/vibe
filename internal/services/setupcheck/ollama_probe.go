@@ -14,8 +14,6 @@ import (
 // DefaultOllamaSuggestModel is the model name we suggest for local Ollama when no chat models are present yet.
 const DefaultOllamaSuggestModel = "qwen3:8b"
 
-// resolveOllamaProbeBaseURL returns the Ollama HTTP base URL for health checks.
-// It respects OLLAMA_HOST (with or without scheme); otherwise http://127.0.0.1:11434.
 func resolveOllamaProbeBaseURL() string {
 	h := strings.TrimSpace(os.Getenv("OLLAMA_HOST"))
 	if h == "" {

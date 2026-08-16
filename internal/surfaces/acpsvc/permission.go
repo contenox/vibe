@@ -21,10 +21,6 @@ func (t *Transport) AskApproval(ctx context.Context, req hitlservice.ApprovalReq
 	}
 
 	toolCallID := approvalflow.ToolCallID(req)
-	// req.PolicyName, req.MatchedRule, and req.Detail are the verdict that
-	// actually gated this call (set by localtools.HITLWrapper from
-	// hitlservice.EvaluationResult), not re-derived guesses — forward them
-	// as-is so the card can say why.
 	rpcReq := approvalflow.BuildRequest(req, approvalflow.BuildOptions{
 		SessionID:   acpSessionID,
 		PolicyName:  req.PolicyName,
@@ -32,9 +28,6 @@ func (t *Transport) AskApproval(ctx context.Context, req hitlservice.ApprovalReq
 		MatchedRule: req.MatchedRule,
 		Detail:      req.Detail,
 	})
-	// The card outlives this call: the run parks, checkpoints, and releases
-	// its process, and the ask stays answerable from any terminal. Tell the
-	// client how long that lasts and what answers it there.
 	t.attachAskRecovery(ctx, &rpcReq, toolCallID)
 
 	t.markPermissionPending(acpSessionID, toolCallID)
@@ -65,40 +58,19 @@ func (t *Transport) AskApproval(ctx context.Context, req hitlservice.ApprovalReq
 	return false, nil
 }
 
-// askRecovery is the durable half of a permission card: when the ask stops
-// being answerable, what happens then, and the command that answers it from
-// any other process. Marshalled beside approvalflow.Meta's own keys (see
-// attachAskRecovery), not as a second envelope, so a client parses one object.
+// askRecovery is the durable half of a permission card: when the ask stops being
+// answerable, what happens then, and the command that answers it elsewhere.
 type askRecovery struct {
-	// AskID is the durable ask's id — the argument `contenox approvals
-	// respond` takes, and the same value as the tool call id on this card.
-	AskID string `json:"askId,omitempty"`
-	// ExpiresAt is when the ask resolves itself with OnTimeout: the deadline a
-	// countdown counts to, RFC3339 UTC.
-	ExpiresAt string `json:"expiresAt,omitempty"`
-	// OnTimeout is the verdict that applies at ExpiresAt if nobody answers.
-	OnTimeout string `json:"onTimeout,omitempty"`
-	// RecoveryCommand answers this ask from a terminal, for a client that has
-	// lost the card (or a run already checkpointed and released).
+	AskID           string `json:"askId,omitempty"`
+	ExpiresAt       string `json:"expiresAt,omitempty"`
+	OnTimeout       string `json:"onTimeout,omitempty"`
 	RecoveryCommand string `json:"recoveryCommand,omitempty"`
 }
 
 // attachAskRecovery merges the ask's deadline and recovery command into the
-// permission request's `_meta` (both the request-level envelope and the tool
-// call's copy, which clients read interchangeably).
-//
-// The deadline is the durable row's ExpiresAt, NOT localtools.ApprovalParkWindow:
-// the park window only decides when the run checkpoints and releases its
-// process — the card stays answerable across it, and a late verdict still
-// resumes the run (localtools deliverLateVerdict). ExpiresAt is the moment
-// SweepExpired applies the ask's on-timeout verdict and any answer is refused,
-// which is what a countdown must count to.
-//
-// Nothing is attached unless the row is found under the very id this card
-// carries — the non-durable blocking path records none, and a call with no
-// engine-minted tool call id gets a uuid-keyed row this side cannot name.
-// Printing a recovery command for a row `contenox approvals respond` cannot
-// find would be a lie.
+// permission request's `_meta`. The deadline is the durable row's ExpiresAt, not
+// localtools.ApprovalParkWindow, and nothing is attached unless the row is found
+// under the id this card carries.
 func (t *Transport) attachAskRecovery(ctx context.Context, rpcReq *libacp.RequestPermissionRequest, askID string) {
 	if t.deps.DB == nil || strings.TrimSpace(askID) == "" {
 		return
@@ -120,8 +92,7 @@ func (t *Transport) attachAskRecovery(ctx context.Context, rpcReq *libacp.Reques
 }
 
 // mergeMetaFields adds extra's fields to a `_meta` object, keeping every key
-// already there. Returns base unchanged if either side is not a JSON object,
-// so a malformed envelope loses nothing.
+// already there, and returns base unchanged if either side is not a JSON object.
 func mergeMetaFields(base json.RawMessage, extra any) json.RawMessage {
 	fields := map[string]json.RawMessage{}
 	if len(base) > 0 {
@@ -147,10 +118,7 @@ func mergeMetaFields(base json.RawMessage, extra any) json.RawMessage {
 	return out
 }
 
-// hitlPolicyPath resolves the on-disk path of a named HITL policy for
-// display, mirroring how acpPolicySource (contenoxcli/acp_cmd.go) and
-// writeEmbeddedHITLPolicies resolve policy files under ContenoxDir. Empty
-// name or unset ContenoxDir (e.g. a setup-only transport) yields "".
+// hitlPolicyPath resolves the on-disk path of a named HITL policy for display.
 func (t *Transport) hitlPolicyPath(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" || t.deps.ContenoxDir == "" {

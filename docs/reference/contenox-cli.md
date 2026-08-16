@@ -1,13 +1,12 @@
 ---
 title: Contenox CLI Reference
 description: Every contenox subcommand, flag, and environment variable.
+order: 3
 ---
 
 # Contenox CLI Reference
 
 `contenox` is the local agent server, driven from the command line. Agents, tools, models and the rules they run under are files on your machine, and so is everything it executes.
-
-![A natural-language task in the terminal: contenox reads the repo and answers](/hero.gif)
 
 ## Global Flags
 
@@ -211,7 +210,7 @@ The login-flow flags and `--insecure-skip-tls-verify` can only be set at `tools 
 
 ### `contenox agent`
 
-> **Beta:** the agent roster requires `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`) and its interface may change; without it this command is hidden and only the shipped `agent-planner` is discovered (`agent-planner` is the chain's `id`, declared inside `chain-planner-default.json` — see [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/)).
+> **Beta:** the agent roster requires `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`) and its interface may change; without it this command is hidden and only the shipped `agent-planner` is discovered (`agent-planner` is the chain's `id`, declared inside `chain-planner-default.json` — see [Chain files: naming, roles, and resolution](/docs/guide/chains/naming/)).
 
 Inspect and manage the runtime's declared agents. Most agents are [declared in a Markdown file](/docs/guide/agents/) under `.contenox/agents/`; agents you already keep in `.claude/agents/` or `.agents/agents/` are found there too, and a task chain on disk is an agent as well. Every one is registered automatically by discovery — this command inspects them, toggles their enabled state, and removes stale registrations. Declared agents are what `/mission` and `contenox mission fire` dispatch.
 
@@ -260,13 +259,13 @@ contenox hitl trust --remove go     # drop a declaration
 | `--list` | List every declaration and its state on this host; changes nothing |
 | `--remove` | Remove the named declarations instead of adding them |
 
-Names are resolved exactly as the policy evaluator resolves them (`PATH` lookup, `PATHEXT` on Windows, then symlinks followed to the real file), so a declaration written here is by construction the one the evaluator will look up. Declarations are spliced into the policy without disturbing any other byte of the file, and the result is validated before it is written. Declaring any hash makes the pin strict for that policy: a command with no declared hash is refused. See [Trusted binaries](/docs/guide/trusted-binaries/) for the full workflow, the per-platform guarantees, and what this does not protect.
+Names are resolved exactly as the policy evaluator resolves them (`PATH` lookup, `PATHEXT` on Windows, then symlinks followed to the real file), so a declaration written here is by construction the one the evaluator will look up. Declarations are spliced into the policy without disturbing any other byte of the file, and the result is validated before it is written. Declaring any hash makes the pin strict for that policy: a command with no declared hash is refused. See [Trusted binaries](/docs/guide/confinement/trusted-binaries/) for the full workflow, the per-platform guarantees, and what this does not protect.
 
 ### `contenox init [provider]`
 
 Initializes a workspace (`.contenox/`) and ensures default runtime presets exist globally (`~/.contenox/`). It's best to run `contenox setup` first for a guided configuration.
 
-`init` creates the `.contenox/workspace.id` marker — a project's portable identity. The marker carries a stable workspace UUID (the database scoping token every session under the project is filed under) plus an optional friendly **name**. It travels *with* the directory, so a project means one thing to the CLI and every ACP session alike. It also seeds `agents.toml` and an `agents/` directory — where you [declare an agent](/docs/guide/agents/) — plus the HITL policies and the [oracle](/docs/use-cases/auto-attention/) set (`chain-oracle-default.json` and `hitl-policy-oracle.json` — inert until `default-oracle-chain` names one) under `~/.contenox/`, and the shipped chain files under `~/.contenox/system/`, unless they already exist. Workspace-local `.contenox/` files can override these global presets by name; `init --local` seeds those workspace copies for you instead of writing to `~/.contenox/`. The seeded chain files follow the `chain-<role>-<variant>.json` convention — [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) covers the grammar and the exact touch/never-touch matrix of every init flag.
+`init` creates the `.contenox/workspace.id` marker — a project's portable identity. The marker carries a stable workspace UUID (the database scoping token every session under the project is filed under) plus an optional friendly **name**. It travels *with* the directory, so a project means one thing to the CLI and every ACP session alike. It also seeds `agents.toml` and an `agents/` directory — where you [declare an agent](/docs/guide/agents/) — plus the HITL policies and the [oracle](/docs/use-cases/auto-attention/) set (`chain-oracle-default.json` and `hitl-policy-oracle.json` — inert until `default-oracle-chain` names one) under `~/.contenox/`, and the shipped chain files under `~/.contenox/system/`, unless they already exist. Workspace-local `.contenox/` files can override these global presets by name; `init --local` seeds those workspace copies for you instead of writing to `~/.contenox/`. The seeded chain files follow the `chain-<role>-<variant>.json` convention — [Chain files: naming, roles, and resolution](/docs/guide/chains/naming/) covers the grammar and the exact touch/never-touch matrix of every init flag.
 
 By default `init` walks up to reuse an ancestor's `.contenox` if one exists (like `git`). Pass `--project` to force a *fresh* project marker in the current directory instead — a distinct workspace nested under a larger one — and `--name` to give it a friendly name (default: the folder's own name). Marking a project does not by itself let sessions open it; `init --project` prints the `contenox workspace add` line that grants it.
 
@@ -550,7 +549,7 @@ A grant that can no longer be honoured — one pointing inside the control plane
 
 ### `contenox shell-env`
 
-Manage the global environment variables contenox injects into the shells it spawns (`local_shell`, forwarded to the connected client's terminal), layered on top of the environment scrub so an injected value always wins. See [Least-privilege shell environment](/docs/guide/environment-scrubbing/) for the full design and current status.
+Manage the global environment variables contenox injects into the shells it spawns (`local_shell`, forwarded to the connected client's terminal), layered on top of the environment scrub so an injected value always wins. See [Least-privilege shell environment](/docs/guide/confinement/environment/) for the full design and current status.
 
 ```bash
 contenox shell-env set HTTP_PROXY=http://proxy:3128 GOCACHE=/var/cache/go
@@ -573,7 +572,7 @@ contenox sandbox env --terminal  # the interactive-terminal policy (SANDBOX_TERM
 | ---- | ----------- |
 | `--terminal` | Show the interactive-terminal policy instead of the agent-shell policy |
 
-See [Least-privilege shell environment](/docs/guide/environment-scrubbing/) for the scrub modes and the `SANDBOX_*` environment variables that configure them.
+See [Least-privilege shell environment](/docs/guide/confinement/environment/) for the scrub modes and the `SANDBOX_*` environment variables that configure them.
 
 ### The `/mission` slash command
 
@@ -738,6 +737,6 @@ contenox version
 | `CONTENOX_BASE_URL` | Endpoint URL for account-specific providers whose URL cannot be defaulted (e.g. Vertex: project + region). |
 | `CONTENOX_OPT_IN_BETA` | Per-invocation override of the `opt-in-beta` config key (`1`/`true` enables the beta features, any other value disables them; unset falls back to config). |
 | `CONTENOX_RELAY_ENDPOINT` | The relay `/pair` redeems against when none is given inline, instead of the hosted relay compiled into the binary — see [Pairing a machine with a relay](/docs/guide/pairing/). |
-| `CONTENOX_SANDBOX_NETWORK_WALL` | Set to `1` to build the [agent sandbox](/docs/guide/agent-sandbox/)'s network wall with no route at all, for a fully offline foreign agent. |
+| `CONTENOX_SANDBOX_NETWORK_WALL` | Set to `1` to build the [agent sandbox](/docs/guide/confinement/sandbox/)'s network wall with no route at all, for a fully offline foreign agent. |
 
-`SANDBOX_SHELL_SCRUB`, `SANDBOX_TERMINAL_SCRUB`, `SANDBOX_ENV_ALLOW`, and `SANDBOX_ENV_DENY` configure the shell environment scrub — see [Least-privilege shell environment](/docs/guide/environment-scrubbing/) for their modes and current status.
+`SANDBOX_SHELL_SCRUB`, `SANDBOX_TERMINAL_SCRUB`, `SANDBOX_ENV_ALLOW`, and `SANDBOX_ENV_DENY` configure the shell environment scrub — see [Least-privilege shell environment](/docs/guide/confinement/environment/) for their modes and current status.

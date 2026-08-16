@@ -151,9 +151,6 @@ func postureFromClaudeCode(mode string) (Posture, string) {
 func unmappedReasonClaudeCode(field string) string {
 	switch field {
 	case "hooks":
-		// Six of the seven lifecycle events have a first-class answer here, so
-		// naming them is more useful than reporting a shortfall. The seventh
-		// genuinely has none.
 		return "contenox governs these in the runtime rather than by running shell commands: " +
 			"tool gating is the HITL policy, notifications are attention asks and the inbox, " +
 			"stop conditions are the drive loop, and context is the system prompt and its macros. " +
@@ -162,8 +159,6 @@ func unmappedReasonClaudeCode(field string) string {
 		return "skills are files the agent reads, not a runtime feature: put them in .contenox/skills/ " +
 			"and write {{skills}} in the declaration body to give this agent the inventory"
 	case "background":
-		// Claude Code's background means "do not block on this subagent".
-		// A dispatched contenox unit is driven detached already.
 		return "already the default: a dispatched agent runs detached and reports back, so there is nothing to switch on"
 	case "memory":
 		return "no per-agent cross-session memory scope"
@@ -176,9 +171,6 @@ func unmappedReasonClaudeCode(field string) string {
 	}
 }
 
-// splitFrontmatter returns the YAML frontmatter and the body. A body line of
-// three dashes does not terminate the block, which ends at the first such line
-// after the opening fence only.
 func splitFrontmatter(data []byte) (front, body []byte, ok bool) {
 	text := strings.TrimPrefix(string(data), "\uFEFF")
 	text = strings.ReplaceAll(text, "\r\n", "\n")
@@ -209,8 +201,6 @@ func stringField(fields map[string]any, key string) string {
 	return s
 }
 
-// listField accepts both YAML sequences and the comma-separated string form
-// Claude Code's own documented example uses.
 func listField(fields map[string]any, key string) []string {
 	v, ok := fields[key]
 	if !ok {

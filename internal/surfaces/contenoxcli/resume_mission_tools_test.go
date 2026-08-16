@@ -1,10 +1,3 @@
-// resume_mission_tools_test.go pins the wiring a resumed mission run depends
-// on. A verdict answered from `contenox approvals respond` (or any other
-// BuildEngine host) resumes the suspended chain on THIS process's engine, so
-// the mission tools localToolset registers are the ones the resumed unit meets:
-// asker-less they downgrade its next question to a blocker report it answers
-// itself, and publisher-less its mission_finish never reaches the fleet's
-// status teardown.
 package contenoxcli
 
 import (
@@ -59,11 +52,8 @@ func (a *recordingAsker) RaiseAttention(_ context.Context, ask missiontools.Atte
 }
 
 // TestUnit_LocalToolset_MissionToolsCarryTheAskerAndThePublisher pins that
-// localToolset hands its mission service and attention asker to the provider
-// it registers, rather than minting a bare durable-only one. Without the asker
-// the question below never reaches a human; without the publisher the finish
-// below never reaches runStatusTeardown, and the unit's subprocess is never
-// reaped.
+// localToolset hands its mission service and attention asker to the provider it
+// registers, rather than minting a bare durable-only one.
 func TestUnit_LocalToolset_MissionToolsCarryTheAskerAndThePublisher(t *testing.T) {
 	ctx := context.Background()
 	db, err := libdb.NewSQLiteDBManager(ctx, filepath.Join(t.TempDir(), "resume-tools.db"), runtimetypes.SchemaSQLite)

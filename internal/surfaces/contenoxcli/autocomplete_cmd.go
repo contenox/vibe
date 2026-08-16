@@ -103,7 +103,7 @@ func runAutocompleteCmd(cmd *cobra.Command, args []string) error {
 	store := runtimetypes.New(db.WithoutTransaction())
 	model, provider, err := resolveAutocompleteRole(ctx, store)
 	if err != nil {
-		// The refusal must ride the stdout protocol: editor clients never read stderr.
+		// The refusal must ride the stdout protocol: clients never read stderr.
 		roleErr := err
 		fmt.Fprintf(cmd.ErrOrStderr(), "autocomplete: %v\n", roleErr)
 		return runAutocompleteStdio(ctx, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr(),
@@ -187,7 +187,7 @@ func runAutocompleteStdio(ctx context.Context, in io.Reader, out, errW io.Writer
 	respond := func(v any) {
 		payload, err := json.Marshal(v)
 		if err != nil {
-			// A response struct of strings cannot fail to marshal; if it ever does, the line is dropped rather than emitting a half-written object.
+			// Drop the line rather than emit a half-written object.
 			fmt.Fprintf(errW, "autocomplete: dropping unencodable response: %v\n", err)
 			return
 		}

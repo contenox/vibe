@@ -13,10 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_ExplainStopReason_EveryShortEndingHasASentence pins that no
-// non-end_turn stop reason travels as a bare token: each carries what happened
-// and, where one exists, the command that resolves it. end_turn is the
-// ordinary ending and must stay unexplained.
+// TestUnit_ExplainStopReason_EveryShortEndingHasASentence pins that no non-
+// end_turn stop reason travels as a bare token: each carries what happened and,
+// where one exists, the command that resolves it.
 func TestUnit_ExplainStopReason_EveryShortEndingHasASentence(t *testing.T) {
 	for _, r := range []libacp.StopReason{
 		libacp.StopReasonMaxTokens,
@@ -161,14 +160,10 @@ func TestUnit_NativeResultToResponse_SuspendedCarriesItsMeta(t *testing.T) {
 	require.Empty(t, finished.Meta, "a completed turn stays bare — that is what makes the park distinguishable")
 }
 
-// TestLoopback_ParkedTurn_ReportsSuspendedAndNamesTheApproval is the
-// regression for the incident: a turn that parks on a human approval reached
-// every client as stop_reason end_turn and nothing else, so a working
-// suspension read as a dead agent. It drives a park through a real ACP wire
-// and pins what an editor now receives — the approval id on the response
-// `_meta` and in an agent message — against a completed turn on the same
-// session, which carries neither: the distinction is the whole point, and it
-// must not leak onto every turn.
+// TestLoopback_ParkedTurn_ReportsSuspendedAndNamesTheApproval is the regression
+// for the incident: a turn that parks on a human approval reached every client
+// as stop_reason end_turn and nothing else, so a working suspension read as a
+// dead agent.
 func TestLoopback_ParkedTurn_ReportsSuspendedAndNamesTheApproval(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()

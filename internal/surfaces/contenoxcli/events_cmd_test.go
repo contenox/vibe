@@ -302,9 +302,8 @@ func TestUnit_Vet_TriggerFilesAreBetaGated(t *testing.T) {
 	require.Contains(t, beta.String(), `unknown type "not_a_thing"`)
 }
 
-// TestUnit_Vet_TriggerReferencesResolveOnSystemPath pins that a trigger's
-// chain must exist in the workspace/home resolution path and a named policy
-// must too.
+// TestUnit_Vet_TriggerReferencesResolveOnSystemPath pins that a trigger's chain
+// must exist in the workspace/home resolution path and a named policy must too.
 func TestUnit_Vet_TriggerReferencesResolveOnSystemPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

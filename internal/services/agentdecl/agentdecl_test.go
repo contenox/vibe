@@ -64,15 +64,19 @@ func TestUnit_ParseClaudeCodeCodeReviewer(t *testing.T) {
 	if ir.Model.Provider != "anthropic" {
 		t.Errorf("model.provider = %q, want anthropic", ir.Model.Provider)
 	}
-	want := []string{"local_fs.read_file", "local_fs.find_files", "local_fs.grep"}
+	want := []string{"local_fs.read_file"}
 	if strings.Join(ir.Tools.Allow, ",") != strings.Join(want, ",") {
 		t.Errorf("tools = %v, want %v", ir.Tools.Allow, want)
 	}
 	if ir.Posture != agentdecl.PostureAskAlways {
 		t.Errorf("posture = %q, want ask_always by default", ir.Posture)
 	}
-	if len(ir.Unmapped) != 0 {
-		t.Errorf("expected nothing unmapped, got %+v", ir.Unmapped)
+	unmapped := map[string]bool{}
+	for _, u := range ir.Unmapped {
+		unmapped[u.Value] = true
+	}
+	if !unmapped["Glob"] || !unmapped["Grep"] {
+		t.Errorf("Glob and Grep name tools contenox no longer hosts and must report unmapped, got %+v", ir.Unmapped)
 	}
 	if ir.ScopedName(true) != "claude-code-code-reviewer" {
 		t.Errorf("scoped name = %q", ir.ScopedName(true))
@@ -292,7 +296,7 @@ func TestUnit_FrontmatterEdgeCases(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parse: %v", err)
 		}
-		if strings.Join(ir.Tools.Allow, ",") != "local_fs.read_file,local_fs.grep" {
+		if strings.Join(ir.Tools.Allow, ",") != "local_fs.read_file" {
 			t.Errorf("tools = %v", ir.Tools.Allow)
 		}
 	})

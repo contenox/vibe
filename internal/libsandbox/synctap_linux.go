@@ -56,7 +56,7 @@ type seccompNotifResp struct {
 }
 
 func installSyscallTap(sockFD int) error {
-	// NO_NEW_PRIVS is a precondition of unprivileged SECCOMP_SET_MODE_FILTER; setting it here (idempotent) composes whether the tap runs before or after Landlock.
+	// NO_NEW_PRIVS is a precondition of unprivileged SECCOMP_SET_MODE_FILTER.
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return fmt.Errorf("set no_new_privs for syscall tap: %w", err)
 	}
@@ -81,7 +81,7 @@ func installSyscallTap(sockFD int) error {
 func buildTapFilter() []unix.SockFilter {
 	tapped := []uint32{uint32(unix.SYS_EXECVE), uint32(unix.SYS_EXECVEAT)}
 
-	// Native-arch guard: tap only native-ABI syscalls so a compat ABI can't masquerade; omitted when unknown, harmless since the response is always CONTINUE.
+	// Native-arch guard so a compat ABI cannot masquerade.
 	prog := make([]unix.SockFilter, 0, len(tapped)+6)
 	if tapAuditArch != 0 {
 		// [0] A = arch; [1] if A==native skip 1 (to LD nr) else [2] ALLOW.
@@ -286,12 +286,10 @@ func (s *tapSupervisor) handleNotification(notifyFD int) bool {
 
 	name, tapped := tappedSyscallName(notif.Data.Nr)
 	if !tapped {
-		// Should not happen (filter only notifies the tapped set); stays legible if the set grows without a name mapping.
 		name = "syscall-" + strconv.Itoa(int(notif.Data.Nr))
 	}
 	path := s.readPathArg(notifyFD, &notif, name)
 
-	// reportErr is never called: the tap observes only; Landlock denying the syscall afterward is not the tap's error.
 	_, reportChange, end := s.tracker.Start(s.ctx, "observe", tapSubject,
 		"syscall", name, "pid", int(notif.Pid))
 	data := map[string]any{"syscall": name, "pid": notif.Pid}
@@ -303,14 +301,15 @@ func (s *tapSupervisor) handleNotification(notifyFD int) bool {
 	reportChange(id, data)
 	end()
 
-	// Always respond CONTINUE, never a decision derived from inspected args — that is what keeps this TOCTOU-safe.
+	// Always CONTINUE, never a decision derived from inspected args: TOCTOU-safe.
 	resp := seccompNotifResp{ID: notif.ID, Flags: uint32(unix.SECCOMP_USER_NOTIF_FLAG_CONTINUE)}
 	if err := notifSend(notifyFD, &resp); err != nil {
 		switch err {
 		case unix.ENOENT:
 			return true // target already gone / notification canceled
 		default:
-			// Unrecoverable SEND failure (e.g. CONTINUE unsupported, pre-5.5): stop serving so run() closes the notify fd, failing the tapped syscall with ENOSYS rather than running unobserved or hanging.
+			// Unrecoverable SEND failure: stop serving so run() closes the notify
+			// fd, failing the tapped syscall rather than running unobserved.
 			return false
 		}
 	}

@@ -19,7 +19,6 @@ var (
 
 type Key = string
 
-// KeyValue exists for backward compatibility with the old interface.
 type KeyValue struct {
 	Key   string
 	Value json.RawMessage

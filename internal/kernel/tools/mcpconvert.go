@@ -7,13 +7,6 @@ import (
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
-// mcpToolToTaskTool converts a runtimetypes.MCPTool (received from mcpworker via NATS)
-// to a taskengine.Tool.
-//
-// injectParams keys are stripped from the tool's inputSchema (properties + required list)
-// before the schema is shown to the model, so the model never sees injected parameters.
-// InputSchema is otherwise passed as-is; the LLM provider handles any schema sanitisation
-// it needs (e.g. Gemini strips additionalProperties).
 func mcpToolToTaskTool(toolsName string, t runtimetypes.MCPTool, injectParams map[string]string) taskengine.Tool {
 	_ = toolsName // available for future namespacing
 	var params any
@@ -30,8 +23,6 @@ func mcpToolToTaskTool(toolsName string, t runtimetypes.MCPTool, injectParams ma
 	}
 }
 
-// filterMCPSchema removes keys in injectParams from the inputSchema's "properties"
-// and "required" fields. If injectParams is empty, the raw schema is returned as-is.
 func filterMCPSchema(rawSchema json.RawMessage, injectParams map[string]string) any {
 	if len(injectParams) == 0 {
 		// Fast path: nothing to strip.

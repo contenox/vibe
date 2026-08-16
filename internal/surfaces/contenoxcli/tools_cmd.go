@@ -1,5 +1,3 @@
-// tools_cmd.go — contenox tools subcommand tree (add, list, show, remove, update).
-// Each subcommand opens only the DB; no LLM stack is needed.
 package contenoxcli
 
 import (
@@ -19,7 +17,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// toolsCmd is the parent "contenox tools" command.
 var toolsCmd = &cobra.Command{
 	Use:   "tools",
 	Short: "Manage remote tool providers (add, list, show, remove, update).",
@@ -172,8 +169,7 @@ func init() {
 	_ = toolsAddCmd.MarkFlagRequired("url")
 	toolsAddCmd.Flags().StringArray("header", nil, `Header to inject into every call, e.g. "Authorization: Bearer $TOKEN" (repeatable)`)
 	toolsAddCmd.Flags().StringArray("inject", nil, `Param to inject as a tool call argument and hide from the model, e.g. "tenant_id=acme" (repeatable)`)
-	// 60s, not 10s: a remote tool that aborts early is retried by the model,
-	// so a slow one used to cost several tool rounds rather than one wait.
+	// 60s, not 10s: a remote tool that aborts early is retried by the model.
 	toolsAddCmd.Flags().Int("timeout", 60000, "Request timeout in milliseconds")
 	toolsAddCmd.Flags().String("spec", "", "Full URL or local file path to the OpenAPI v3 spec (e.g. https://host/openapi.yaml, ~/spec.yaml, ./spec.json)")
 
@@ -197,7 +193,6 @@ func init() {
 }
 
 // openToolsService resolves the DB path, opens SQLite and returns a toolsproviderservice.
-// The toolsRegistry is nil here (CLI doesn't need ListLocalTools / GetSchemasForSupportedTools).
 func openToolsService(cmd *cobra.Command) (libdb.DBManager, toolsproviderservice.Service, error) {
 	dbPath, err := resolveDBPath(cmd)
 	if err != nil {
@@ -211,7 +206,6 @@ func openToolsService(cmd *cobra.Command) (libdb.DBManager, toolsproviderservice
 	return db, toolsproviderservice.New(db, nil, nil), nil
 }
 
-// parseHeaders parses a []string of "Key: Value" into a map[string]string.
 func parseHeaders(raw []string) (map[string]string, error) {
 	out := make(map[string]string, len(raw))
 	for _, h := range raw {
@@ -226,7 +220,6 @@ func parseHeaders(raw []string) (map[string]string, error) {
 	return out, nil
 }
 
-// parseInjects parses a []string of "key=value" into a map[string]string.
 func parseInjects(raw []string) (map[string]string, error) {
 	out := make(map[string]string, len(raw))
 	for _, kv := range raw {
@@ -241,9 +234,8 @@ func parseInjects(raw []string) (map[string]string, error) {
 	return out, nil
 }
 
-// probeTools fetches tools from the spec source and returns the count.
-// specURL is used as the spec source when non-empty; otherwise endpointURL is used.
-// Returns -1 on failure — non-fatal, just affects the registration message.
+// probeTools fetches tools from the spec source and returns the count, or -1 on
+// failure.
 func probeTools(endpointURL, specURL string) int {
 	proto := &tools.OpenAPIToolProtocol{SpecSource: specURL}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -255,12 +247,9 @@ func probeTools(endpointURL, specURL string) int {
 	return len(discovered)
 }
 
-// resolveSpecPath converts a user-supplied spec source to the canonical stored form.
-//   - http:// and https:// URLs are returned as-is.
-//   - file:// URIs are returned as-is (user already knows what they're doing).
-//   - ~/path is expanded to the user's home directory and converted to file:///abs/path.
-//   - Relative and absolute file paths are resolved to an absolute path,
-//     verified to exist, and returned as file:///abs/path.
+// resolveSpecPath converts a user-supplied spec source to the canonical stored
+// form: URLs and file:// URIs pass through, everything else is resolved to an
+// absolute file:/// path and verified to exist.
 func resolveSpecPath(raw string) (string, error) {
 	// Pass through URLs and already-formed file:// URIs.
 	if strings.HasPrefix(raw, "http://") ||
@@ -349,7 +338,7 @@ func runToolsAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("tools %q already exists; use 'contenox tools update' to modify it", name)
 	}
 
-	// Probe tools (non-fatal — purely presentation logic, not a service concern).
+	// Probe tools (non-fatal).
 	toolCount := probeTools(url, resolvedSpec)
 
 	remoteTools := &runtimetypes.RemoteTools{

@@ -26,7 +26,7 @@ Grant one to an agent with a single line in its declaration's front matter —
 `mcpServers: [memory]` in `.contenox/agents/<name>.md`, and nothing else; see
 [declaring agents](/docs/guide/agents/). A chain that needs the same grant sets
 `"tools": ["memory"]` (or `["filesystem"]`, `["fetch"]`) in its
-`execute_config` instead — see [Request routing](/docs/guide/request-routing/)
+`execute_config` instead — see [Request routing](/docs/guide/chains/routing/)
 for how a chain's tasks reach tools.
 
 ## What each server is for

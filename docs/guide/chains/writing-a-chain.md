@@ -1,6 +1,7 @@
 ---
-title: Writing a chain by hand
+title: "Writing a chain by hand"
 description: Walk from a blank file to a working authored chain in five edits — for the agent that has outgrown a declaration.
+order: 1
 ---
 
 # Writing a chain by hand
@@ -9,7 +10,7 @@ Most agents never need this page. An agent is [a Markdown declaration](/docs/gui
 
 You are here because you need something a declaration cannot say: a branch, a different model per step, a recovery path, a point where a human is required. Then you write the state machine yourself, and the engine runs exactly what you wrote. This page walks you from a blank file to a working chain in five edits.
 
-If you haven't installed Contenox yet, do the [Quickstart](/docs/guide/quickstart/) first. If you have not written an agent yet, do [your first agent](/docs/guide/tutorial-first-agent/) — it is the shorter road and probably the right one.
+If you haven't installed Contenox yet, do the [Quickstart](/docs/guide/quickstart/) first. If you have not written an agent yet, do [your first agent](/docs/guide/tutorials/first-agent/) — it is the shorter road and probably the right one.
 
 ---
 
@@ -48,7 +49,7 @@ To make any directory a workspace, run `contenox init` inside it. Workspace-scop
 
 ## What `contenox init` already gave you
 
-Look in `~/.contenox/system/`. Every chain file follows the `chain-<role>-<variant>.json` naming convention ([the full grammar](/docs/guide/chain-naming/)).
+Look in `~/.contenox/system/`. Every chain file follows the `chain-<role>-<variant>.json` naming convention ([the full grammar](/docs/guide/chains/naming/)).
 
 You don't have to start there. You can write your own.
 
@@ -203,8 +204,6 @@ If the task uses tools, you author the policy. Allowlists, denylists, per-tool c
 ```
 
 `_allowed_commands` and `_denied_commands` constrain what `local_shell` can run for this task, independent of any other chain.
-
-![A sudo command is refused because the chain's command policy denies it; the policy is plain JSON](/chain-blocked.gif)
 
 ---
 

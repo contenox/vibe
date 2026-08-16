@@ -1,5 +1,6 @@
 ---
 description: How contenox turns files, commands, and APIs into schemas a model can call — and how the allowlist decides what's on the table.
+order: 2
 ---
 
 # What are Tools?

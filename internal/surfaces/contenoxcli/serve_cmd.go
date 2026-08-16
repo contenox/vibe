@@ -22,12 +22,7 @@ import (
 )
 
 // serve keeps a contenox runtime up so the hosted app can attach to this
-// machine. Without it the app is only reachable while an editor happens to be
-// running an ACP session, which makes "open contenox on your phone" depend on
-// a program that has nothing to do with the relay.
-//
-// beam is the same host under the name the terminal UI used, kept so the
-// muscle memory keeps working.
+// machine. beam is the same host under the name the terminal UI used.
 var serveCmd = &cobra.Command{
 	Use:   "serve [path]",
 	Short: "Keep contenox running so the app can reach this machine.",
@@ -72,8 +67,7 @@ var beamCmd = &cobra.Command{
 }
 
 // hostLogName is the base name of the host's own logs, kept separate from
-// telemetry.log so turning telemetry on or off never changes whether a host
-// has a log. Files land as serve-<date>.log inside hostLogDirName.
+// telemetry.log. Files land as serve-<date>.log inside hostLogDirName.
 const (
 	hostLogName    = "serve"
 	hostLogDirName = "logs"
@@ -87,9 +81,8 @@ func init() {
 }
 
 // openHostLog opens the host's log directory. It runs before the database is
-// readable, so it starts on defaults; the stored `log-*` settings are applied
-// by [applyStoredLogSettings] once the database is open. A log that only works
-// after the database opens is no use for diagnosing a database that will not.
+// readable, so it starts on defaults; [applyStoredLogSettings] moves it onto the
+// stored `log-*` settings once the database is open.
 func openHostLog(cmd *cobra.Command) (*liblog.Writer, error) {
 	dir, _ := cmd.Flags().GetString("log-dir")
 	if strings.TrimSpace(dir) == "" {
@@ -103,7 +96,7 @@ func openHostLog(cmd *cobra.Command) (*liblog.Writer, error) {
 }
 
 // applyStoredLogSettings moves a live host log onto the operator's configured
-// bounds. Anything unset stays on the default it booted with.
+// bounds; anything unset stays on the default it booted with.
 func applyStoredLogSettings(ctx context.Context, store runtimetypes.Store, w *liblog.Writer) {
 	if w == nil {
 		return
@@ -111,17 +104,9 @@ func applyStoredLogSettings(ctx context.Context, store runtimetypes.Store, w *li
 	w.Reconfigure(logSettingsFromConfig(ctx, store))
 }
 
-// defaultHostRoot resolves the workspace root a host serves.
-//
-// With no path, that is the user's home directory, not the directory the host
-// was started in. A host is a property of the machine — it outlives the shell
-// that launched it and is reached from a phone that knows nothing about where
-// that shell was standing — so scoping it to a happenstance working directory
-// would make what the app can open depend on an invisible detail. `serve .`
-// is how you ask for the narrow scope, and it says so out loud.
-//
-// A relative path is made absolute here so the screen names the same directory
-// the sessions actually get.
+// defaultHostRoot resolves the workspace root a host serves: with no path, the
+// user's home directory rather than the launch directory, since a host outlives
+// the shell that started it. A relative path is made absolute.
 func defaultHostRoot(cmd *cobra.Command, launchDir string) string {
 	args := cmd.Flags().Args()
 	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
@@ -141,8 +126,7 @@ func defaultHostRoot(cmd *cobra.Command, launchDir string) string {
 }
 
 // hostSetupCheck lifts the readiness result off the engine the host already
-// built, so the pre-flight costs nothing extra. A host serving setup-only has
-// no engine and therefore no result.
+// built; a setup-only host has none.
 func hostSetupCheck(_ context.Context, engine *enginesvc.Engine) *setupcheck.Result {
 	if engine == nil {
 		return nil
@@ -151,15 +135,13 @@ func hostSetupCheck(_ context.Context, engine *enginesvc.Engine) *setupcheck.Res
 	return &res
 }
 
-// relayIsConfigured reports whether this machine has stored relay credentials
-// at all, which is what decides between "attached" and "pair me" on screen.
+// relayIsConfigured reports whether this machine has stored relay credentials.
 func relayIsConfigured(contenoxDir string) bool {
 	_, err := relaycreds.Load(contenoxDir)
 	return err == nil
 }
 
-// hostScreen is everything the status display names. It is a plain value so
-// the renderer is testable without a running runtime.
+// hostScreen is everything the status display names.
 type hostScreen struct {
 	contenoxDir  string
 	workspaceID  string
@@ -172,10 +154,9 @@ type hostScreen struct {
 	relayEnabled bool
 }
 
-// runHost draws the status screen and blocks until the context is cancelled,
-// which is what SIGINT/SIGTERM resolve to. The runtime and the relay tunnel
-// are already running by the time this is called; tearing them down is the
-// caller's deferred business.
+// runHost draws the status screen and blocks until the context is cancelled.
+// The runtime and the relay tunnel are already running, and tearing them down is
+// the caller's business.
 func runHost(ctx context.Context, cmd *cobra.Command, s hostScreen) error {
 	out := cmd.OutOrStdout()
 	writeHostScreen(out, s, isTerminal(out))
@@ -185,17 +166,13 @@ func runHost(ctx context.Context, cmd *cobra.Command, s hostScreen) error {
 	return nil
 }
 
-// writeHostScreen renders the status display. Everything it prints is a fact
-// about this process; nothing is aspirational, because a host that claims to
-// be reachable when it is not is worse than one that says nothing.
+// writeHostScreen renders the status display.
 func writeHostScreen(w io.Writer, s hostScreen, colour bool) {
 	fmt.Fprintln(w)
 	brand.WriteHeader(w, brand.Options{Colour: colour})
 	fmt.Fprintln(w)
 
-	// Setup first: a host with no usable model can still be reached, but
-	// nothing it is asked to do will work, and that is worth saying before
-	// the reassuring lines below.
+	// Setup first: a host with no usable model is reachable but useless.
 	var next []string
 	next = append(next, writeHostReadiness(w, s)...)
 
@@ -213,8 +190,6 @@ func writeHostScreen(w io.Writer, s hostScreen, colour bool) {
 	next = append(next, writeHostRelay(w, s)...)
 	writeHostLog(w, s)
 
-	// Every instruction lands here rather than between the status rows, so the
-	// aligned block stays scannable and the things to do stay together.
 	if len(next) > 0 {
 		fmt.Fprintln(w)
 		for _, line := range next {
@@ -227,8 +202,6 @@ func writeHostScreen(w io.Writer, s hostScreen, colour bool) {
 	fmt.Fprintln(w)
 }
 
-// writeHostReadiness prints the setup row and returns any follow-up lines for
-// the instructions block.
 func writeHostReadiness(w io.Writer, s hostScreen) []string {
 	if !s.engineReady {
 		fmt.Fprintf(w, "  %-12s no model configured\n", "Setup")
@@ -252,9 +225,6 @@ func writeHostReadiness(w io.Writer, s hostScreen) []string {
 	return nil
 }
 
-// writeHostRelay prints the relay rows and returns any follow-up lines. The
-// unpaired case is the whole reason this screen exists, so it gets the full
-// three-step funnel rather than a terse hint.
 func writeHostRelay(w io.Writer, s hostScreen) []string {
 	creds, err := relaycreds.Load(s.contenoxDir)
 	if err != nil {
@@ -289,8 +259,6 @@ func writeHostLog(w io.Writer, s hostScreen) {
 	fmt.Fprintf(w, "  %-12s contenox config set log-max-size 50MB\n", "")
 }
 
-// keepDescription and ageDescription render a retention bound the way the
-// config key that sets it reads, including the operator's 0 for "no limit".
 func keepDescription(n int) string {
 	if n <= 0 {
 		return "every file"
@@ -312,8 +280,7 @@ func ageDescription(d time.Duration) string {
 	return fmt.Sprintf("%d days", days)
 }
 
-// isTerminal reports whether w is a terminal, which decides colour. A
-// redirected stdout gets plain text so a captured screen stays readable.
+// isTerminal reports whether w is a terminal, which decides colour.
 func isTerminal(w io.Writer) bool {
 	f, ok := w.(*os.File)
 	if !ok {

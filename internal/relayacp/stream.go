@@ -44,8 +44,7 @@ func (s *stream) offer(payload json.RawMessage) bool {
 		return false
 	default:
 	}
-	// Never blocks: a full or closed queue drops the payload rather than
-	// waiting on the connector's read loop.
+	// Never blocks: a full or closed queue drops the payload.
 	select {
 	case s.in <- payload:
 		return true
@@ -56,8 +55,6 @@ func (s *stream) offer(payload json.RawMessage) bool {
 
 func (s *stream) Read(p []byte) (int, error) {
 	if len(s.pending) == 0 {
-		// Closure checked before the queue: a dropped attachment stops
-		// immediately rather than serving a message whose answer cannot leave.
 		select {
 		case <-s.done:
 			return 0, io.EOF
@@ -82,8 +79,6 @@ func (s *stream) Write(p []byte) (int, error) {
 		return 0, ErrStreamClosed
 	default:
 	}
-	// Refused rather than truncated: a partial JSON-RPC message would be
-	// syntactically broken on the wire.
 	if len(s.outbound)+len(p) > librelay.MaxFrameBytes {
 		return 0, fmt.Errorf("relayacp: outbound message exceeds librelay.MaxFrameBytes (%d)", librelay.MaxFrameBytes)
 	}
@@ -95,12 +90,10 @@ func (s *stream) Write(p []byte) (int, error) {
 		}
 		line := s.outbound[:i]
 		if len(bytes.TrimSpace(line)) > 0 {
-			// Copied out: the frame outlives this call once queued for the
-			// connector to encode later.
+			// Copied out: the frame outlives this call.
 			payload := make(json.RawMessage, len(line))
 			copy(payload, line)
-			// ID/ReplyTo unset: correlation lives in the JSON-RPC message,
-			// not the frame.
+			// ID/ReplyTo unset: correlation lives in the JSON-RPC message.
 			if err := s.send(librelay.Frame{
 				Type:     librelay.TypeACPMessage,
 				Instance: s.instance,
@@ -110,8 +103,7 @@ func (s *stream) Write(p []byte) (int, error) {
 				return 0, err
 			}
 		}
-		// Compacted in place so a long-lived attachment's buffer does not
-		// grow unbounded.
+		// Compacted so a long-lived attachment's buffer does not grow unbounded.
 		s.outbound = append(s.outbound[:0], s.outbound[i+1:]...)
 	}
 }

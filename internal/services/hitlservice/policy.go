@@ -88,9 +88,8 @@ const (
 	// backticks, <(), >()), including via AST for a readable shell line.
 	OpNoCommandSubstitution ConditionOp = "no_command_substitution"
 	// OpCommandPrefixAllowlist matches the call's command line, as tokens,
-	// against comma-separated safe prefixes; it refuses any control or
-	// substitution character in any token, and on a fully parseable shell
-	// line matches when every command in the line is on the list.
+	// against comma-separated safe prefixes, refusing any control or
+	// substitution character.
 	OpCommandPrefixAllowlist ConditionOp = "command_prefix_allowlist"
 )
 
@@ -215,8 +214,6 @@ func (e *evalScope) trusts(names []string) bool {
 		return true
 	}
 	if len(names) == 0 {
-		// An allow whose program word cannot even be named is not one this
-		// gate can vouch for.
 		e.noteTrustRefusal("the allowed command could not be named for a trusted-binary check — allow refused")
 		return false
 	}

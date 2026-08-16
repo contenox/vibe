@@ -41,16 +41,11 @@ type Meta struct {
 	DiffOld    string `json:"diffOld,omitempty"`
 	DiffNew    string `json:"diffNew,omitempty"`
 
-	// MatchedRule is the 0-based index, in the active policy's rule list, of
-	// the rule that gated this call; nil when no rule matched and the
-	// policy's DefaultAction applied instead. Mirrors
-	// hitlservice.EvaluationResult.MatchedRule onto the wire.
+	// MatchedRule is the 0-based index of the rule that gated this call; nil
+	// when the policy's DefaultAction applied instead.
 	MatchedRule *int `json:"matchedRule,omitempty"`
 
-	// Detail is the matched rule's human-readable cause -- what in the call
-	// actually tripped it (e.g. which shell command), when the rule has one.
-	// Mirrors hitlservice.EvaluationResult.Detail onto the wire. Empty for
-	// rules with no such cause, or when DefaultAction applied.
+	// Detail is the matched rule's human-readable cause, when it has one.
 	Detail string `json:"detail,omitempty"`
 
 	// MayCall is the gated call's declared reach, in order; a declaration, not a proof.

@@ -82,7 +82,8 @@ func (s missionSupervision) PendingAsks(ctx context.Context, missionID string) (
 	return out, nil
 }
 
-// The bound is enforced here, not only where the ask was offered: a session agent can reach a live askId from mission_list and call mission_answer unprompted.
+// The bound is enforced here, not only where the ask was offered: an agent can
+// reach a live askId from mission_list and call mission_answer unprompted.
 func (s missionSupervision) AnswerAsAgent(ctx context.Context, askID, text string) error {
 	if s.db == nil || s.hitl == nil {
 		return s.refuse(ctx, askID, "mission supervision has no store wired in this process, so the envelope's agent-answer bound cannot be read")
@@ -119,9 +120,8 @@ func (s missionSupervision) refuse(ctx context.Context, askID, reason string) er
 }
 
 // fleetSpawner is the write half of the supervisor surface: start one subagent.
-// The fleet is built after the toolset (it needs the engine the toolset feeds),
-// so the dispatcher is resolved per call rather than captured — nil until the
-// fleet is up, which the tool reports as unavailable rather than half-firing.
+// The dispatcher is resolved per call rather than captured, since the fleet is
+// built after the toolset.
 type fleetSpawner struct {
 	fleet func() fleetservice.Service
 }
@@ -147,7 +147,7 @@ func (f fleetSpawner) Spawn(ctx context.Context, spec missiontools.SubagentSpec)
 }
 
 // subagentDefaults reads the agent and envelope a subagent started with neither
-// named runs under, from the same config keys /mission and `mission fire` read.
+// named runs under.
 func subagentDefaults(db libdb.DBManager) missiontools.SubagentDefaults {
 	return func(ctx context.Context) (string, string) {
 		store := runtimetypes.New(db.WithoutTransaction())

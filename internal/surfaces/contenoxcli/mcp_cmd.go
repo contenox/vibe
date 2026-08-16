@@ -103,8 +103,6 @@ Examples:
 		rawInjects, _ := flags.GetStringArray("inject")
 
 		// Positional shorthand: contenox mcp add <name> <url>
-		// If a second positional arg is provided, treat it as --url and default
-		// transport to "http" unless the user explicitly set --transport.
 		if len(args) == 2 {
 			if url == "" {
 				url = args[1]
@@ -220,10 +218,8 @@ servers. If none are registered, prints a hint to run 'contenox mcp add'.`,
 	},
 }
 
-// mcpServerOwner says who a registration belongs to, so a row an agent brought
-// with it is not mistaken for one to manage by hand. A declaration-owned row is
-// rewritten by the next discovery pass and retired with its declaration —
-// editing or removing it here does not stick.
+// mcpServerOwner says who a registration belongs to. A declaration-owned row is
+// rewritten by the next discovery pass, so editing it here does not stick.
 func mcpServerOwner(name string) string {
 	switch {
 	case runtimetypes.IsDeclaredToolName(name):

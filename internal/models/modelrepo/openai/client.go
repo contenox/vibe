@@ -46,10 +46,6 @@ type openAIChatRequest struct {
 	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 }
 
-// apiChatMessage is the wire-format message sent to the OpenAI REST API.
-// Content is `any` so it can carry a plain string (with null for tool-only
-// assistant messages), or the content-parts array when the message has image
-// attachments.
 type apiChatMessage struct {
 	Role       string           `json:"role"`
 	Content    any              `json:"content"`
@@ -57,8 +53,6 @@ type apiChatMessage struct {
 	ToolCalls  []apiToolCallReq `json:"tool_calls,omitempty"`
 }
 
-// apiContentPart is one element of the chat/completions content-parts array,
-// used only when a message carries image attachments.
 type apiContentPart struct {
 	Type     string       `json:"type"`
 	Text     string       `json:"text,omitempty"`
@@ -192,11 +186,6 @@ func (c *openAIClient) sendRequest(ctx context.Context, endpoint string, request
 	return nil
 }
 
-// buildOpenAIRequest builds a compliant request and sanitizes tool names to
-// OpenAI's pattern (^[a-zA-Z0-9_-]+$), returning a sanitized->original map so
-// callers can translate names back. It also sanitizes tool_calls[].function.name
-// in message history, since taskengine's "toolsName.toolName" qualified names
-// contain a dot that violates OpenAI's pattern.
 func buildOpenAIRequest(modelName string, messages []modelrepo.Message, args []modelrepo.ChatArgument) (openAIChatRequest, map[string]string) {
 	return buildOpenAIRequestWithCapabilities(modelName, messages, args, true)
 }
@@ -324,9 +313,6 @@ func buildOpenAIRequestWithCapabilities(modelName string, messages []modelrepo.M
 	return req, nameMap
 }
 
-// openAIImageContent renders a message as the chat/completions content-parts
-// array: a leading text part (when present), then one image_url part per
-// image as an inline base64 data URI.
 func openAIImageContent(msg modelrepo.Message) []apiContentPart {
 	parts := make([]apiContentPart, 0, len(msg.Images)+1)
 	if msg.Content != "" {
@@ -341,8 +327,6 @@ func openAIImageContent(msg modelrepo.Message) []apiContentPart {
 	return parts
 }
 
-// imageDataURI builds the data:<mime>;base64,<payload> URI OpenAI accepts for
-// inline image bytes; shared by the chat/completions and Responses builders.
 func imageDataURI(mimeType string, data []byte) string {
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
@@ -350,8 +334,6 @@ func imageDataURI(mimeType string, data []byte) string {
 	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
-// openAIAPIBaseModelID returns the model id segment OpenAI expects, without provider/namespace
-// prefixes (e.g. "openai/gpt-5" -> "gpt-5"). Runtime state may store namespaced ids.
 func openAIAPIBaseModelID(model string) string {
 	m := strings.ToLower(strings.TrimSpace(model))
 	if i := strings.LastIndex(m, "/"); i >= 0 {
@@ -360,9 +342,6 @@ func openAIAPIBaseModelID(model string) string {
 	return m
 }
 
-// openAIUsesResponsesEndpoint reports whether this model requires the OpenAI
-// Responses API (POST /v1/responses) rather than /chat/completions. GPT-5
-// family models are routed to /responses.
 func openAIUsesResponsesEndpoint(model string) bool {
 	base := openAIAPIBaseModelID(model)
 	return strings.HasPrefix(base, "gpt-5")
@@ -460,8 +439,6 @@ func openAIModelSupportsXHighReasoning(model string) bool {
 		strings.HasPrefix(base, "gpt-5.4")
 }
 
-// sanitizeToolName replaces invalid characters with '_' and trims leading/trailing separators.
-// Allowed: letters, digits, underscore, hyphen.
 func sanitizeToolName(in string) string {
 	if in == "" {
 		return ""
@@ -482,7 +459,6 @@ func sanitizeToolName(in string) string {
 	return s
 }
 
-// uniquifyToolName ensures we don't send duplicate names (OpenAI recommends unique names).
 func uniquifyToolName(seen map[string]int, name string) string {
 	if _, ok := seen[name]; !ok {
 		seen[name] = 1

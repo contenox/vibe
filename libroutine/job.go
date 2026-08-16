@@ -13,40 +13,34 @@ type Condition func(ctx context.Context) (bool, error)
 // Operation is the work a Job performs once its Condition allows it.
 type Operation func(ctx context.Context) error
 
-// Job is one step in a chain: check Condition, run Operation, and — if both
-// succeed — continue into Next. A Job is driven by a Runner, which adds the
-// circuit-breaker protection and single-flight guard around it.
+// Job is one step in a chain: check Condition, run Operation, and if both
+// succeed continue into Next. A Job is driven by a Runner.
 type Job struct {
 	// Name identifies this job in RunResult and error messages.
 	Name string
-	// Condition, if set, is evaluated before Operation. A false result (no
-	// error) skips Operation and Next without failing the run — the
-	// condition simply wasn't met, not an error.
+	// Condition, if set, is evaluated before Operation. A false result skips
+	// Operation and Next without failing the run.
 	Condition Condition
 	Operation Operation
-	// Next, if set, runs after Operation succeeds. It does not run if
-	// Condition returns false, or if Operation or Condition errors.
+	// Next, if set, runs after Operation succeeds.
 	Next *Job
 }
 
 // RunResult reports the outcome of running a Job, including its chain.
 type RunResult struct {
 	Name     string
-	Skipped  bool // Condition evaluated to false; Operation did not run
+	Skipped  bool
 	Err      error
 	Duration time.Duration
-	// Next is the chained job's result, set only when this job's Operation
-	// succeeded and Next was run.
+	// Next is the chained job's result, set only when Next was run.
 	Next *RunResult
 }
 
-// Failed reports whether this result or any result later in its chain
-// errored.
+// Failed reports whether this result or any later in its chain errored.
 func (r *RunResult) Failed() bool {
 	return r.firstErr() != nil
 }
 
-// firstErr returns the first error in this result's chain, or nil.
 func (r *RunResult) firstErr() error {
 	for n := r; n != nil; n = n.Next {
 		if n.Err != nil {

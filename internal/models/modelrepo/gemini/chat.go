@@ -85,9 +85,8 @@ func (c *GeminiChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 					Arguments: string(argsJSON),
 				},
 			}
-			// Gemini 3: thoughtSignature is at the Part level (p.ThoughtSignature),
-			// not inside functionCall. Propagate it to parallel calls in the same turn
-			// where Gemini may only set it once.
+			// Gemini 3 puts thoughtSignature at the Part level and may set it only
+			// once for parallel calls in the same turn.
 			sig := p.ThoughtSignature
 			if sig == "" {
 				sig = p.FunctionCall.ThoughtSignature // fallback: older API placement

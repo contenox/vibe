@@ -1,8 +1,6 @@
 // Package vfs is the single home for workspace-root containment: resolving a
-// candidate path against a root and rejecting anything that escapes it,
-// symlinks included. Contain resolves a path within a root; Within is the
-// raw predicate; Factory holds the serve-level root allowlist and vends
-// rooted Views.
+// candidate path against a root and rejecting anything that escapes it, symlinks
+// included. Factory holds the serve-level root allowlist and vends rooted Views.
 package vfs
 
 import (
@@ -39,12 +37,9 @@ func ResolveRoot(root string) (string, error) {
 	return filepath.Clean(abs), nil
 }
 
-// Contain resolves candidate (absolute, or relative to root) to a cleaned,
-// symlink-resolved absolute path guaranteed to lie within root. A
-// non-existent leaf is permitted: the deepest existing parent is resolved
-// and the missing suffix re-appended, so a write through an escaping symlink
-// is still rejected. Returns an error wrapping ErrEscape when the path
-// leaves root.
+// Contain resolves candidate to a cleaned, symlink-resolved absolute path
+// guaranteed to lie within root, wrapping ErrEscape when it does not. A
+// non-existent leaf is permitted.
 func Contain(root, candidate string) (string, error) {
 	realRoot, err := ResolveRoot(root)
 	if err != nil {
@@ -57,9 +52,6 @@ func containWithin(realRoot, displayRoot, candidate string) (string, error) {
 	return containWithinOpts(realRoot, displayRoot, candidate, false)
 }
 
-// containWithinOpts is containWithin with a privileged escape hatch for the
-// runtime's own reads of its control plane (see OpenPrivilegedView); the
-// root-escape check is always enforced regardless.
 func containWithinOpts(realRoot, displayRoot, candidate string, privileged bool) (string, error) {
 	absPath := candidate
 	if !filepath.IsAbs(candidate) {
@@ -77,9 +69,8 @@ func containWithinOpts(realRoot, displayRoot, candidate string, privileged bool)
 	if !within(realRoot, real) {
 		return "", fmt.Errorf("%w: %s escapes %s", ErrEscape, candidate, displayRoot)
 	}
-	// A path within root is still refused if it lands under the runtime's
-	// control plane; real is already symlink-resolved, so a link into the
-	// control plane is caught too. See controlplane.go.
+	// real is already symlink-resolved, so a link into the control plane is
+	// caught here too.
 	if !privileged {
 		if denied, ok := deniedResolved(real); ok {
 			return "", controlPlaneError(candidate, denied)
@@ -112,9 +103,6 @@ func within(realRoot, abs string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+sep))
 }
 
-// resolveLeaf resolves symlinks for an existing target; for a non-existing
-// target it resolves the deepest existing parent and re-appends the missing
-// suffix, so a write through an escaping symlink is still caught.
 func resolveLeaf(absPath string) (string, error) {
 	absPath = filepath.Clean(absPath)
 
@@ -124,13 +112,9 @@ func resolveLeaf(absPath string) (string, error) {
 		return "", err
 	}
 
-	// EvalSymlinks reports ENOENT both for a path that does not exist and for
-	// a symlink whose target does not exist. The two are not the same: the
-	// second is a link that still redirects a write. Lstat tells them apart,
-	// and a dangling link is refused rather than treated as a plain missing
-	// file that re-appends inside the root (which would let
-	// "<root>/notes.md -> ~/.ssh/authorized_keys" pass containment and land
-	// the bytes outside).
+	// EvalSymlinks reports ENOENT for both a missing path and a symlink whose
+	// target is missing. Lstat tells them apart, and a dangling link is refused
+	// rather than treated as a plain missing file that re-appends inside the root.
 	if fi, lerr := os.Lstat(absPath); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
 		return "", fmt.Errorf("%w: %s is a symlink whose target cannot be resolved", ErrEscape, absPath)
 	}

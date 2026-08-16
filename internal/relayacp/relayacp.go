@@ -1,8 +1,6 @@
 // Package relayacp carries ACP over a relay connection, so a remote client is
-// just another ACP client of this runtime, routed by [librelay.Frame.Session]
-// to its own [libacp.AgentSideConnection]. It is the adapter between
-// internal/relaylink's transport and libacp's protocol layer, so neither has
-// to know the other.
+// just another ACP client of this runtime, routed by [librelay.Frame.Session] to
+// its own [libacp.AgentSideConnection].
 package relayacp
 
 import (
@@ -19,10 +17,10 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-// Bounds [Config] leaves zero; ceilings on a remote peer's appetite.
+// Bounds [Config] leaves zero.
 const (
 	// DefaultQueue is how many inbound messages may await one attachment's
-	// ACP connection before it is judged wedged; see [Tunnel.Handle].
+	// ACP connection before it is judged wedged.
 	DefaultQueue = 64
 	// DefaultMaxAttachments bounds the attachments one tunnel serves at once.
 	DefaultMaxAttachments = 64
@@ -31,8 +29,7 @@ const (
 // SendFunc puts one frame on the relay; it must not block.
 type SendFunc func(librelay.Frame) error
 
-// Config is everything a tunnel needs; it names no endpoint or credential,
-// which belong to the connector.
+// Config is everything a tunnel needs.
 type Config struct {
 	// Instance is this runtime's identity at the relay, stamped on every
 	// outbound frame; required.
@@ -47,13 +44,13 @@ type Config struct {
 	// MaxAttachments caps concurrent attachments; zero means
 	// [DefaultMaxAttachments].
 	MaxAttachments int
-	// Tracker instruments each attachment's lifetime; nil degrades to
+	// Tracker instruments each attachment's lifetime; nil means
 	// [libtracker.NoopTracker].
 	Tracker libtracker.ActivityTracker
 }
 
-// Tunnel routes relay cargo to per-attachment ACP connections; the zero
-// value is unusable — call [New] — and it is safe for concurrent use.
+// Tunnel routes relay cargo to per-attachment ACP connections. Use [New]; it is
+// safe for concurrent use.
 type Tunnel struct {
 	cfg     Config
 	tracker libtracker.ActivityTracker
@@ -70,8 +67,7 @@ type Tunnel struct {
 	closed bool
 }
 
-// New validates cfg and returns a tunnel that has attached nothing; it
-// performs no I/O and starts no goroutine.
+// New validates cfg and returns a tunnel that has attached nothing.
 func New(cfg Config) (*Tunnel, error) {
 	if cfg.Instance == "" {
 		return nil, errors.New("relayacp: Instance is required")
@@ -106,8 +102,8 @@ func New(cfg Config) (*Tunnel, error) {
 }
 
 // Handle applies one routed frame to the attachment named by
-// [librelay.Frame.Session]; it never blocks or fails, dropping anything it
-// cannot place, and is registered as the connector's [relaylink.Handler].
+// [librelay.Frame.Session]. It never blocks or fails, dropping what it cannot
+// place.
 func (t *Tunnel) Handle(ctx context.Context, f librelay.Frame) {
 	if f.Session == "" {
 		return
@@ -128,15 +124,15 @@ func (t *Tunnel) Handle(ctx context.Context, f librelay.Frame) {
 	}
 }
 
-// Len reports how many attachments are live right now; diagnostics only.
+// Len reports how many attachments are live; diagnostics only.
 func (t *Tunnel) Len() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return len(t.live)
 }
 
-// Close drops every attachment and returns once each one's ACP connection
-// and goroutine has exited; idempotent.
+// Close drops every attachment and returns once each one's ACP connection and
+// goroutine has exited. It is idempotent.
 func (t *Tunnel) Close() {
 	t.mu.Lock()
 	first := !t.closed
@@ -149,8 +145,8 @@ func (t *Tunnel) Close() {
 	if first {
 		t.cancel()
 	}
-	// Closed after the lock is released: an attachment deregistering itself
-	// while the lock was held would deadlock against it.
+	// Closed after the lock is released to avoid deadlocking against an
+	// attachment deregistering itself.
 	for _, a := range live {
 		a.close()
 	}
@@ -164,8 +160,6 @@ func (t *Tunnel) detachSession(session string) {
 	if a == nil {
 		return
 	}
-	// Deregistered before close, and closed under the lock: closing only
-	// closes a channel and cannot block the connector's read loop.
 	delete(t.live, session)
 	a.close()
 }
@@ -180,8 +174,7 @@ func (t *Tunnel) attachmentFor(ctx context.Context, session string) *attachment 
 		a.touch(t.clock.Add(1))
 		return a
 	}
-	// At the cap, evict inline under the lock rather than refuse: eviction
-	// only closes a channel, so it cannot block the connector's read loop.
+	// At the cap, evict inline: eviction only closes a channel.
 	for len(t.live) >= t.cfg.MaxAttachments {
 		oldest := t.oldestLocked()
 		if oldest == nil {
@@ -214,9 +207,8 @@ func (t *Tunnel) run(a *attachment, openCtx context.Context) {
 	reportErr, _, end := t.tracker.Start(openCtx, "hold", "relay_attachment", "session", a.session)
 	defer end()
 
-	// The connection runs under t.ctx, not openCtx: an attachment outlives
-	// the action that opened it, so its later work must not carry that
-	// action's correlation key.
+	// The connection runs under t.ctx, not openCtx: an attachment outlives the
+	// action that opened it.
 	conn := libacp.NewAgentSideConnection(a.stream, t.cfg.Factory)
 	err := conn.Run(t.ctx)
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) &&
@@ -229,8 +221,7 @@ func (t *Tunnel) run(a *attachment, openCtx context.Context) {
 func (t *Tunnel) detach(a *attachment) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	// Identity-checked: an eviction that already replaced this session must
-	// not be undone by the evicted attachment's own goroutine.
+	// Identity-checked so an eviction that replaced this session is not undone.
 	if t.live[a.session] == a {
 		delete(t.live, a.session)
 	}

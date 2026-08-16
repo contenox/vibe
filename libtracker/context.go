@@ -21,13 +21,8 @@ func CopyTrackingValues(src context.Context, dst context.Context) context.Contex
 	return ctx
 }
 
-// WithNewRequestID stamps a fresh random request ID into ctx. Call this at
-// any entry point lacking one so the tracker never logs SERVERBUG.
-//
-// Uses math/rand/v2, not crypto/rand, deliberately: request IDs are
-// correlation keys only, never authenticated or authorized on, so the only
-// requirement is collision avoidance. Do not reuse these as tokens, nonces,
-// or idempotency keys — mint those with crypto/rand.
+// WithNewRequestID stamps a fresh random request ID into ctx. Request IDs are
+// correlation keys only: do not reuse one as a token, nonce or idempotency key.
 func WithNewRequestID(ctx context.Context) context.Context {
 	id := fmt.Sprintf("cli-%016x", rand.Uint64())
 	return context.WithValue(ctx, ContextKeyRequestID, id)

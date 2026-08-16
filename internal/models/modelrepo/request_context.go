@@ -5,9 +5,7 @@ import "context"
 type requestedContextLengthKey struct{}
 
 // WithRequestedContextLength attaches a per-request context window to ctx.
-// Providers that can control their runtime context may honor it when building
-// a client; callers still pass the same value through llmrepo.Request so the
-// resolver can reject known-insufficient models before client construction.
+// Providers that can control their runtime context may honor it.
 func WithRequestedContextLength(ctx context.Context, contextLength int) context.Context {
 	if contextLength <= 0 {
 		return ctx

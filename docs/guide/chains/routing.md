@@ -1,15 +1,16 @@
 ---
 title: Request routing
 description: One prompt, several specialist loops. The router is where a workflow's expertise is spent — teaching the system what a request means, instead of asking the user to prompt harder.
+order: 4
 ---
 
 # Request routing
 
 A single agent loop cannot be good at everything. The instruction that makes a model a careful editor of files is not the instruction that makes it a careful reader of them, and the tools one needs are the tools the other must not have. The usual answer is to push the difference onto the user: write a longer prompt, spell out the method, remember to say "do not change anything". That answer scales badly and fails silently — a reasonable sentence gets a shallow answer and nobody can see why.
 
-Contenox puts the difference in the chain instead. A `route` task reads the request, labels it, and hands it to the loop built for that label. The expertise lives in the configuration, authored once, and the user goes on writing ordinary sentences.
+Contenox puts the difference in the workflow instead. You author this as a directory: the parent `agent.md` is the classifier and each subdirectory is a branch — see [Branching: the directory is the chain](/docs/guide/agents/#branching-the-directory-is-the-chain). This page is the shape that compiles into, and what to read when you want to see how a routed workflow actually executes.
 
-This is the layer above [the agentic loop](/docs/guide/agentic-loop/): that page is about how one loop is built, this one is about choosing which loop runs.
+It is the layer above [the agentic loop](/docs/guide/chains/agentic-loop/): that page is about how one loop is built, this one about choosing which loop runs.
 
 ## The shape
 

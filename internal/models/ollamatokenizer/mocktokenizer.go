@@ -41,7 +41,6 @@ func (m MockTokenizer) OptimalModel(ctx context.Context, baseModel string) (stri
 	return fmt.Sprintf("%s-optimized", baseModel), nil
 }
 
-// Simple word splitter for fake tokenization
 func splitWords(s string) []string {
 	// Replace with a more realistic splitter if needed
 	var words []string

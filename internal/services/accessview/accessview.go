@@ -68,8 +68,6 @@ func (e *Evaluator) Evaluate(ctx context.Context, paths []string) (policyName st
 	return policyName, verdicts
 }
 
-// verdict evaluates one path: an unreachable path short-circuits with no
-// policy eval; otherwise isDir (via stat) gates the read tool choice.
 func (e *Evaluator) verdict(ctx context.Context, rootRelPath string) (PathVerdict, string) {
 	pv := PathVerdict{Path: rootRelPath}
 
@@ -102,7 +100,6 @@ func (e *Evaluator) verdict(ctx context.Context, rootRelPath string) (PathVerdic
 	return pv, policyName
 }
 
-// toDimensionVerdict maps res onto the wire shape, keeping Rule only when it decided the action.
 func toDimensionVerdict(res hitlservice.EvaluationResult) *DimensionVerdict {
 	dv := &DimensionVerdict{
 		Action: string(res.Action),

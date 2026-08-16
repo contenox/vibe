@@ -68,8 +68,7 @@ func TestUnit_Host_RootDefaultsToTheHomeDirectory(t *testing.T) {
 }
 
 // `serve` and `serve .` must differ: the whole point of the dot is asking for
-// the narrow scope explicitly. If they resolved the same way the argument
-// would be decoration.
+// the narrow scope explicitly.
 func TestUnit_Host_BareAndDotAreDifferentScopes(t *testing.T) {
 	if _, err := os.UserHomeDir(); err != nil {
 		t.Skipf("no home directory on this machine: %v", err)
@@ -97,15 +96,10 @@ func TestUnit_Host_RelativePathIsMadeAbsolute(t *testing.T) {
 	}
 }
 
-// The screen must name the root the sessions actually get. This regressed
-// once: the display called defaultHostRoot while the workspace allowlist was
-// still built from the launch directory, so `serve /some/path` printed that
-// path while serving the directory it was started in — the display lied.
-//
-// The check is that the resolved root reaches the workspace factory as its
-// default, because that factory is what actually bounds every session and
-// relay attachment. Asserting only on the printed string would have passed
-// while the bug was live.
+// The screen must name the root the sessions actually get. This regressed once:
+// the display called defaultHostRoot while the workspace allowlist was still
+// built from the launch directory, so `serve /some/path` printed that path
+// while serving the directory it was started in — the display lied.
 func TestUnit_Host_ServedRootReachesTheWorkspaceAllowlist(t *testing.T) {
 	dir := t.TempDir()
 	root := hostRootFor(t, dir)
@@ -174,9 +168,7 @@ func TestUnit_Host_PairedScreenShowsAttachmentAndAppLink(t *testing.T) {
 }
 
 // Self-hosting is the same mechanism, not a second one: a relay on another
-// domain, verified against its own public key, serves its own app. Such a host
-// must be shown its own origin — never sent back to the hosted service it
-// deliberately did not use.
+// domain, verified against its own public key, serves its own app.
 func TestUnit_Host_SelfHostedRelayIsShownAsItself(t *testing.T) {
 	dir := t.TempDir()
 	if err := relaycreds.Save(dir, relaycreds.Credentials{

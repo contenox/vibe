@@ -7,13 +7,7 @@ import (
 )
 
 // ParseSize reads a human-written size — "10MB", "512kb", "1 GiB", "2048" —
-// into bytes. A bare number is bytes.
-//
-// KB and KiB both mean 1024, and so on down the ladder. That is technically
-// wrong about SI, and deliberate: the value is a disk budget typed by an
-// operator who means "ten megabytes of log", and resolving KB to 1000 here
-// would make `log-max-size 10MB` quietly produce files 5% smaller than the
-// number they typed, for a distinction nobody was drawing.
+// into bytes. A bare number is bytes, and KB and KiB both mean 1024.
 func ParseSize(s string) (int64, error) {
 	raw := strings.TrimSpace(s)
 	if raw == "" {
@@ -53,8 +47,7 @@ func ParseSize(s string) (int64, error) {
 	return int64(n * float64(unit)), nil
 }
 
-// FormatSize renders a byte count the way ParseSize would accept it back, so a
-// status screen and the config value that set it agree.
+// FormatSize renders a byte count the way ParseSize would accept it back.
 func FormatSize(n int64) string {
 	switch {
 	case n >= 1<<30:

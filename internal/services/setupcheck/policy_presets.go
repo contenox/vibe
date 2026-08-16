@@ -13,10 +13,8 @@ const CategoryPolicy = "policy"
 // the toolsets this build ships. Deliberately absent from blockingIssue's list.
 const StalePolicyPresetsCode = "hitl_policy_presets_stale"
 
-// TrustedBinaryIssueCode is the issue code for a policy whose
-// trusted_binaries declarations no longer describe this host. Deliberately
-// absent from blockingIssue's list: an entry that stopped matching costs an
-// approval card, never a refusal to run.
+// TrustedBinaryIssueCode is the issue code for a policy whose trusted_binaries
+// declarations no longer describe this host. Never blocking.
 const TrustedBinaryIssueCode = "hitl_trusted_binaries_drift"
 
 // TrustedBinaryDrift names one policy file together with the declaration
@@ -29,11 +27,8 @@ type TrustedBinaryDrift struct {
 	Findings []string `json:"findings"`
 }
 
-// AddTrustedBinaryIssue appends a warning for declarations that no longer
-// match this host, returning the Result unchanged when nothing drifted. The
-// runtime's own answer for a drifted entry is a refusal (the allow is
-// withdrawn and the call asks a human), so this only ever explains an
-// otherwise puzzling approval card and names the verb that fixes it.
+// AddTrustedBinaryIssue appends a warning for declarations that no longer match
+// this host, returning the Result unchanged when nothing drifted.
 func AddTrustedBinaryIssue(r Result, drift []TrustedBinaryDrift, refreshCommand string) Result {
 	parts := make([]string, 0, len(drift))
 	for _, d := range drift {
@@ -75,12 +70,9 @@ type StalePolicyPreset struct {
 	Effect string `json:"effect,omitempty"`
 }
 
-// AddStalePolicyPresetIssue appends a warning for policy files that predate
-// this build's toolsets, returning the Result unchanged when nothing is
-// stale. Never a blocking code: a stale envelope just asks for approval
-// more often, never a reason to refuse to run. Each stale file is named by
-// full path with its default_action fall-through; a policy never gates tool
-// visibility (the chain's tools allowlist does).
+// AddStalePolicyPresetIssue appends a warning for policy files that predate this
+// build's toolsets, returning the Result unchanged when nothing is stale. Never
+// a blocking code.
 func AddStalePolicyPresetIssue(r Result, stale []StalePolicyPreset, refreshCommand string) Result {
 	if len(stale) == 0 {
 		return r

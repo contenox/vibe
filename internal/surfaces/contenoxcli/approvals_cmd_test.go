@@ -177,8 +177,7 @@ func TestUnit_ApprovalsRespond_AsAgentRecordsAttributionWithinBounds(t *testing.
 }
 
 // TestUnit_ApprovalsRespond_AsAgentRefusedWhenEnvelopeForbids pins the exact
-// refusal when the mission's envelope has no attention grant. The envelope
-// always wins; the ask stays pending for a human.
+// refusal when the mission's envelope has no attention grant.
 func TestUnit_ApprovalsRespond_AsAgentRefusedWhenEnvelopeForbids(t *testing.T) {
 	fx := seedRespondFixture(t, humanOnlyEnvelope)
 

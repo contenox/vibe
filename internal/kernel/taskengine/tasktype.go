@@ -45,10 +45,8 @@ func IsToolBearingHandler(handler string) bool {
 	}
 }
 
-// Transition-eval tokens are the control values a handler emits as its
-// transition eval, matched by a TransitionBranch's When field via exact
-// string equality; branch on these constants, not the model's free text (use
-// the `route` handler for that).
+// Transition-eval tokens are the control values a handler emits as its transition
+// eval, matched by a TransitionBranch's When field via exact string equality.
 const (
 	// TransitionExecuted: a chat_completion turn finished with no tool calls.
 	TransitionExecuted = "executed"

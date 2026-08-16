@@ -97,8 +97,7 @@ func (e *modelManager) reconcileForResolution(ctx context.Context, resolveErr er
 	}
 	e.reconcileMu.Lock()
 	defer e.reconcileMu.Unlock()
-	// A very recent cycle already refreshed state (e.g. a concurrent failing
-	// request); retry against it instead of re-scanning every backend again.
+	// A very recent cycle already refreshed state; retry against it.
 	if !e.lastReconcileAt.IsZero() && time.Since(e.lastReconcileAt) < minResolveReconcileInterval {
 		return true
 	}
@@ -417,8 +416,7 @@ func (e *modelManager) reportTokenUsage(ctx context.Context, req Request, meta M
 	if tracker == nil {
 		return
 	}
-	// The stream often ends because the consumer's context was canceled or
-	// completed; the usage record must still land.
+	// The stream often ends on consumer cancellation; the usage record must still land.
 	ctx = context.WithoutCancel(ctx)
 	_, reportChange, end := tracker.Start(ctx, "report", "token_usage",
 		"model", meta.ModelName,

@@ -1,6 +1,7 @@
 ---
 title: Declaring agents
 description: An agent is a Markdown file with a YAML frontmatter header. Where declarations live, what the frontmatter says, what the config file supplies that a declaration cannot, and what an agent is allowed to do.
+order: 5
 ---
 
 # Declaring agents

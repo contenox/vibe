@@ -11,11 +11,12 @@ import (
 	"github.com/contenox/contenox/internal/services/setupcheck"
 )
 
-// ErrPreflightBlocked is returned when LLM setup is not ready; instructions are already printed to w.
+// ErrPreflightBlocked is returned when LLM setup is not ready; instructions are
+// already printed to w.
 var ErrPreflightBlocked = errors.New("LLM setup is not ready")
 
-// PreflightLLMSetup checks setup status before running chat or run. If the user must fix
-// configuration first, it prints instructions and returns ErrPreflightBlocked. Otherwise it returns nil.
+// PreflightLLMSetup checks setup status, printing instructions and returning
+// ErrPreflightBlocked when configuration must be fixed first.
 func PreflightLLMSetup(w io.Writer, res setupcheck.Result) error {
 	if res.Ready() {
 		return nil
@@ -26,7 +27,6 @@ func PreflightLLMSetup(w io.Writer, res setupcheck.Result) error {
 	return ErrPreflightBlocked
 }
 
-// isModelResolverFailure reports errors where printing setupcheck issues helps the user.
 func isModelResolverFailure(err error) bool {
 	if err == nil {
 		return false
@@ -62,8 +62,8 @@ func issueRank(code string) int {
 	return 100
 }
 
-// PrintSetupIssues prints actionable setup issues after model resolution failures.
-// Includes error and warning severities, ordered for readability.
+// PrintSetupIssues prints actionable setup issues after model resolution
+// failures.
 func PrintSetupIssues(w io.Writer, res setupcheck.Result) {
 	if len(res.Issues) == 0 {
 		return

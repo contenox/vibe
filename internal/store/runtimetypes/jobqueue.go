@@ -10,7 +10,6 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// AppendJobs inserts a list of jobs into the job_queue table.
 func (s *store) AppendJob(ctx context.Context, job Job) error {
 	if job.ID == "" {
 		job.ID = uuid.New().String()
@@ -75,7 +74,6 @@ func (s *store) AppendJobs(ctx context.Context, jobs ...*Job) error {
 	return err
 }
 
-// PopAllJobs removes and returns every job in the job_queue.
 func (s *store) PopAllJobs(ctx context.Context) ([]*Job, error) {
 	query := `
 	DELETE FROM job_queue_v2
@@ -98,7 +96,6 @@ func (s *store) PopAllJobs(ctx context.Context) ([]*Job, error) {
 	return jobs, nil
 }
 
-// PopJobsForType removes and returns all jobs matching a specific task type.
 func (s *store) PopJobsForType(ctx context.Context, taskType string) ([]*Job, error) {
 	query := `
 	DELETE FROM job_queue_v2

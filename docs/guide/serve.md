@@ -1,6 +1,7 @@
 ---
 title: "Reaching a machine from the app"
 description: Running contenox as a host with contenox serve — what the status screen reports, how the workspace root is chosen, and how its logs are organised and bounded.
+order: 13
 ---
 
 # Reaching a machine from the app

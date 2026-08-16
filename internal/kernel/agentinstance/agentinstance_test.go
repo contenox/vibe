@@ -435,8 +435,7 @@ func TestManager_Chain_DefaultsToTheRunningExecutable(t *testing.T) {
 // TestManager_Chain_ForwardsTheHostDatabase pins the handoff a dispatched unit
 // needs to report at all: its mission row lives in the database the dispatching
 // host opened, so the spawn must name that database rather than let the child
-// resolve its own. Without it every mission tool the unit calls fails not-found
-// and the run only ends at its timeout.
+// resolve its own.
 func TestManager_Chain_ForwardsTheHostDatabase(t *testing.T) {
 	_, _, svc := setupRegistry(t)
 	chainPath := filepath.Join(t.TempDir(), "agent-fixture.json")
@@ -1064,9 +1063,8 @@ func TestManager_AvailableCommands_Captured(t *testing.T) {
 	require.Equal(t, "explain", cmds[1].Name)
 }
 
-// TestManager_Terminal_RoutesToControllerTerminalServer pins that a
-// downstream terminal/* is routed to the controller when it implements
-// TerminalServer.
+// TestManager_Terminal_RoutesToControllerTerminalServer pins that a downstream
+// terminal/* is routed to the controller when it implements TerminalServer.
 func TestManager_Terminal_RoutesToControllerTerminalServer(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -1194,9 +1192,8 @@ func TestManager_Cancel_UnblocksInFlightTurn(t *testing.T) {
 	}
 }
 
-// TestManager_CloseSession_DropsStateNotInstance pins that CloseSession
-// drops the session's viewers and captured state without stopping the
-// instance.
+// TestManager_CloseSession_DropsStateNotInstance pins that CloseSession drops
+// the session's viewers and captured state without stopping the instance.
 func TestManager_CloseSession_DropsStateNotInstance(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)

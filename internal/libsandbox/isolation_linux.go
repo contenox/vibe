@@ -27,7 +27,7 @@ func applyIsolation(ctx context.Context, cmd *exec.Cmd, spec Spec, tracker libtr
 			return err
 		}
 
-		// No Net carve-outs means no egress — the netns stays at the deny-by-construction floor; setupEgress's goroutine is bound to ctx.
+		// No Net carve-outs means no egress; the netns stays routeless.
 		if len(spec.Net) > 0 {
 			sockFD, eerr := setupEgress(ctx, cmd, spec, tracker)
 			if eerr != nil {
@@ -38,7 +38,7 @@ func applyIsolation(ctx context.Context, cmd *exec.Cmd, spec Spec, tracker libtr
 		}
 	}
 
-	// Fails closed up front if the kernel lacks seccomp user-notify rather than silently skipping telemetry; setupSyscallTap's goroutine is bound to ctx.
+	// Fails closed if the kernel lacks seccomp user-notify.
 	if spec.SyscallTap {
 		if !seccompUserNotifSupported() {
 			return fmt.Errorf("%w: SyscallTap was requested but this kernel has no seccomp "+
@@ -71,7 +71,8 @@ func applyIsolation(ctx context.Context, cmd *exec.Cmd, spec Spec, tracker libtr
 	cmd.SysProcAttr.Setpgid = true
 	cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL
 
-	// uid/gid map to 0 so execve regrants CAP_NET_ADMIN for the "lo" ioctl; GidMappingsEnableSetgroups must be false or the kernel rejects the unprivileged gid mapping.
+	// uid/gid map to 0 so execve regrants CAP_NET_ADMIN for the "lo" ioctl;
+	// GidMappingsEnableSetgroups must be false for an unprivileged gid mapping.
 	if spec.NetworkWall {
 		cmd.SysProcAttr.Cloneflags |= unix.CLONE_NEWUSER | unix.CLONE_NEWNET
 		cmd.SysProcAttr.UidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}}
@@ -79,7 +80,7 @@ func applyIsolation(ctx context.Context, cmd *exec.Cmd, spec Spec, tracker libtr
 		cmd.SysProcAttr.GidMappingsEnableSetgroups = false
 	}
 
-	// No PID namespace: the agent shares the host pid namespace, but cross-userns ptrace is refused by the kernel and /proc is not Landlock-granted, bounding the exposure.
+	// No PID namespace: cross-userns ptrace is refused and /proc is not granted.
 	return nil
 }
 

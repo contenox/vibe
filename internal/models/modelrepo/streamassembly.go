@@ -6,13 +6,10 @@ import (
 	"strings"
 )
 
-// StreamAssembler is the one place streamed deltas become a completed
-// response; providers must never assemble their own streams. Invariants:
-// tool-call fragments group by ToolCallDelta.Index; the atomic fields (ID,
-// Type, Name) of one index are set at most once, a conflicting second value
-// is a hard error; ArgsFragment pieces concatenate in arrival order; finished
-// calls are ordered by index; a successful stream carries exactly one
-// Terminal parcel and nothing after it.
+// StreamAssembler is the one place streamed deltas become a completed response;
+// providers must never assemble their own streams. Fragments group by
+// ToolCallDelta.Index, and a conflicting second value for ID, Type or Name of
+// one index is a hard error.
 type StreamAssembler struct {
 	providerType string
 	modelName    string
@@ -101,9 +98,6 @@ func (a *StreamAssembler) Consume(p *StreamParcel) error {
 	return nil
 }
 
-// consumeToolCall applies one fragment under the atomic-field rules: ID, Type,
-// and Name may each be set once per index; a differing second value means the
-// provider mixed up its fragment grouping and the result cannot be trusted.
 func (a *StreamAssembler) consumeToolCall(d *ToolCallDelta) error {
 	acc := a.toolAcc[d.Index]
 	if acc == nil {

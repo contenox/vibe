@@ -33,8 +33,6 @@ func (p *catalogProvider) ListModels(ctx context.Context) ([]modelrepo.ObservedM
 	ctx, cancel := modelrepo.NonStreamingContext(ctx)
 	defer cancel()
 
-	// Same credential rules as inference: stored static-creds JSON when
-	// present, ambient AWS chain otherwise.
 	cfg, err := loadAWSConfig(ctx, regionFromURL(p.spec.BaseURL), p.spec.APIKey, p.httpClient)
 	if err != nil {
 		return nil, err
@@ -47,10 +45,8 @@ func (p *catalogProvider) ListModels(ctx context.Context) ([]modelrepo.ObservedM
 		return nil, fmt.Errorf("failed to list foundation models: %w", err)
 	}
 
-	// Newer models (Claude 3.5v2+) are invocable only through a cross-region
-	// inference profile; the base model id returns a 400. Profile listing is
-	// best-effort: without bedrock:ListInferenceProfiles permission the
-	// profile-only models are omitted rather than listed uninvocable.
+	// Newer models are invocable only through a cross-region inference profile.
+	// Listing is best-effort: without permission, profile-only models are omitted.
 	profileIDs, _ := listInferenceProfileIDs(ctx, client)
 
 	var models []modelrepo.ObservedModel
@@ -65,9 +61,6 @@ func (p *catalogProvider) ListModels(ctx context.Context) ([]modelrepo.ObservedM
 	return models, nil
 }
 
-// listInferenceProfileIDs returns every system-defined inference-profile id in
-// the region (e.g. us.anthropic.claude-sonnet-4-5-20250929-v1:0), following
-// nextToken pagination.
 func listInferenceProfileIDs(ctx context.Context, client *bedrock.Client) ([]string, error) {
 	var ids []string
 	var nextToken *string
@@ -91,11 +84,6 @@ func listInferenceProfileIDs(ctx context.Context, client *bedrock.Client) ([]str
 	}
 }
 
-// resolveInvocableModelID returns the id to invoke a model with. A model with
-// ON_DEMAND inference is invocable by its base id; a profile-only model
-// resolves to the system-defined profile named "<geo prefix>.<base id>"
-// (us./eu./apac./jp./global.), preferring geographic profiles over global.
-// ok=false means the model cannot be invoked from this account/region.
 func resolveInvocableModelID(modelID string, inferenceTypes []types.InferenceType, profileIDs []string) (string, bool) {
 	for _, t := range inferenceTypes {
 		if t == types.InferenceTypeOnDemand {
@@ -112,8 +100,7 @@ func resolveInvocableModelID(modelID string, inferenceTypes []types.InferenceTyp
 	if len(matches) == 0 {
 		return "", false
 	}
-	// Geographic profiles sort before "global." lexically only by accident;
-	// order explicitly: non-global first, then stable order.
+	// Non-global profiles first, then stable order.
 	sort.SliceStable(matches, func(i, j int) bool {
 		gi := strings.HasPrefix(matches[i], "global.")
 		gj := strings.HasPrefix(matches[j], "global.")
@@ -122,14 +109,6 @@ func resolveInvocableModelID(modelID string, inferenceTypes []types.InferenceTyp
 	return matches[0], true
 }
 
-// observedFromSummary maps a ListFoundationModels entry into an ObservedModel
-// named by its invocable id. Pure function, no AWS calls, so it is unit
-// tested without credentials.
-//
-// CanVision comes from InputModalities reporting ModelModalityImage, not a
-// hardcoded model list. CanEmbed is always false: this provider speaks only
-// the Converse API and GetEmbedConnection refuses, so advertising embeddings
-// would lie to the request router.
 func observedFromSummary(summary types.FoundationModelSummary, invokeID string) modelrepo.ObservedModel {
 	modelID := aws.ToString(summary.ModelId)
 	isEmbed := strings.Contains(strings.ToLower(modelID), "embed")
@@ -154,10 +133,6 @@ func observedFromSummary(summary types.FoundationModelSummary, invokeID string) 
 	}
 }
 
-// bedrockModelSupportsReasoning reports whether a Bedrock model supports the
-// Claude extended-thinking reasoning config (Claude 3.7 and the Claude 4+ /
-// Fable / Mythos generations). The list API reports no reasoning capability, so
-// this is name-based like the vision allowlists in modelrepo.
 func bedrockModelSupportsReasoning(modelID string) bool {
 	base := strings.ToLower(bedrockBaseModelID(modelID))
 	if !strings.Contains(base, "anthropic.") {

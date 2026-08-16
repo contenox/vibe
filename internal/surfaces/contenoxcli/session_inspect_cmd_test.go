@@ -14,8 +14,7 @@ import (
 )
 
 // The session inventory commands used to carry their own SQL against
-// message_indices/messages; they now read through runtimetypes. These pin the
-// rendered output, so the reroute is verifiably behaviour-preserving.
+// message_indices/messages; they now read through runtimetypes.
 
 func setupInspectDB(t *testing.T) (context.Context, libdb.DBManager) {
 	t.Helper()
@@ -48,9 +47,7 @@ func seedInspectSessions(t *testing.T, ctx context.Context, db libdb.DBManager) 
 }
 
 // TestUnit_QuerySessionIndex_ReadsEveryWorkspace pins the inventory read: every
-// workspace, every identity, unnamed rows included, with message counts. The
-// unscoped read is the point of the command — a workspace-scoped store would
-// silently hide most of this.
+// workspace, every identity, unnamed rows included, with message counts.
 func TestUnit_QuerySessionIndex_ReadsEveryWorkspace(t *testing.T) {
 	ctx, db := setupInspectDB(t)
 	seedInspectSessions(t, ctx, db)
@@ -161,10 +158,9 @@ func TestUnit_SessionWorkspaces_PinsRenderedTable(t *testing.T) {
 	require.Equal(t, "(unnamed)", deriveNamespace(byID["idx-anon"].name))
 }
 
-// TestUnit_ResolveSessionByID_ThroughStore pins the id -> name resolve: a
-// named index gives its name, an unnamed one is still found (empty name, found
-// true), and an unknown id is not found. The lookup crosses workspaces on
-// purpose — the operator pastes ids straight out of the inventory above.
+// TestUnit_ResolveSessionByID_ThroughStore pins the id -> name resolve: a named
+// index gives its name, an unnamed one is still found (empty name, found true),
+// and an unknown id is not found.
 func TestUnit_ResolveSessionByID_ThroughStore(t *testing.T) {
 	ctx, db := setupInspectDB(t)
 	seedInspectSessions(t, ctx, db)

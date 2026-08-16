@@ -125,12 +125,10 @@ func evaluateCore(in Input) Result {
 
 	if r.DefaultModel == "" {
 		addIssue(&r, Issue{
-			Code:     "missing_default_model",
-			Severity: "error",
-			Category: CategoryDefaults,
-			Message:  "No default model is set. Internal chat and chains using {{var:model}} need it.",
-			// Defaults live on the Settings page, not Backends — a
-			// registered backend alone never sets a default.
+			Code:       "missing_default_model",
+			Severity:   "error",
+			Category:   CategoryDefaults,
+			Message:    "No default model is set. Internal chat and chains using {{var:model}} need it.",
 			FixPath:    "/settings",
 			CLICommand: "contenox setup   # guided; or: contenox config set default-model <name>",
 		})
@@ -183,11 +181,10 @@ func evaluateCore(in Input) Result {
 	return r
 }
 
-// OverlayEffectiveDefaults credits an effective default model/provider
-// supplied out-of-band (e.g. CLI flags) but never persisted to KV config:
-// for each empty persisted default, a non-empty override fills it and
-// clears the corresponding "missing default" issue. Empty overrides are
-// ignored; a persisted default is never overwritten.
+// OverlayEffectiveDefaults credits an effective default model and provider
+// supplied out-of-band but never persisted: each empty persisted default is
+// filled and its "missing default" issue cleared. A persisted default is never
+// overwritten.
 func OverlayEffectiveDefaults(res Result, model, provider string) Result {
 	model = strings.TrimSpace(model)
 	provider = strings.TrimSpace(provider)
@@ -260,9 +257,6 @@ func providerTypeMatches(provider, backendType string) bool {
 	return provider == "vertex" && strings.HasPrefix(backendType, "vertex-")
 }
 
-// blockingIssue reports whether an issue prevents a usable agent: any
-// error-severity issue, plus no_backends (emitted as a warning, but chat/run/ACP
-// cannot resolve any model without at least one backend).
 func blockingIssue(iss Issue) bool {
 	return iss.Severity == "error" || iss.Code == "no_backends"
 }
@@ -280,9 +274,7 @@ func (r Result) BlockingIssues() []Issue {
 }
 
 // Ready reports whether the runtime has a usable default model and provider with
-// a reachable backend. It reads the already-computed Result — no I/O, and never a
-// model completion — and is the shared readiness predicate for doctor, chat/run
-// preflight, and the setup wizard.
+// a reachable backend. It reads the already-computed Result and does no I/O.
 func (r Result) Ready() bool {
 	return len(r.BlockingIssues()) == 0
 }
@@ -409,12 +401,10 @@ func addDefaultProviderIssues(r *Result) {
 	available := strings.Join(chatModels, ", ")
 	cmd := fmt.Sprintf("contenox config set default-model %q", chatModels[0])
 	addIssue(r, Issue{
-		Code:     "default_model_not_available",
-		Severity: "error",
-		Category: CategoryHealth,
-		Message:  fmt.Sprintf("Default model %q is not currently available for provider %q. Available chat models: %s.", r.DefaultModel, r.DefaultProvider, available),
-		// The backend is reachable; the misconfiguration is the default
-		// model choice, picked on the Settings page, not Backends.
+		Code:       "default_model_not_available",
+		Severity:   "error",
+		Category:   CategoryHealth,
+		Message:    fmt.Sprintf("Default model %q is not currently available for provider %q. Available chat models: %s.", r.DefaultModel, r.DefaultProvider, available),
 		FixPath:    "/settings",
 		CLICommand: cmd,
 	})

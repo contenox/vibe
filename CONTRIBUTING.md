@@ -1,9 +1,9 @@
 # Contributing to Contenox
 
-Thanks for helping improve Contenox. This repository centers on the V1 runtime
-surface: the `contenox` CLI, ACP over stdio for editors (Zed, JetBrains,
-AionUi, OpenClaw), and the upcoming `contenox new` terminal UI. Why the
-surface looks like this: see WHY.md.
+Thanks for helping improve Contenox. This repository is the contenox agent server: ACP over stdio for editors
+(Zed, JetBrains, AionUi, OpenClaw), `contenox serve` for a paired host, and
+the CLI that declares, inspects and fires agents. Why the surface looks like
+this: see WHY.md.
 
 ## Code of Conduct
 
@@ -12,10 +12,12 @@ actionable.
 
 ## Architecture
 
-Contenox is a single-binary agent with a thin set of host adapters:
+Contenox is a single-binary agent server. It hosts agents and sessions and
+brings no tools of its own: the operator supplies them, from an ACP client or
+from MCP servers they attach.
 
 ```text
-CLI / ACP stdio sessions / terminal UI
+CLI / ACP stdio sessions / relay
     ->
 Service Layer (runtime/*service/)
     ->
@@ -31,11 +33,10 @@ semantics elsewhere.
 
 ### V1 product surface
 
-- `contenox` CLI (chat, run, sessions, config, backends, models, tools, MCP,
-  workspace grants, sandbox inspection)
+- `contenox` CLI (agents, missions, approvals, inbox, sessions, config,
+  backends, models, tools, MCP, events, hitl, vet, workspace grants)
 - `contenox acp` / `contenox acpx` for ACP editors
-- `contenox new` — the terminal UI (in development, built on the same ACP
-  session services)
+- `contenox serve` / `contenox pair` for a relay-reachable host
 
 When you change this surface, update the relevant user docs in the same
 change.
@@ -63,9 +64,9 @@ Runtime state catalogs configured backend capabilities for selectors and
 diagnostics.
 
 **Tool System** — chains invoke tools by name and resolution happens at
-runtime. Built-in providers include `local_shell`, `local_fs`, `webtools`,
-`echo`, `print`, OpenAPI-backed remote tools (third-party specs), and
-MCP-backed tools. HITL policy wraps tool execution where approval is required.
+runtime. Built-in toolsets are `local_fs` and `local_shell`, both
+forwarded to the ACP client; everything else is MCP-backed or an
+OpenAPI-backed remote tool the operator attaches. HITL policy wraps tool execution where approval is required.
 
 **Event-driven async** — `libbus` abstracts the local event bus. Services
 publish typed events such as `task.events.step_completed`, and other services
@@ -79,7 +80,7 @@ subscribe without direct package coupling.
 | `internal/kernel/taskengine/taskenv.go` | Runtime tool resolution and chain execution context |
 | `internal/surfaces/contenoxcli/cli.go` | CLI dispatch |
 | `internal/surfaces/contenoxcli/engine.go` | CLI-local engine bootstrap |
-| `internal/surfaces/acpsvc/` | ACP session transport (editors and the terminal UI build on this) |
+| `internal/surfaces/acpsvc/` | ACP session transport (editors build on this) |
 | `internal/kernel/agentinstance/` | the embeddable fleet kernel (missions run in-process) |
 
 ## Repository structure
@@ -112,7 +113,7 @@ internal/services/       domain services: chat, session, mission, fleet,
 internal/store/          runtimetypes — entities + the SQLite Store
                          (including the model registry)
 internal/surfaces/       thin adapters: contenoxcli (CLI), acpsvc (ACP
-                         sessions), beamtui (the TUI, in development)
+                         sessions), fleetboot (mission host bootstrap)
 internal/libsandbox/     sandboxing, no LLM dependency
 libbus/, libdbexec/, libkvstore/, libtracker/
                          top-level infrastructure libraries with no LLM

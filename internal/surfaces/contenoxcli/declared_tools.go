@@ -15,21 +15,12 @@ import (
 	libdb "github.com/contenox/contenox/libdbexec"
 )
 
-// defaultDeclaredRemoteTimeoutMs matches `contenox tools add`'s own default so
-// a declared service behaves like a registered one.
 const defaultDeclaredRemoteTimeoutMs = 30000
 
 // reconcileDeclaredTools makes the declaration-scoped MCP servers and remote
-// tools on this machine exactly the set the current declarations ask for.
-//
-// Reconciliation rather than event bookkeeping: the desired set is recomputed
-// from the declarations every pass, so a crash between writing a row and
-// writing sync state cannot strand a registration, and deleting a declaration
-// retires what it brought without anything having recorded that it existed.
-//
-// Rows carry the runtimetypes.DeclaredToolNamePrefix, which is what separates
-// them from `contenox mcp add` / `contenox tools add` registrations — those are
-// the operator's and are never touched here.
+// tools on this machine exactly the set the current declarations ask for. Rows
+// carry runtimetypes.DeclaredToolNamePrefix, which separates them from the
+// operator's own registrations, which are never touched here.
 func reconcileDeclaredTools(ctx context.Context, store runtimetypes.Store, bus libbus.Messenger, results []agentdecl.SyncResult) []agentdecl.SyncResult {
 	desiredMCP := map[string]*runtimetypes.MCPServer{}
 	desiredRemote := map[string]*runtimetypes.RemoteTools{}
@@ -194,9 +185,8 @@ func listDeclaredRemoteNames(ctx context.Context, store runtimetypes.Store) (map
 	}
 }
 
-// publishMCPEvent lets the engine's manager start the worker. A nil bus is the
-// normal case for a command that only inspects the roster: the row is written,
-// and a host that runs agents starts the worker when it comes up.
+// publishMCPEvent lets the engine's manager start the worker; a nil bus writes
+// the row and leaves the worker to the next host that comes up.
 func publishMCPEvent(ctx context.Context, bus libbus.Messenger, subject string, srv *runtimetypes.MCPServer) {
 	if bus == nil {
 		return

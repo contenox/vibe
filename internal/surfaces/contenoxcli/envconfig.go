@@ -10,13 +10,10 @@ import (
 // sandboxEnvConfig is the SANDBOX_* environment configuration for shells
 // contenox spawns.
 type sandboxEnvConfig struct {
-	// SandboxShellScrub selects how an agent-reachable shell's environment is
-	// scrubbed of the parent process's credentials: "deny-secrets" (default),
-	// "strict" (safe base set plus SandboxEnvAllow), or "off" (inherit
-	// everything). See libsandbox.EnvPolicyForMode.
+	// SandboxShellScrub is "deny-secrets" (default), "strict", or "off".
 	SandboxShellScrub string `json:"sandbox_shell_scrub"`
 	// SandboxTerminalScrub is the same posture for an interactive terminal,
-	// defaulting to "off" since it's a trusted operator shell.
+	// defaulting to "off".
 	SandboxTerminalScrub string `json:"sandbox_terminal_scrub"`
 	// SandboxEnvAllow adds variable names or globs to whichever scrub is
 	// active (comma/whitespace-separated).
@@ -26,8 +23,6 @@ type sandboxEnvConfig struct {
 	SandboxEnvDeny string `json:"sandbox_env_deny"`
 }
 
-// loadEnvConfig populates cfg from environment variables (lowercased keys
-// mapped to json tags).
 func loadEnvConfig[T any](cfg *T) error {
 	if cfg == nil {
 		return fmt.Errorf("config pointer is nil")

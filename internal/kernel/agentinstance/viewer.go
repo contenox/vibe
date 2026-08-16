@@ -10,28 +10,25 @@ import (
 )
 
 // Viewer is a consumer attached to one downstream session: it receives the
-// session's streamed updates via Deliver and, when it is the session's
-// controller, answers the downstream agent's permission requests via
-// RequestPermission.
+// session's streamed updates and, when it is the controller, answers the
+// downstream agent's permission requests.
 type Viewer interface {
 	// ID uniquely identifies this viewer within a session; two viewers on the
 	// same session must not share an ID.
 	ID() string
 
-	// Deliver receives one session update, in order (replayed backlog then live); it
-	// must not block since it runs under the session lock, and its returned error is
-	// advisory only.
+	// Deliver receives one session update, in order. It must not block, since it
+	// runs under the session lock; its returned error is advisory.
 	Deliver(ctx context.Context, n libacp.SessionNotification) error
 
-	// RequestPermission answers the downstream agent's session/request_permission;
-	// called only on the controller viewer, it runs on its own goroutine and may block
-	// awaiting a decision.
+	// RequestPermission answers the downstream agent's session/request_permission.
+	// Called only on the controller viewer, it may block awaiting a decision.
 	RequestPermission(ctx context.Context, req libacp.RequestPermissionRequest) (libacp.RequestPermissionResponse, error)
 }
 
-// TerminalServer is an optional Viewer capability that services a downstream agent's
-// terminal/* callbacks for the session it controls; routed only to the controller (else
-// terminal/* answers MethodNotFound), and callbacks may block on their own goroutine.
+// TerminalServer is an optional Viewer capability that services a downstream
+// agent's terminal/* callbacks for the session it controls. It is routed only to
+// the controller; otherwise terminal/* answers MethodNotFound.
 type TerminalServer interface {
 	CreateTerminal(ctx context.Context, req libacp.CreateTerminalRequest) (libacp.CreateTerminalResponse, error)
 	TerminalOutput(ctx context.Context, req libacp.TerminalOutputRequest) (libacp.TerminalOutputResponse, error)
@@ -108,8 +105,7 @@ func (h *viewerHub) attach(ctx context.Context, sessionID libacp.SessionID, view
 		s.controllerID = vid
 		controllerGranted = true
 	}
-	// Replay under the lock so a concurrent live update waits and lands
-	// strictly after it.
+	// Replay under the lock so a concurrent live update lands strictly after it.
 	for _, n := range s.journal.snapshot() {
 		_ = viewer.Deliver(ctx, n)
 	}
@@ -166,8 +162,6 @@ func (h *viewerHub) requestPermission(ctx context.Context, req libacp.RequestPer
 	h.mu.Unlock()
 
 	if controller == nil {
-		// Read outside the lock: the fallback is set once at construction and may
-		// block a long time.
 		if answer := h.onUnsupervisedRequest; answer != nil {
 			resp, err := answer(ctx, req)
 			if err == nil {

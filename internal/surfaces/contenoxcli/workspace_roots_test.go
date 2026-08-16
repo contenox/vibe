@@ -75,12 +75,6 @@ func TestUnit_BuildWorkspaceFactory_LaunchDirectoryIsTheDefaultRoot(t *testing.T
 // regression test for the defect this file exists to close: `contenox
 // workspace` wrote durable grants that nothing read, so an operator could grant
 // a root, see it listed, and watch every session refuse it.
-//
-// It asserts through vfs.ResolveSessionCwd rather than the Factory's own
-// accessors on purpose — that function is the one decision procedure a session
-// cwd goes through (acpsvc.resolveWorkspaceCwd and fleetservice.resolveCwd both
-// call it), so passing here means the grant reached the list a session is really
-// checked against, not merely a list.
 func TestUnit_BuildWorkspaceFactory_GrantReachesTheSessionAllowlist(t *testing.T) {
 	launchDir := t.TempDir()
 	grantedDir := t.TempDir()
@@ -153,8 +147,6 @@ func TestUnit_BuildWorkspaceFactory_DuplicateAcrossSourcesCollapses(t *testing.T
 // TestUnit_BuildWorkspaceFactory_GrantsAreReadWhenTheAllowlistIsBuilt pins the
 // documented timing: the grant list is a snapshot taken at build time, so a
 // grant written afterward does not appear in an allowlist that already exists.
-// This is the behaviour the docs promise ("takes effect the next time a surface
-// starts"), and the reason no bus subscriber is wired.
 func TestUnit_BuildWorkspaceFactory_GrantsAreReadWhenTheAllowlistIsBuilt(t *testing.T) {
 	launchDir := t.TempDir()
 	lateDir := t.TempDir()
@@ -179,16 +171,6 @@ func TestUnit_BuildWorkspaceFactory_GrantsAreReadWhenTheAllowlistIsBuilt(t *test
 // TestUnit_BuildWorkspaceFactory_ControlPlaneIsRefusedOnEveryPath pins the
 // guarantee that has no off switch: no source may put the runtime's own config,
 // database, or policies into the allowlist.
-//
-// The launch-directory case is the one that was open before: roots[0] is what
-// Resolve hands back for the "/" sentinel without matching it against anything,
-// so a control-plane launch directory would have been served to a client as a
-// session cwd.
-//
-// The grant subtest asserts the one deliberate asymmetry: a grant is standing
-// config that may predate the guard `workspace add` applies, so it is dropped
-// with a note instead of blocking the launch — otherwise one stale row would
-// take away the very surface an operator needs in order to revoke it.
 func TestUnit_BuildWorkspaceFactory_ControlPlaneIsRefusedOnEveryPath(t *testing.T) {
 	controlPlane := t.TempDir()
 	denyControlPlane(t, controlPlane)

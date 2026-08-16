@@ -8,11 +8,7 @@ import (
 )
 
 // newInstanceEventSink adapts the agentinstance lifecycle EventSink onto the
-// shared ActivityTracker: every event is reported for audit and nothing
-// else — no bus subject, no goroutine, no behavior triggered off it. The
-// event carries only ids/state/kind, never prompt content, so it's safe to
-// record whole; the synchronous Start/reportChange/end never blocks or calls
-// back into the Manager.
+// shared ActivityTracker, reporting every event for audit and nothing else.
 func newInstanceEventSink(tracker libtracker.ActivityTracker) agentinstance.EventSink {
 	return func(ev agentinstance.Event) {
 		_, reportChange, end := tracker.Start(

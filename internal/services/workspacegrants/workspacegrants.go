@@ -1,8 +1,7 @@
 // Package workspacegrants owns the durable, hot-reloadable workspace-root
-// allowlist beyond serve's launch-time roots: a durable config value
-// (source of truth, read via clikv) plus a fire-and-forget bus doorbell
-// (RootsChangedSubject) that tells a running serve to reload. serve treats
-// the doorbell as a nudge only and always re-reads the durable config.
+// allowlist beyond serve's launch-time roots: a durable config value plus a
+// fire-and-forget bus doorbell that tells a running serve to reload. The
+// doorbell is a nudge only; the durable config is the source of truth.
 package workspacegrants
 
 import (
@@ -52,8 +51,6 @@ func ReadGrants(ctx context.Context, store runtimetypes.Store) []string {
 	return splitGrants(raw)
 }
 
-// splitGrants parses the stored path-list string into a trimmed, non-empty
-// slice.
 func splitGrants(raw string) []string {
 	out := []string{}
 	for _, p := range filepath.SplitList(raw) {
@@ -64,15 +61,10 @@ func splitGrants(raw string) []string {
 	return out
 }
 
-// joinGrants renders a grant list back to the stored path-list string.
 func joinGrants(roots []string) string {
 	return strings.Join(roots, string(filepath.ListSeparator))
 }
 
-// normalizeGrant validates and canonicalizes a grant path: non-empty,
-// resolves to an absolute path, and names an existing directory. Unlike
-// vfs.ResolveRoot, it refuses a path that does not yet exist. Returns the
-// cleaned absolute path to store.
 func normalizeGrant(path string) (string, error) {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
@@ -99,10 +91,6 @@ func normalizeGrant(path string) (string, error) {
 	return abs, nil
 }
 
-// isBroadParent refuses roots that would defeat project scoping: the
-// filesystem root, the operator's home directory, and any single-segment
-// absolute path (e.g. "/home", "/mnt"). A real project directory is at
-// least two segments deep.
 func isBroadParent(abs string) (bool, string) {
 	sep := string(filepath.Separator)
 	if abs == filepath.Dir(abs) {
@@ -120,8 +108,6 @@ func isBroadParent(abs string) (bool, string) {
 	return false, ""
 }
 
-// samePath reports whether two grant paths denote the same directory,
-// compared on their cleaned absolute forms.
 func samePath(a, b string) bool {
 	ac, err := filepath.Abs(strings.TrimSpace(a))
 	if err != nil {
@@ -157,9 +143,8 @@ func Add(ctx context.Context, store runtimetypes.Store, path string) ([]string, 
 }
 
 // Remove drops every grant whose canonical path matches path, persists the
-// result, and returns the remaining grants. Removing an ungranted path is
-// an idempotent no-op; path is not existence-checked, so a since-deleted
-// grant can still be revoked.
+// result, and returns the remaining grants. path is not existence-checked, so a
+// since-deleted grant can still be revoked.
 func Remove(ctx context.Context, store runtimetypes.Store, path string) ([]string, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("%w: a path is required", ErrInvalidGrant)
@@ -181,7 +166,6 @@ func Remove(ctx context.Context, store runtimetypes.Store, path string) ([]strin
 	return kept, nil
 }
 
-// writeGrants persists the grant list as the stored path-list string.
 func writeGrants(ctx context.Context, store runtimetypes.Store, roots []string) error {
 	if err := clikv.SetString(ctx, store, ConfigKey, joinGrants(roots)); err != nil {
 		return fmt.Errorf("persist workspace-root grants: %w", err)
@@ -203,9 +187,6 @@ func PublishChanged(ctx context.Context, pub Publisher, roots []string) error {
 	return pub.Publish(ctx, RootsChangedSubject, data)
 }
 
-// marshalEvent renders the self-contained doorbell payload. roots is copied into
-// a fresh, non-nil slice so the event always carries a JSON array (never null)
-// even for an empty grant set.
 func marshalEvent(roots []string) ([]byte, error) {
 	ev := RootsChangedEvent{Roots: append([]string{}, roots...)}
 	data, err := json.Marshal(ev)

@@ -1,6 +1,7 @@
 ---
 title: Transitions & Branching
 description: How a chain decides which task runs next — operators, edges, and on_failure.
+order: 2
 ---
 
 # Transitions & Branching

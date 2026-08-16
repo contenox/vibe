@@ -24,28 +24,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file drives the case the relay tunnel exists for: one engine serving two
-// ACP clients at once — a desk on the process's own connection and a phone
-// behind a real relayacp.Tunnel — and asserts that both of them see the session
-// they both hold: the same transcript, and the same approvals.
-//
-// Both clients are real libacp.ClientSideConnections with live Run loops, and
-// the phone's runs across a genuine frame boundary rather than a stand-in for
-// one, because "which connection was asked" is precisely what is under test and
-// a shared fake would answer it by construction.
-
 // fleetInstance is the runtime identity the tunnel stamps on every frame.
 const fleetInstance = "inst-fleet"
 
-// phoneAttachment is the relay's side of one attachment: the
-// io.ReadWriteCloser a real client connection runs on, whose writes become
-// inbound frames for the tunnel and whose reads serve the frames the tunnel
-// sent back. It is relayacp's own stream seen from the other end, written out
-// rather than reused so nothing in the test shares state with what it tests.
-//
-// The newline is the contract on both sides: libacp writes a message and its
-// terminator as separate calls, so a frame is emitted per completed line and a
-// queued payload is served back one at a time with its newline restored.
+// phoneAttachment is the relay's side of one attachment: the io.ReadWriteCloser
+// a real client connection runs on, whose writes become inbound frames for the
+// tunnel and whose reads serve the frames the tunnel sent back.
 type phoneAttachment struct {
 	session string
 	handle  func(context.Context, librelay.Frame)
@@ -152,8 +136,7 @@ func (p *fleetPeer) ensureTransport(t *testing.T) *Transport {
 }
 
 // permissionCount reports how many session/request_permission calls this client
-// has been shown. A test asserts both halves — the card arrived here, and it
-// arrived nowhere else — since routing to everyone would satisfy the first.
+// has been shown.
 func (p *fleetPeer) permissionCount() int {
 	p.lc.permMu.Lock()
 	defer p.lc.permMu.Unlock()
@@ -228,8 +211,7 @@ type fleet struct {
 }
 
 // attach brings up one relay attachment under session and returns the peer
-// behind it. The tunnel creates the transport on the first frame, so the peer
-// is only complete once the client has spoken.
+// behind it.
 func (f *fleet) attach(t *testing.T, session string) *fleetPeer {
 	t.Helper()
 	pipe := newPhoneAttachment(session, f.tunnel.Handle)
@@ -253,13 +235,7 @@ func (f *fleet) attach(t *testing.T, session string) *fleetPeer {
 }
 
 // newFleet wires one engine, one router and one desk connection, plus a tunnel
-// ready to accept attachments. Transports appear on the returned channel in
-// creation order: the desk's is built by NewAgentSideConnection below, and each
-// attachment's by the tunnel when its first frame arrives.
-//
-// withFleetDeps mutates the Deps every peer's transport is built from, applied
-// before any transport exists — wiring after construction would race the live
-// connections already reading them.
+// ready to accept attachments.
 func newFleet(t *testing.T, withFleetDeps ...func(*Deps, libdb.DBManager)) *fleet {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -334,14 +310,7 @@ func newFleet(t *testing.T, withFleetDeps ...func(*Deps, libdb.DBManager)) *flee
 }
 
 // TestFleet_ApprovalGoesToTheClientDrivingTheSession is the defect this whole
-// seam closes. Before it, every attachment was served from one acpsvc.Deps and
-// an approval resolved through whichever transport the process bound at
-// startup: work started on a phone raised its permission card at the desk, and
-// the phone waited on a question it was never shown.
-//
-// The card must arrive on the phone and NOT at the desk. Both halves are
-// asserted, because a router that fanned out to every attached client would
-// satisfy the first while asking one question of two humans.
+// seam closes.
 func TestFleet_ApprovalGoesToTheClientDrivingTheSession(t *testing.T) {
 	f := newFleet(t)
 	phone := f.attach(t, "att-phone")
@@ -369,9 +338,7 @@ func TestFleet_ApprovalGoesToTheClientDrivingTheSession(t *testing.T) {
 
 // TestFleet_StdioIsUnchangedWithNothingAttached pins the other direction: a
 // runtime nobody has attached to behaves exactly as it did before the router
-// existed. The desk owns its own sessions, so its approvals resolve on the desk;
-// a session nobody holds reports ErrNoBoundSession, which is the one condition
-// the ACP profile falls back to its stdio transport on.
+// existed.
 func TestFleet_StdioIsUnchangedWithNothingAttached(t *testing.T) {
 	f := newFleet(t)
 	require.Zero(t, f.tunnel.Len(), "no attachment may exist before a frame arrives")
@@ -398,17 +365,6 @@ func TestFleet_StdioIsUnchangedWithNothingAttached(t *testing.T) {
 // single-owner rule this test previously pinned: a session is shared, so every
 // client holding it is shown the card, and the first real answer resolves the
 // question for all of them.
-//
-// The case the old rule got wrong is the ordinary one. A phone and a desk on
-// one session are one person looking from two places; asking only the
-// connection that fired the turn strands the question on whichever screen they
-// are not watching, which is how a turn ends up parked on an approval nobody
-// ever saw.
-//
-// The desk holds its card without answering, so the phone's answer is
-// unambiguously first. What the desk must then observe is a cancellation rather
-// than a card left on screen — libacp turns the losing request's cancelled
-// context into $/cancelRequest for precisely this.
 func TestFleet_TwoClientsOnOneSessionAreBothAskedAndFirstAnswerWins(t *testing.T) {
 	f := newFleet(t)
 	phone := f.attach(t, "att-phone")
@@ -453,12 +409,7 @@ func TestFleet_TwoClientsOnOneSessionAreBothAskedAndFirstAnswerWins(t *testing.T
 }
 
 // TestFleet_DetachStopsTheDetachedClientBeingTheApprovalTarget joins the two
-// halves of this change. The detach ends the attachment deterministically, the
-// closing connection releases the router entries it held, and the next approval
-// on that session reports ErrNoBoundSession rather than being written to a dead
-// transport — where it would fail as a connection error on a question no human
-// was ever shown, instead of falling through to the terminal that can answer
-// the durable ask.
+// halves of this change.
 func TestFleet_DetachStopsTheDetachedClientBeingTheApprovalTarget(t *testing.T) {
 	f := newFleet(t)
 	phone := f.attach(t, "att-phone")
@@ -516,16 +467,6 @@ func (p *fleetPeer) waitForUpdate(t *testing.T, text string, within time.Duratio
 
 // TestFleet_ATurnOnOneClientRendersOnTheOther is the property the surfaces are
 // expected to have and did not: a session is one thing several screens watch.
-//
-// session/load already replayed the transcript to a late attacher, so the
-// scrollback matched; what did not was everything after. Updates were written
-// to the connection running the turn, so a turn driven from a phone rendered
-// nowhere else, and a desk attached to the same session sat showing a session
-// that had apparently stopped.
-//
-// The update is sent through the transport rather than through a fake agent so
-// the assertion is about the mirror and not about what a driver happens to
-// emit.
 func TestFleet_ATurnOnOneClientRendersOnTheOther(t *testing.T) {
 	f := newFleet(t)
 	phone := f.attach(t, "att-phone")
@@ -556,9 +497,7 @@ func TestFleet_ATurnOnOneClientRendersOnTheOther(t *testing.T) {
 }
 
 // TestFleet_MirroringStopsWhenAClientLeaves pins the other half: the mirror
-// follows the router, so a detached client stops being written to. Without it a
-// dead connection's queue would fill for the life of the process, and the
-// session would look held by something nobody can see.
+// follows the router, so a detached client stops being written to.
 func TestFleet_MirroringStopsWhenAClientLeaves(t *testing.T) {
 	f := newFleet(t)
 	phone := f.attach(t, "att-phone")

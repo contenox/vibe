@@ -1,5 +1,3 @@
-// session_cmd.go — contenox session subcommand tree (new, list, switch, delete, show).
-// Each subcommand opens only the DB via sessionservice; no LLM stack is needed.
 package contenoxcli
 
 import (
@@ -16,7 +14,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// sessionCmd is the parent "contenox session" command.
 var sessionCmd = &cobra.Command{
 	Use:   "session",
 	Short: "Manage chat sessions (new, list, switch, delete, show, fork, workspaces).",
@@ -111,7 +108,6 @@ func init() {
 	sessionCmd.AddCommand(sessionNewCmd, sessionListCmd, sessionSwitchCmd, sessionDeleteCmd, sessionShowCmd, sessionWorkspacesCmd)
 }
 
-// openSessionService resolves the DB path and returns a sessionservice.Service.
 func openSessionService(cmd *cobra.Command) (context.Context, libdb.DBManager, sessionservice.Service, func(), error) {
 	dbPath, err := resolveDBPath(cmd)
 	if err != nil {
@@ -231,7 +227,6 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 	tailN, _ := cmd.Flags().GetInt("tail")
 	headN, _ := cmd.Flags().GetInt("head")
 
-	// Resolve which session to show.
 	var sessionID, sessionName string
 	if len(args) > 0 {
 		if nm, ok := resolveSessionByID(ctx, db, args[0]); ok {
@@ -283,7 +278,6 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Apply head/tail filters.
 	slice := rawMsgs
 	if headN > 0 && headN < len(slice) {
 		slice = slice[:headN]

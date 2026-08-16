@@ -54,11 +54,10 @@ func captureFromEditor(seed []byte, modelHint string) (string, error) {
 	finalHash := sha256.Sum256(final)
 	if bytes.Equal(initialHash[:], finalHash[:]) {
 		if len(seed) > 0 {
-			// Unedited buffer with a seed means "keep the seed as-is"; echo it
-			// back verbatim rather than re-deriving it from the template.
+			// An unedited buffer with a seed means "keep the seed as-is".
 			return string(seed), nil
 		}
-		// No seed and nothing written: there is genuinely nothing to send.
+		// No seed and nothing written: there is nothing to send.
 		return "", errEmptyPrompt
 	}
 

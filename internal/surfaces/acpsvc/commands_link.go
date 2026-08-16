@@ -10,17 +10,8 @@ import (
 	libacp "github.com/contenox/contenox/libacp"
 )
 
-// handleLink prints the app deep link for the session it is typed into, so a
-// person walking away from the desk can open this same session on a phone.
-// One URL and one plain line, deliberately: phone-notification and clipboard
-// ecosystems already move URLs between devices, so no QR, no clipboard magic.
-//
-// The link is the app's origin (see appOrigin) plus the app's attached route,
-// /session/<instance id>/<session id> — the shape the app's router owns
-// (its ROUTE_PATTERNS.attached), so a drift there breaks this link.
-//
-// sid is the ACP session id: the durable message-index name session/list
-// reports, which is exactly the id the app's attached route addresses.
+// handleLink prints the app deep link for the session it is typed into: the
+// app's origin plus its attached route, /session/<instance id>/<session id>.
 func (t *Transport) handleLink(sid libacp.SessionID) (string, error) {
 	dir := t.deps.ContenoxDir
 	if dir == "" {
@@ -43,19 +34,11 @@ func (t *Transport) handleLink(sid libacp.SessionID) (string, error) {
 	return link + "\nOpen this on your phone to attach to this session — sign-in required.", nil
 }
 
-// appOrigin resolves where the app serving this session's link lives, given
-// the relay endpoint a pairing stored.
-//
-// INVARIANT: the hosted relay and the hosted app are one deployment under two
-// hostnames — machines dial [relaypair.DefaultEndpoint], humans sign in at
-// [relaypair.DefaultAppEndpoint], the canonical human-facing address — so the
-// hosted machine endpoint maps to the app's hostname. Any other endpoint is
-// self-hosted, and a self-hosted relay serves the app same-origin, so its own
-// origin is the app's.
+// appOrigin resolves where the app serving this session's link lives, given the
+// relay endpoint a pairing stored.
 func appOrigin(endpoint string) (string, error) {
 	origin, err := relaypair.AppOrigin(endpoint)
 	if err != nil {
-		// The session surface names its own remedy; the shared helper cannot.
 		return "", fmt.Errorf("%w — /pair again", err)
 	}
 	return origin, nil

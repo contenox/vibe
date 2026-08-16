@@ -98,5 +98,4 @@ func WithActivityTracker(service Service, tracker libtracker.ActivityTracker) Se
 	}
 }
 
-// Ensure the decorator implements the Service interface
 var _ Service = (*activityTrackerDecorator)(nil)

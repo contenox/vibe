@@ -9,9 +9,8 @@ import (
 	"github.com/contenox/contenox/libacp"
 )
 
-// Initialize negotiates the protocol version and reports which auth methods,
-// capabilities, and (once configured) workspace config options this agent
-// offers the connecting client.
+// Initialize negotiates the protocol version and reports the auth methods,
+// capabilities and workspace config options this agent offers.
 func (t *Transport) Initialize(ctx context.Context, req libacp.InitializeRequest) (libacp.InitializeResponse, error) {
 	t.initMu.Lock()
 	t.clientInfo = req.ClientInfo
@@ -36,7 +35,6 @@ func (t *Transport) Initialize(ctx context.Context, req libacp.InitializeRequest
 			}),
 		})
 	}
-	// Non-interactive setup route; only meaningful while unconfigured.
 	if t.deps.Engine == nil && t.deps.EnvSetup != nil {
 		authMethods = append(authMethods, libacp.AuthMethod{
 			ID:          envAuthMethodID,
@@ -57,10 +55,7 @@ func (t *Transport) Initialize(ctx context.Context, req libacp.InitializeRequest
 		AgentCapabilities: libacp.AgentCapabilities{
 			LoadSession: true,
 			PromptCapabilities: libacp.PromptCapabilities{
-				// See extractImageParts: images ride to CanVision providers.
-				Image: true,
-				// See extractAudioParts: audio rides to CanAudio providers,
-				// bounded per block by the modelrepo inline-audio limits.
+				Image:           true,
 				Audio:           true,
 				EmbeddedContext: true,
 			},
@@ -73,16 +68,13 @@ func (t *Transport) Initialize(ctx context.Context, req libacp.InitializeRequest
 				Resume: &struct{}{},
 				Close:  &struct{}{},
 				Delete: &struct{}{},
-				// AdditionalDirectories stays unset: no session path reads it, so
-				// advertising it would promise unimplemented behavior.
 			},
 		},
 		AuthMethods: authMethods,
 	}
 
-	// contenox extension: workspace config options let a client render
-	// model/think/HITL/token-limit controls before any session exists. Only
-	// sent when configured; unrecognized _meta keys are ignored by spec.
+	// Workspace config options let a client render controls before any session
+	// exists. Only sent when configured.
 	if t.deps.Engine != nil {
 		if opts := t.workspaceConfigOptions(ctx); len(opts) > 0 {
 			resp.Meta = mustJSON(map[string]any{
@@ -101,8 +93,6 @@ func negotiateProtocolVersion(client int) int {
 	return libacp.ProtocolVersion
 }
 
-// clientSupportsTerminalAuth honors both the spec's capability field and
-// Zed's earlier _meta convention.
 func clientSupportsTerminalAuth(caps libacp.ClientCapabilities) bool {
 	if caps.Auth.Terminal {
 		return true

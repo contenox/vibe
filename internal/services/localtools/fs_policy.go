@@ -204,8 +204,6 @@ func (h *LocalFSTools) maxOutputBytesFromPolicy(ctx context.Context) (limit int6
 	if s, ok := h.policyString(ctx, "_model_context_tokens"); ok && s != "" {
 		if tokens, err := strconv.ParseInt(s, 10, 64); err == nil && tokens > 0 {
 			derived := int64(float64(tokens) * contextBytesPerToken * contextBudgetFraction)
-			// Floor: a budget too small for any useful result is worse than a
-			// slightly oversized one.
 			if derived < 4096 {
 				derived = 4096
 			}

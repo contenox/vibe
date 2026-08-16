@@ -38,10 +38,8 @@ func SetupVLLMLocalInstance(ctx context.Context, model string, tag string, toolP
 	}
 
 	cleanup := func() {}
-	// Memory-bound the CPU backend: vLLM-CPU reserves gpu-memory-utilization *
-	// total_RAM at startup and aborts if that exceeds what's free (default 0.92
-	// ~ all RAM), so 0.3 keeps the target small. max-model-len must be a flag
-	// (the MAX_MODEL_LEN env is ignored by vLLM).
+	// vLLM-CPU reserves gpu-memory-utilization * total_RAM at startup, so 0.3
+	// keeps the target small. max-model-len must be a flag, not an env var.
 	cmd := []string{
 		"--model", model,
 		"--max-model-len", defaultMaxModelLen,
@@ -101,7 +99,6 @@ func SetupVLLMLocalInstance(ctx context.Context, model string, tag string, toolP
 	return apiBase, container, cleanup, nil
 }
 
-// waitForModelsEndpoint polls the /v1/models endpoint to ensure the model is fully loaded.
 func waitForModelsEndpoint(ctx context.Context, apiBase string) error {
 	client := &http.Client{Timeout: 5 * time.Second}
 	modelsURL := apiBase + vllmModelsPath

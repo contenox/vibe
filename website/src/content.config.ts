@@ -8,6 +8,8 @@ const docsSchema = z.object({
   title: z.string().optional(),
   description: z.string().optional(),
   draft: z.boolean().optional(),
+  /** Sidebar position within its folder. Unordered pages follow, alphabetically. */
+  order: z.number().optional(),
 });
 
 const docs = defineCollection({

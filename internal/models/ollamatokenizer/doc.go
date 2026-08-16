@@ -1,7 +1,4 @@
-// Package ollamatokenizer provides Tokenizer implementations used by llmrepo
-// to count and split tokens for a given model.
-//
-// NewHTTPClient talks to an Ollama-compatible tokenizer endpoint;
-// EstimateTokenizer is a dependency-free heuristic fallback; MockTokenizer
-// is intended for tests.
+// Package ollamatokenizer provides Tokenizer implementations used by llmrepo to
+// count and split tokens for a given model: an HTTP client, a heuristic
+// estimator, and a mock.
 package ollamatokenizer

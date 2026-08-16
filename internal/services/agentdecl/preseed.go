@@ -17,10 +17,8 @@ var preseedResearcher string
 //go:embed preseed/README.md
 var preseedReadme string
 
-// preseedTrees is the worked example of the DIRECTORY convention: a router and
-// the branches it chooses between. Embedded as a filesystem rather than as
-// named strings because the shape is the point — a flat list of files would
-// have to re-encode the nesting that the directories already state.
+// preseedTrees is the worked example of the directory convention: a router and
+// the branches it chooses between.
 //
 //go:embed preseed/agents
 var preseedTrees embed.FS
@@ -59,9 +57,8 @@ func Preseed(contenoxDir string) ([]string, error) {
 		created = append(created, path)
 	}
 
-	// The tree example, written with its directories intact. Skipped file by
-	// file rather than wholesale, so an operator who deleted one branch does not
-	// get it back while an operator who edited another keeps their edit.
+	// Skipped file by file rather than wholesale, so a deleted branch stays
+	// deleted and an edited one keeps its edit.
 	err := fs.WalkDir(preseedTrees, "preseed/agents", func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil || d.IsDir() {
 			return walkErr

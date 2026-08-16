@@ -67,7 +67,6 @@ func (p *bedrockProvider) CanPrompt() bool         { return p.canPrompt }
 func (p *bedrockProvider) CanThink() bool          { return p.canThink }
 func (p *bedrockProvider) CanVision() bool         { return p.canVision }
 
-// CanAudio always reports false; audio input is refused, not dropped.
 func (p *bedrockProvider) CanAudio() bool { return false }
 
 func (p *bedrockProvider) client(ctx context.Context) (bedrockClient, error) {

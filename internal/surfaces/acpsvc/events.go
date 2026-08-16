@@ -24,8 +24,7 @@ func (t *Transport) publishEvent(ctx context.Context, sid libacp.SessionID, payl
 	switch ev.Kind {
 	case taskengine.TaskEventStepChunk:
 		// Only a handler whose streamed output is assistant narration reaches the
-		// transcript — a route task's streamed output, e.g., is its routing
-		// decision, not prose. taskengine owns the handler vocabulary and judgement.
+		// transcript; a route task's streamed output is its decision, not prose.
 		if !taskengine.IsAssistantProseHandler(ev.TaskHandler) {
 			return
 		}
@@ -42,12 +41,9 @@ func (t *Transport) publishEvent(ctx context.Context, sid libacp.SessionID, payl
 			})
 		}
 	case taskengine.TaskEventStepStreamEnd:
-		// Consumed without a wire notification: ACP has no end-of-stream frame,
-		// and usage indicators come from token_usage. Kept as an explicit case so
-		// the engine-events contract test can assert every kind is addressed.
+		// Consumed without a wire notification: ACP has no end-of-stream frame.
 	case taskengine.TaskEventChainSuspended:
-		// Consumed without a wire notification: the permission flow's approval
-		// card already stands in for the suspension; answering it resumes the run.
+		// Consumed without a wire notification: the approval card stands in for it.
 	case taskengine.TaskEventStepStarted:
 		if taskengine.IsToolBearingHandler(ev.TaskHandler) {
 			return
@@ -77,16 +73,13 @@ func (t *Transport) publishEvent(ctx context.Context, sid libacp.SessionID, payl
 		id := t.toolCallWireID(sid, ev, true)
 		t.sendToolCallUpdateGuarded(ctx, sid, id, toolCallUpdateNotification(sid, ev, id))
 		// A mission_plan call also projects the stored plan snapshot as a
-		// full-snapshot ACP `plan` update, in addition to the tool-call card above.
-		// planUpdateNotification returns ok only for a successful, parseable event.
+		// full-snapshot ACP `plan` update, beside the tool-call card above.
 		if note, ok := planUpdateNotification(sid, ev); ok {
 			t.sendUpdate(ctx, note)
 		}
 	case taskengine.TaskEventTokenUsage:
 		used := ev.TokenUsed
 		size := ev.TokenSize
-		// Fall back to the session's effective token limit when the chain has no
-		// ctxLength budget set, so indicators reflect the user-configured budget.
 		if size <= 0 {
 			if s, ok := t.sessionFor(sid); ok && s != nil {
 				if eff := s.effectiveTokenLimit(); eff > 0 {
@@ -151,8 +144,8 @@ func toolCallPendingNotification(sid libacp.SessionID, ev taskengine.TaskEvent, 
 }
 
 func toolCallUpdateNotification(sid libacp.SessionID, ev taskengine.TaskEvent, toolCallID string) libacp.SessionNotification {
-	// INVARIANT: a call whose tool never ran is never "completed"; ACP's
-	// closed status set maps a policy denial to "failed".
+	// A call whose tool never ran is never "completed": a policy denial maps to
+	// "failed".
 	status := libacp.ToolCallStatusCompleted
 	errText := ev.Error
 	if errText == "" {
@@ -207,9 +200,6 @@ func toolCallIDFromCtx(ctx context.Context) string {
 	return v
 }
 
-// terminalAttachNotification uses SessionUpdateToolCall (create-or-update) so
-// it's race-safe vs the pending notification. ACP requires `title` on
-// tool_call notifications; omitting it makes Zed reject the update.
 func terminalAttachNotification(sid libacp.SessionID, toolCallID, terminalID, title string) libacp.SessionNotification {
 	return libacp.SessionNotification{
 		SessionID: sid,
@@ -226,8 +216,6 @@ func terminalAttachNotification(sid libacp.SessionID, toolCallID, terminalID, ti
 	}
 }
 
-// fallbackToolCallID is the name-derived id used when the engine minted no
-// ApprovalID; not invocation-unique alone — see Transport.toolCallWireID.
 func fallbackToolCallID(ev taskengine.TaskEvent) string {
 	if ev.ApprovalID != "" {
 		return ev.ApprovalID

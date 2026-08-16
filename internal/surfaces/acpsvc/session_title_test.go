@@ -12,9 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Session title resolution order: operator /rename override, then the
-// first-user-message heuristic, then the raw session name.
-
 const titleTestWorkspace = "ws-title-test"
 
 // newTitleTransport builds a Transport over a real SQLite DB with one named,

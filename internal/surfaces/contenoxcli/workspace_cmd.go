@@ -1,16 +1,3 @@
-// workspace_cmd.go is the `contenox workspace` command tree: shell-side grant
-// verbs for the durable half of the workspace-root allowlist that bounds a
-// session's working directory.
-//
-// These verbs are the writer; workspace_roots.go is the reader, where the
-// grants are unioned with the launch directory and this run's flags into the
-// single allowlist a session cwd is checked against. Keep the help text here
-// and the source order documented there in agreement — they describe one
-// mechanism.
-//
-// Writing a grant also publishes workspacegrants.RootsChangedSubject. Nothing
-// subscribes, by decision rather than omission: see workspace_roots.go for why
-// a live reload is the wrong shape for a cwd that is fixed at session/new.
 package contenoxcli
 
 import (
@@ -111,17 +98,14 @@ func init() {
 }
 
 func runWorkspaceAdd(cmd *cobra.Command, args []string) error {
-	// Reject a bad friendly name before anything persists (same validation
-	// project.Register applies).
+	// Reject a bad friendly name before anything persists.
 	rawName, _ := cmd.Flags().GetString("name")
 	name, err := project.NormalizeName(rawName)
 	if err != nil {
 		return fmt.Errorf("%w: %v", workspacegrants.ErrInvalidGrant, err)
 	}
 
-	// Refuse granting the runtime's own state dir (~/.contenox) as a workspace
-	// root. There is no separate daemon to defer to, so this CLI computes the
-	// control-plane dirs itself.
+	// Refuse granting the runtime's own state dir as a workspace root.
 	if contenoxDir, derr := ResolveContenoxDir(cmd); derr == nil {
 		if denied, ok := vfs.WithinControlPlane(controlPlaneDirs(contenoxDir), args[0]); ok {
 			return fmt.Errorf("%w: %q is inside the runtime's control plane (%s) and can never be a workspace root — the runtime never lets a session reach its own config, database, or policies", workspacegrants.ErrInvalidGrant, args[0], denied)
@@ -139,9 +123,8 @@ func runWorkspaceAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Register the granted directory as a project so it gets a friendly name
-	// and a stable workspace id. The grant is already durable, so a marker
-	// write failure only costs the friendly name, never the grant.
+	// The grant is already durable, so a marker write failure only costs the
+	// friendly name.
 	if _, merr := project.Register(args[0], name); merr != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(),
 			"note: root granted, but its project marker could not be written (the name falls back to the folder name): %v\n", merr)
@@ -181,16 +164,8 @@ func runWorkspaceList(cmd *cobra.Command, args []string) error {
 }
 
 // ringReloadDoorbell publishes the workspace-roots-changed event on the bus.
-//
-// Nothing subscribes, and that is a decision rather than a gap: a session's
-// cwd is fixed at session/new, so reloading a running process could only widen
-// what a future session may pick — which its next start does anyway — while a
-// live SetRoots would also move roots[0] and silently change the default root
-// under sessions already being served. The event stays published so an
-// external watcher can act on it; the grant is durable either way.
-//
-// Best-effort: a publish failure is noted on stderr, never a command failure,
-// since the grant is already durable.
+// Nothing in-process subscribes: a session's cwd is fixed at session/new, so a
+// live reload could only widen what a future session may pick. Best-effort.
 func ringReloadDoorbell(ctx context.Context, cmd *cobra.Command, db libdb.DBManager, roots []string) {
 	bus := libbus.NewSQLite(db.WithoutTransaction())
 	defer bus.Close()
@@ -208,7 +183,7 @@ func printWorkspaceGrants(cmd *cobra.Command, roots []string) {
 	}
 	fmt.Fprintln(out, "Granted workspace roots:")
 	for _, r := range roots {
-		// The project's friendly name, when its marker carries one.
+
 		if m, ok := project.ReadFromProjectRoot(r); ok && m.Name != "" {
 			fmt.Fprintf(out, "  %s  (%s)\n", r, m.Name)
 			continue

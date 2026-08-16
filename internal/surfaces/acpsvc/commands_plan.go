@@ -7,23 +7,16 @@ import (
 	"github.com/contenox/contenox/internal/services/missiontools"
 )
 
-// missionStartToolRef is the name the model sees in its tool list — the bare
-// function name, not the qualified event name plan_projection.go matches on.
+// missionStartToolRef is the bare function name the model sees in its tool list.
 func missionStartToolRef() string { return missiontools.ToolNameStartMission }
 
-// planCommandName is the verb that turns a goal into a planned run: state the
-// steps, then carry each one out as a subagent.
 const planCommandName = "plan"
 
 const planUsageLine = "usage: /plan <what you want done>"
 
-// parsePlanCommand recognises `/plan <goal>` and returns the goal.
-//
-// /plan is deliberately NOT a command handler. A handler returns text, and this
-// verb needs the model — with its tools — to run the turn. So it expands into an
-// instruction and takes the ordinary prompt path, which is also why a plan can
-// be followed up on conversationally afterwards: nothing about the session is
-// special once the turn starts.
+// parsePlanCommand recognises `/plan <goal>` and returns the goal. /plan is not
+// a command handler: it expands into an instruction and takes the ordinary
+// prompt path, because the verb needs the model and its tools.
 func parsePlanCommand(input string) (string, bool) {
 	name, args, ok := parseCommand(input)
 	if !ok || name != planCommandName {
@@ -32,8 +25,7 @@ func parsePlanCommand(input string) (string, bool) {
 	return strings.TrimSpace(args), true
 }
 
-// planPreamble is the instruction `/plan` expands into. It names the tool by the
-// same string the model sees in its tool list, so the two cannot drift.
+// planPreamble is the instruction `/plan` expands into.
 func planPreamble(goal string) string {
 	tool := missionStartToolRef()
 	return fmt.Sprintf(`Plan the following work, then carry it out one step at a time using subagents.
@@ -50,7 +42,6 @@ Run it like this:
 Run the steps as subagents rather than doing them yourself. If a step turns out to be trivial or already done, say so and skip it rather than starting a subagent for nothing.`, goal, tool)
 }
 
-// planPreambleForMissingFleet is what /plan says where subagents cannot run.
 func planPreambleForMissingFleet() error {
 	return fmt.Errorf("/plan needs subagents, which this session cannot start: it requires a configured model and the in-process fleet. Configure a model with `contenox config set default-model …` and run /plan from your editor session")
 }

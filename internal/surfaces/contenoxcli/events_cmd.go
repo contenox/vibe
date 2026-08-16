@@ -218,7 +218,7 @@ func runEventsDispatch(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	o.EffectiveDB = dbPath
-	// Shell defaults on: trigger chains actuate through local_shell; explicit --shell=false still wins.
+	// Shell defaults on: trigger chains actuate through local_shell.
 	if !cmd.Root().Flags().Changed("shell") {
 		o.EffectiveEnableLocalExec = true
 	}
@@ -245,7 +245,7 @@ func runEventsDispatch(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(errOut, "  %s\n", formatTriggerLine(t))
 	}
 
-	// The dispatcher is workspace-bound: it drains only this workspace's events, under a per-workspace cursor.
+	// The dispatcher is workspace-bound, under a per-workspace cursor.
 	workspaceID := ResolveWorkspaceID(contenoxDir)
 	fmt.Fprintf(errOut, "Workspace: %s\n", workspaceID)
 	logSvc := eventlog.NewService(db, engine.Bus, engine.Tracker)
@@ -309,8 +309,8 @@ func (r *chainFiringRunner) RunChain(ctx context.Context, t eventtrigger.Trigger
 	}
 	execCtx := ctx
 	if t.Policy != "" {
-		// The trigger's named envelope; unset, hitlservice's standard
-		// resolution (active-policy KV, then the default) applies.
+		// The trigger's named envelope; unset, hitlservice's standard resolution
+		// applies.
 		execCtx = hitlservice.WithPolicyName(execCtx, t.Policy)
 	}
 	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
@@ -433,7 +433,7 @@ func printFiringTrouble(ctx context.Context, w io.Writer, exec libdbexec.Exec, w
 	if err != nil {
 		return
 	}
-	// A stranded firing counts too: its claim outlived its host and reads as running forever with no error.
+	// A stranded firing counts too: its claim outlived its host.
 	now := time.Now().UTC()
 	bad := 0
 	for _, f := range firings {

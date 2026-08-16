@@ -53,13 +53,11 @@ type MCPDeletedEvent struct {
 	Name string `json:"name"`
 }
 
-// poolEntry wraps a session pool with its last-access timestamp for idle eviction.
 type poolEntry struct {
 	pool       *localtools.MCPSessionPool
 	lastAccess time.Time
 }
 
-// worker holds the multiplexed pools and NATS subscriptions for one MCP server.
 type worker struct {
 	serverName             string
 	cfg                    localtools.MCPServerConfig
@@ -115,8 +113,6 @@ func New(ctx context.Context, db runtimetypes.Store, messenger libbus.Messenger,
 	return m, nil
 }
 
-// getOrCreatePool lazily initializes a session pool for a specific Contenox chat session.
-// Uses double-checked locking to prevent TOCTOU ghost-connection races.
 func (m *Manager) getOrCreatePool(ctx context.Context, w *worker, chatSessionID string) *localtools.MCPSessionPool {
 	if chatSessionID == "" {
 		chatSessionID = "default"
@@ -160,8 +156,7 @@ func (m *Manager) getOrCreatePool(ctx context.Context, w *worker, chatSessionID 
 	// Create the pool (connection is lazy — happens inside CallTool/ListTools).
 	pool := localtools.NewMCPSessionPool(poolCfg)
 
-	// Double-check: another goroutine may have inserted for this session while we
-	// were doing the DB lookup. Return the existing one to avoid ghost connections.
+	// Another goroutine may have inserted for this session during the DB lookup.
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if existing, ok := w.pools[chatSessionID]; ok {
@@ -226,9 +221,8 @@ func (m *Manager) StartWorker(ctx context.Context, srv *runtimetypes.MCPServer) 
 		cancelFn:   workerCancel,
 	}
 
-	// Background idle-pool eviction: reap sessions untouched for 30 minutes.
-	// Because Mcp-Session-Id is persisted in SQLite KV, eviction is safe —
-	// the next access transparently restores the session from the KV store.
+	// Eviction is safe because Mcp-Session-Id is persisted in KV, so the next
+	// access restores the session.
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()

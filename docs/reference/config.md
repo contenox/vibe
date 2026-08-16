@@ -1,6 +1,7 @@
 ---
 title: Configuration
 description: Backends, defaults, and workspace state — all stored in SQLite, managed with CLI commands.
+order: 2
 ---
 
 # Configuration

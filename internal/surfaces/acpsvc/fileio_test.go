@@ -51,8 +51,6 @@ func TestUnit_MapACPNotExist_WrapsResourceNotFoundAsErrNotExist(t *testing.T) {
 
 // A host serves sessions no client is attached to — work driven over the relay
 // before a transport binds, or a chain fired by a trigger with nobody watching.
-// Such a call has no editor to proxy through, and must read the disk rather
-// than fail: refusing here made file tools unusable outside an editor.
 func TestUnit_ACPFileIO_RefusesWhenNoClientIsAttached(t *testing.T) {
 	fio := NewACPFileIO(func(context.Context) *Transport { return nil })
 	_, err := fio.ReadFile(context.Background(), "whatever.txt")

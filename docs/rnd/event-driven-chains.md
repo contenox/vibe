@@ -9,7 +9,7 @@ Missions already leave a durable trail: every report, status change, plan revisi
 
 > **Beta:** the event tier requires `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`) and its interface may change. Without the opt-in, `contenox events` is hidden and no trigger file loads. No trigger ships either — `contenox init` seeds none, so every trigger below is a file you write yourself.
 
-All three stories share one setup: the trigger file, its chain, and its policy sit in the workspace `.contenox/` (or `~/.contenox/` — [same resolution as every system file](/docs/guide/chain-naming/#resolution-which-file-wins)), `contenox vet --all` confirms they parse and resolve, and firing happens on the two documented paths — live inside any engine-running host, and by `contenox events dispatch` catching up on everything appended while no such host ran. The [events guide](/docs/guide/events/) is the full contract; this page is what it feels like in use.
+All three stories share one setup: the trigger file, its chain, and its policy sit in the workspace `.contenox/` (or `~/.contenox/` — [same resolution as every system file](/docs/guide/chains/naming/#resolution-which-file-wins)), `contenox vet --all` confirms they parse and resolve, and firing happens on the two documented paths — live inside any engine-running host, and by `contenox events dispatch` catching up on everything appended while no such host ran. The [events guide](/docs/guide/events/) is the full contract; this page is what it feels like in use.
 
 ## Story 1 — the attention buzz
 

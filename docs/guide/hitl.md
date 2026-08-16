@@ -1,6 +1,7 @@
 ---
 title: HITL Policies
 description: Control which tool calls require human approval using named policy presets.
+order: 9
 ---
 
 # HITL Policies
@@ -19,9 +20,7 @@ HITL is **on by default**. When the engine runs a tool call, it evaluates the ac
 - **allow** — pass through silently (no prompt)
 - **deny** — reject the call immediately without prompting
 
-In the **CLI**, approval prompts appear inline in the terminal (TTY):
-
-![A destructive rm command stops at a human approval gate before it runs](/hitl-approve.gif)
+In the **CLI**, approval prompts appear inline in the terminal (TTY).
 
 To disable HITL entirely, pass `--auto` on a surface that would otherwise prompt:
 
@@ -75,6 +74,15 @@ A policy is a JSON file with an optional `default_action` and a list of `rules`:
 
 Rules are evaluated top-to-bottom; the first match wins.
 
+An expiry is applied when the ask is next read rather than by a background
+sweep — contenox runs no daemon — so a verdict arriving after the window still
+resumes the run until something lists the inbox.
+
+Of the compute bounds, `maxTokens` applies when a unit's provider reports usage
+and is inert when it does not, and `maxToolCalls` is validated at parse time and
+enforced by the unattended permission answerer. Each shipped preset records this
+in its own `//compute-fields` note.
+
 ### Condition operators (`when[].op`)
 
 | Op | Matches |
@@ -95,7 +103,7 @@ A rule with `when` conditions gates a tool only for calls whose arguments match 
 ```
 
 > **Note:**
-> `command_prefix_allowlist` pins a command **name**, and `PATH` decides what a name means — so an allowlisted `go` can be a `go` planted anywhere earlier on `PATH`. Add a `trusted_binaries` block to pin those names to a real path and a SHA256; see [Trusted binaries](/docs/guide/trusted-binaries/).
+> `command_prefix_allowlist` pins a command **name**, and `PATH` decides what a name means — so an allowlisted `go` can be a `go` planted anywhere earlier on `PATH`. Add a `trusted_binaries` block to pin those names to a real path and a SHA256; see [Trusted binaries](/docs/guide/confinement/trusted-binaries/).
 
 ## Who may answer a subagent (`attention`)
 

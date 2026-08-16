@@ -29,7 +29,7 @@ func TestUnit_DoctorVerdict(t *testing.T) {
 		var out strings.Builder
 		printDoctorVerdict(&out, res)
 		require.Contains(t, out.String(), "Ready: yes")
-		require.Contains(t, out.String(), `contenox "your prompt"`)
+		require.Contains(t, out.String(), `contenox acp`)
 	})
 
 	t.Run("not ready names the ranked reason and its own fix", func(t *testing.T) {

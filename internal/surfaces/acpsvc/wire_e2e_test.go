@@ -669,7 +669,6 @@ func TestE2E_Wire_SessionWorkspaceCwd(t *testing.T) {
 	toolCtx := context.WithValue(ctx, runtimetypes.SessionIDContextKey, internalID)
 	assert.Equal(t, resolvedB, resolver(toolCtx), "resolver must return the session's persisted cwd")
 
-
 	// A session without a workspace in scope falls back to the default root.
 	assert.Equal(t, factory.Default(), resolver(context.Background()))
 

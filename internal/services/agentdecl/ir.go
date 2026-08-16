@@ -138,9 +138,7 @@ type AgentIR struct {
 }
 
 // DeclaredToolsetNames are the registered names of the sources this agent
-// brought, in declaration order. The emitted chain lists them in
-// execute_config.tools and the registrar writes rows under the same names —
-// this function is the single place that contract is expressed.
+// brought, in declaration order. It is the single place that contract is expressed.
 func (ir *AgentIR) DeclaredToolsetNames(agentID string) []string {
 	names := make([]string, 0, len(ir.DeclaredMCP)+len(ir.DeclaredRemote))
 	for _, srv := range ir.DeclaredMCP {
@@ -157,13 +155,9 @@ func (ir *AgentIR) AddUnmapped(field, value, reason string) {
 	ir.Unmapped = append(ir.Unmapped, Unmapped{Field: field, Value: value, Reason: reason})
 }
 
-// ScopedName is the emitted chain id, which chainagents also uses as the
-// registry name — so it is what an operator types at `mission fire` and reads
-// in `agent list`. A declaration's own name carries through unchanged; the
-// word chain belongs to the file this becomes, not to the agent.
-//
-// Scoping by dialect is what stops two products' identically named agents from
-// resolving to one row, where the loser is dropped silently.
+// ScopedName is the emitted chain id, which chainagents also uses as the registry
+// name. Scoping by dialect stops two products' identically named agents from
+// resolving to one row.
 func (ir *AgentIR) ScopedName(scopeWithDialect bool) string {
 	if !scopeWithDialect {
 		return ir.Name

@@ -1,32 +1,7 @@
-// Package sanitize is beam's one gate between untrusted text and a
-// [frame.Span], which draws its text as literal cells with no interpretation
-// beyond the style table. Left unsanitized, agent output, tool titles, file
-// names or a diff could carry a cursor-motion sequence that scribbles over
-// scrollback, an OSC that retitles the window or stuffs the clipboard, or a
-// bidi override that makes a reviewed diff line read as the opposite of what
-// it applies.
-//
-// Every ingest point runs text through here once, at the boundary where it
-// arrives, so nothing downstream needs to re-check it. It removes:
-//
-//   - ESC-initiated sequences whole (CSI, OSC, DCS/SOS/PM/APC, charset
-//     selects, two-byte escapes) — body and all, not just the ESC byte;
-//   - every remaining C0 control and DEL;
-//   - the Unicode bidi controls U+202A–U+202E and U+2066–U+2069.
-//
-// Bytes >= 0x80 always survive (UTF-8 continuation bytes, never C1 controls).
-//
-// [Line] and [Lines] differ only in what structure they keep: Line is for a
-// value that becomes one span and strips newline/tab entirely (folding tabs
-// to a space); Lines is for source text the caller will split itself, so it
-// keeps "\n" and "\t" for [ExpandTabs] to handle once the caller knows which
-// line a tab sits on.
-//
-// The functions are stateless: an escape split across streamed chunks loses
-// only its ESC byte, so the tail arrives as literal text. The security
-// property (no ESC ever reaches a span) still holds; the cosmetic one
-// doesn't. Shell output goes through comp/transcript's stateful parser
-// instead, for that reason.
+// Package sanitize is beam's gate between untrusted text and a rendered span. It
+// removes ESC-initiated sequences whole, every remaining C0 control and DEL, and
+// the Unicode bidi controls; bytes >= 0x80 always survive. The functions are
+// stateless, so an escape split across streamed chunks loses only its ESC byte.
 package sanitize
 
 import (
@@ -35,32 +10,21 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/contenoxcli/textwidth"
 )
 
-// DefaultTabStop is the tab width beam expands to: 8, matching what every
-// terminal, diff tool and pager already assumes.
+// DefaultTabStop is the tab width beam expands to.
 const DefaultTabStop = 8
 
-// Line returns s reduced to text safe for one [frame.Span]: escape
-// sequences, C0 controls, DEL and bidi controls are removed, tabs fold to a
-// single space, and no newline survives.
-//
-// Use it for values that render as a single line — names, titles,
-// descriptions, error strings — where a newline breaks the line contract.
+// Line returns s reduced to text safe for one span: tabs fold to a single space
+// and no newline survives.
 func Line(s string) string { return strip(s, false) }
 
 // Lines returns s reduced to safe source text: the same removals as [Line],
-// except "\n" and "\t" survive.
-//
-// Use it for text the caller splits itself (streamed prose, a user echo, a
-// diff). Each resulting line must still go through [ExpandTabs] before
-// becoming a span — a tab's width depends on the column it starts in.
+// except "\n" and "\t" survive. Each resulting line must still go through
+// [ExpandTabs] before becoming a span.
 func Lines(s string) string { return strip(s, true) }
 
 // ExpandTabs replaces every tab in s with spaces up to the next multiple of
-// tabstop, measured in terminal cells so wide runes land on the same stops a
-// terminal would. A non-positive tabstop falls back to [DefaultTabStop].
-//
-// s is expected to be one line already: a newline does not reset the
-// column, so a caller holding multi-line text must split it first.
+// tabstop, measured in terminal cells. A non-positive tabstop falls back to
+// [DefaultTabStop]. s must already be a single line.
 func ExpandTabs(s string, tabstop int) string {
 	if strings.IndexByte(s, '\t') < 0 {
 		return s
@@ -84,9 +48,7 @@ func ExpandTabs(s string, tabstop int) string {
 	return b.String()
 }
 
-// strip is the shared state machine. keepStructure decides whether "\n" and
-// "\t" survive as themselves (Lines) or are dropped and folded to a space
-// respectively (Line).
+// strip is the shared state machine; keepStructure is the Lines/Line difference.
 func strip(s string, keepStructure bool) string {
 	if !needsWork(s, keepStructure) {
 		return s
@@ -95,10 +57,7 @@ func strip(s string, keepStructure bool) string {
 	var b strings.Builder
 	b.Grow(len(s))
 
-	// state is the escape-sequence parser's position. It is local rather than
-	// a field because these functions are stateless by contract; a sequence
-	// left open at the end of s simply eats the rest of s, which is the safe
-	// direction to fail.
+	// A sequence left open at the end of s eats the rest of s, the safe failure.
 	const (
 		text   = iota
 		esc    // ESC seen, dispatch byte pending
@@ -128,9 +87,7 @@ func strip(s string, keepStructure bool) string {
 					b.WriteByte(' ')
 				}
 			case r < 0x20 || r == 0x7f:
-				// dropped: CR, BEL, backspace, NUL and friends
 			case isBidi(r):
-				// dropped: invisible, and it reorders everything after it
 			default:
 				b.WriteRune(r)
 			}
@@ -164,7 +121,7 @@ func strip(s string, keepStructure bool) string {
 			case '\\':
 				state = text
 			case 0x1b:
-				// stay: a second ESC re-arms the terminator
+				// A second ESC re-arms the terminator.
 			default:
 				state = osc
 			}
@@ -187,8 +144,7 @@ func strip(s string, keepStructure bool) string {
 	return b.String()
 }
 
-// needsWork reports whether s holds anything strip would change, so the
-// overwhelmingly common clean string is returned without allocating.
+// needsWork reports whether s holds anything strip would change.
 func needsWork(s string, keepStructure bool) bool {
 	// The bidi controls are the only multibyte runes strip touches, and both
 	// blocks share a lead byte, so the rune scan only runs when it might matter.
@@ -211,10 +167,7 @@ func needsWork(s string, keepStructure bool) bool {
 	return maybeBidi && strings.ContainsAny(s, bidiRunes)
 }
 
-// bidiRunes is the closed set strip removes: four legacy embedding/override
-// controls, two isolate replacements, and the pop. All are zero-width and
-// reorder everything after them — how a diff line can read as the reverse
-// of what it applies.
+// bidiRunes is the closed set strip removes.
 const bidiRunes = "‪‫‬‭‮⁦⁧⁨⁩"
 
 func isBidi(r rune) bool {

@@ -78,4 +78,4 @@ See [Handlers](/docs/specification/handlers) and [Transitions](/docs/specificati
 - **[Handlers](/docs/specification/handlers)** — all task handler types and their fields
 - **[Transitions & Branching](/docs/specification/transitions)** — how the chain decides what to do next
 - **[Annotated Examples](/docs/specification/examples)** — full working chains with commentary
-- **[Writing a chain by hand](/docs/guide/first-chain/)** — the walkthrough, when you have decided you need one
+- **[Writing a chain by hand](/docs/guide/chains/writing-a-chain/)** — the walkthrough, when you have decided you need one

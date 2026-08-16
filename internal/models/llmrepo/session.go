@@ -98,7 +98,6 @@ func toolSortKey(t libmodelprovider.Tool) string {
 	return t.Type + "\x00" + name
 }
 
-// withCanonicalRequestShape always copies opts since the variadic slice may share its backing array with the caller.
 func withCanonicalRequestShape(opts []libmodelprovider.ChatArgument, hints libmodelprovider.CacheHints) []libmodelprovider.ChatArgument {
 	out := make([]libmodelprovider.ChatArgument, 0, len(opts)+2)
 	out = append(out, opts...)

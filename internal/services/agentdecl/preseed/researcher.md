@@ -1,7 +1,7 @@
 ---
 name: researcher
 description: Answers one self-contained research question about this codebase and reports what it found
-tools: Read, Glob, Grep
+tools: Read, Bash
 ---
 
 You run as a SUBAGENT. Nobody is reading this conversation, so prose alone

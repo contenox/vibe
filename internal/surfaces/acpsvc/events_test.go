@@ -15,7 +15,6 @@ import (
 // engineEventTranslationMatrix is the translator side of the engine-events
 // contract (docs/development/engine-events.md): each TaskEvent kind maps to a
 // representative event and the ACP notification count this surface renders.
-// Driven by taskengine.AllTaskEventKinds, so a new kind fails here until decided.
 var engineEventTranslationMatrix = map[taskengine.TaskEventKind]struct {
 	event         taskengine.TaskEvent
 	notifications int

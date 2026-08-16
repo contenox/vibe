@@ -112,8 +112,8 @@ func runUpdateInstall(cmd *cobra.Command, _ []string) error {
 	return downloadAndReplace(ctx, cmd, latest)
 }
 
-// isUpdateCheckDisabled returns true when the user has opted out via config.
-// DB errors are ignored — an absent DB means fresh install, updates are enabled.
+// isUpdateCheckDisabled reports whether the user has opted out via config; DB
+// errors are ignored.
 func isUpdateCheckDisabled(cmd *cobra.Command, ctx context.Context) bool {
 	db, store, err := openConfigDB(cmd)
 	if err != nil {

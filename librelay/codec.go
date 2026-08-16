@@ -10,15 +10,10 @@ import (
 	"sync"
 )
 
-// readBufSize is the initial bufio window. Frames are usually small — a
-// heartbeat is under 64 bytes — and a long one grows the accumulator instead,
-// so this is sized for the common case rather than for MaxFrameBytes.
 const readBufSize = 64 * 1024
 
-// Codec-level failures. ErrFrameTooLarge is the only one that ends a
-// connection: every other error here is per-frame and the [Reader] resumes at
-// the next line, because a peer that emits one bad frame has not proved the
-// stream is unusable.
+// Codec-level failures. ErrFrameTooLarge is the only one that ends a connection;
+// every other error is per-frame and the [Reader] resumes at the next line.
 var (
 	ErrFrameTooLarge = errors.New("librelay: frame exceeds MaxFrameBytes")
 	ErrReaderClosed  = errors.New("librelay: reader is unusable after a framing error")
@@ -36,17 +31,10 @@ func NewReader(r io.Reader) *Reader {
 	return &Reader{br: bufio.NewReaderSize(r, readBufSize)}
 }
 
-// ReadFrame returns the next frame.
-//
-// It distinguishes two kinds of failure, and callers must too. A malformed or
-// invalid frame is reported with the line already consumed, so calling
-// ReadFrame again is correct and reads the next frame; this is what lets one
-// garbled message not take down a connection carrying other sessions.
-// [ErrFrameTooLarge] is different: the offending line has not been consumed
-// and cannot be, since consuming it is the unbounded read the limit exists to
-// prevent. The Reader is dead after it and every later call returns
-// [ErrReaderClosed] — resynchronizing on a newline an attacker chose would
-// hand them control of where the next frame starts.
+// ReadFrame returns the next frame. A malformed or invalid frame is reported
+// with the line already consumed, so calling ReadFrame again reads the next one;
+// after [ErrFrameTooLarge] the Reader is dead and every later call returns
+// [ErrReaderClosed].
 func (r *Reader) ReadFrame() (Frame, error) {
 	if r.dead != nil {
 		return Frame{}, r.dead
@@ -56,9 +44,7 @@ func (r *Reader) ReadFrame() (Frame, error) {
 		return Frame{}, err
 	}
 	var f Frame
-	// Unknown fields are accepted deliberately: the envelope evolves by
-	// addition, and DisallowUnknownFields would make every new field a
-	// breaking change in the direction old→new.
+	// Unknown fields are accepted deliberately: the envelope evolves by addition.
 	if err := json.Unmarshal(line, &f); err != nil {
 		return Frame{}, fmt.Errorf("librelay: decode frame: %w", err)
 	}
@@ -68,10 +54,8 @@ func (r *Reader) ReadFrame() (Frame, error) {
 	return f, nil
 }
 
-// readLine returns one newline-delimited line with blank lines skipped,
-// refusing to accumulate past MaxFrameBytes. The length check happens before
-// the append, not after, so a hostile stream can never make this allocate more
-// than one buffer growth beyond the limit.
+// readLine returns one newline-delimited line with blank lines skipped, refusing
+// to accumulate past MaxFrameBytes.
 func (r *Reader) readLine() ([]byte, error) {
 	var line []byte
 	for {
@@ -83,10 +67,6 @@ func (r *Reader) readLine() ([]byte, error) {
 		line = append(line, frag...)
 		switch {
 		case err == nil:
-			// ReadSlice reports nil only when it found the delimiter and
-			// included it, so frag is non-empty and line is at least one byte
-			// long. The subtraction cannot underflow — an empty line reaches
-			// this branch as the single byte "\n", not as zero bytes.
 			line = line[:len(line)-1] // drop the delimiter
 			if n := len(line); n > 0 && line[n-1] == '\r' {
 				line = line[:n-1]
@@ -99,10 +79,7 @@ func (r *Reader) readLine() ([]byte, error) {
 		case errors.Is(err, bufio.ErrBufferFull):
 			continue
 		case errors.Is(err, io.EOF):
-			// A final line without a trailing newline is a
-			// truncated frame, not a frame: the writer never omits
-			// the delimiter, so its absence means the connection
-			// died mid-write.
+			// A final line without a trailing newline is a truncated frame.
 			if len(bytes.TrimSpace(line)) == 0 {
 				return nil, io.EOF
 			}
@@ -113,9 +90,7 @@ func (r *Reader) readLine() ([]byte, error) {
 	}
 }
 
-// Writer encodes frames as NDJSON. It is safe for concurrent use: a connection
-// is written by more than one goroutine (a session stream and a heartbeat, at
-// minimum) and an interleaved frame is a corrupt stream, not a slow one.
+// Writer encodes frames as NDJSON. It is safe for concurrent use.
 type Writer struct {
 	mu sync.Mutex
 	w  io.Writer
@@ -124,12 +99,8 @@ type Writer struct {
 // NewWriter returns a Writer over w.
 func NewWriter(w io.Writer) *Writer { return &Writer{w: w} }
 
-// WriteFrame validates and writes f followed by a newline.
-//
-// It fails closed: an invalid frame is never partially written, because the
-// encoding happens into a buffer and reaches the connection as a single Write.
-// A frame that failed halfway across would desynchronize framing for every
-// session sharing the connection, not just its own.
+// WriteFrame validates and writes f followed by a newline. An invalid frame is
+// never partially written; the line reaches the connection as a single Write.
 func (wr *Writer) WriteFrame(f Frame) error {
 	if err := f.Validate(); err != nil {
 		return err
@@ -148,14 +119,11 @@ func (wr *Writer) WriteFrame(f Frame) error {
 }
 
 // encodeLine renders f as one NDJSON line. Compaction is what makes
-// newline-delimiting sound: a payload supplied as pretty-printed raw JSON
-// would otherwise carry literal newlines and split one frame into several.
+// newline-delimiting sound.
 func encodeLine(f Frame) ([]byte, error) {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
-	// HTML escaping would rewrite <, > and & inside an ACP payload the
-	// relay promised to pass through untouched. Nothing here is embedded
-	// in a document, so the escaping buys nothing and costs byte fidelity.
+	// HTML escaping would rewrite <, > and & inside a passed-through payload.
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(f); err != nil {
 		return nil, fmt.Errorf("librelay: encode frame %q: %w", f.Type, err)
@@ -163,8 +131,7 @@ func encodeLine(f Frame) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// marshalCompact encodes v as compact, unescaped JSON with no trailing
-// newline — the form a payload must be in before it is embedded in a frame.
+// marshalCompact encodes v as compact, unescaped JSON with no trailing newline.
 func marshalCompact(v any) ([]byte, error) {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)

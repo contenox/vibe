@@ -1,14 +1,15 @@
 import type { APIRoute } from 'astro';
 import { getCollection } from 'astro:content';
 import { entryTitle, published } from '../lib/entries';
+import { PRODUCT_SHAPES, PRODUCT_SUMMARY } from '../lib/summary';
 
 const SITE = 'https://contenox.com';
 
 const SECTIONS: [string, string, string][] = [
-  ['guide', 'Guides', 'Concepts, the envelope, missions, pairing, sovereignty.'],
-  ['reference', 'Reference', 'CLI and configuration.'],
-  ['specification', 'Specification', 'Handlers, transitions, worked examples.'],
-  ['integrations', 'Integrations', 'Editors, model providers, tools.'],
+  ['guide', 'Guides', 'Declaring agents, the envelope, missions and the durable ask, pairing, sovereignty.'],
+  ['reference', 'Reference', 'The CLI, agents.toml, and configuration.'],
+  ['specification', 'Specification', 'The compiled chain format: handlers, transitions, worked examples.'],
+  ['integrations', 'Integrations', 'Editors over ACP, model providers, MCP servers and OpenAPI tools.'],
   ['use-cases', 'Use cases', 'Worked recipes.'],
 ];
 
@@ -22,20 +23,23 @@ export const GET: APIRoute = async () => {
   const out: string[] = [
     '# contenox',
     '',
-    '> An agent server. You don\'t build an agent, you declare one: an agent is files in `.contenox/` — chain files (`chain-agent-*.json`) declaring tasks, model routing, tools, retries and branching, and HITL policy files declaring what needs a human. Edit a file and the next invocation runs it: no build step, no plugin API, no release. Both kinds are JSON Schema–validated. contenox is a process you run and connect to, and the same chain runs unchanged in the terminal, headless in CI, inside an ACP editor, and as a unit the fleet dispatches. Every action is checked against your policy before it runs. Open source under Apache-2.0, one binary, no account, on your own machine, on any AI model you pick.',
+    `> ${PRODUCT_SUMMARY}`,
     '',
-    'Terminology, so a summary does not invent one: the declaration file is the **envelope**; approvals gated by it are **human-in-the-loop**; a unit of unattended work is a **mission**; the surfaces (terminal UI, CLI, editors over ACP, browser via the optional relay) are example implementations, not the product.',
+    PRODUCT_SHAPES,
+    '',
+    'Terminology, so a summary does not invent one: the policy file bounding a run is the **envelope**; approvals gated by it are **human-in-the-loop**; a paused run that outlives its own process is the **durable ask**; a unit of unattended work is a **mission**. The agents that ship in the box (`acp`, `acpx`, `triage`, `reviewer`, `researcher`) are examples of the artifact, the default page rather than the product, and the surfaces (CLI, editors over ACP, browser via the optional relay) are example implementations, not the product either.',
     '',
     '## Start here',
     '',
     `- [What contenox is](${SITE}/docs/guide/what-contenox-is/): the product in one page — what it is, why it exists, what it is typically used for, and what it is not.`,
+    `- [Declaring agents](${SITE}/docs/guide/agents/): the artifact — the frontmatter, where declarations live, the directory that becomes a workflow.`,
+    `- [The envelope](${SITE}/docs/guide/hitl/): what passes silently, what stops for a human, what is denied outright.`,
     `- [Quickstart](${SITE}/docs/guide/quickstart/): install and first mission.`,
-    `- [Core concepts](${SITE}/docs/guide/concepts/): chains, tasks, tools, transitions.`,
     '',
     '## Machine-readable',
     '',
     `- [HITL policy JSON Schema](${SITE}/schema/hitl-policy-v1.schema.json): the envelope format, generated from the Go types that load it.`,
-    `- [Task chain JSON Schema](${SITE}/schema/task-chain.schema.json): the chain file format, same source.`,
+    `- [Task chain JSON Schema](${SITE}/schema/task-chain.schema.json): the compiled chain format, same source.`,
     `- [Full text](${SITE}/llms-full.txt): every documentation page concatenated.`,
     `- [Sitemap](${SITE}/sitemap-index.xml): the complete URL list.`,
     '',

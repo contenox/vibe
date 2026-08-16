@@ -19,8 +19,6 @@ func (e *ErrAmbiguousDialect) Error() string {
 		"Name it with --dialect", e.Path)
 }
 
-// anchors map a directory that appears in a source path to the dialect that
-// owns it, longest first so a more specific anchor wins.
 var anchors = []struct {
 	segments []string
 	dialect  Dialect
@@ -34,7 +32,6 @@ var anchors = []struct {
 	{[]string{".cursor", "agents"}, DialectCursor},
 }
 
-// fingerprints are frontmatter keys that appear in exactly one dialect.
 var fingerprints = map[string]Dialect{
 	"disallowedTools":        DialectClaudeCode,
 	"isolation":              DialectClaudeCode,
@@ -59,8 +56,6 @@ var fingerprints = map[string]Dialect{
 // DetectDialect establishes which product a file was written for, strongest
 // signal first: the nearest ancestor agents directory, then the filename shape,
 // then a frontmatter key unique to one dialect. It refuses rather than guess.
-// The `.agents/` anchor is generic rather than vendor-scoped, so it counts only
-// alongside the fixed `agent.md` filename or a fingerprint.
 func DetectDialect(path string, data []byte) (Dialect, error) {
 	base := filepath.Base(path)
 	parts := strings.Split(filepath.ToSlash(filepath.Clean(path)), "/")
@@ -130,8 +125,6 @@ func slicesEqual(a, b []string) bool {
 	return true
 }
 
-// fingerprintOf returns the dialect a file's frontmatter uniquely identifies,
-// or empty when it carries only the common core or points at more than one.
 func fingerprintOf(data []byte) Dialect {
 	front, _, ok := splitFrontmatter(data)
 	if !ok {

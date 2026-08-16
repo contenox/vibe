@@ -4,7 +4,8 @@ package libsandbox
 
 import "fmt"
 
-// Preflight reports whether the Landlock confinement floor can be built on this host without attempting a spawn; nil means yes, a non-nil error (wrapping ErrIsolation) says why not.
+// Preflight reports whether the Landlock confinement floor can be built on this
+// host without attempting a spawn. A non-nil error wraps ErrIsolation.
 func Preflight() error {
 	abi, err := landlockABI()
 	if err != nil {

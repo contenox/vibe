@@ -21,10 +21,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// invalidateBackendModelCache busts the cached model list (prov:<id>) for a
-// backend so the next chat/run refetches from the provider. Best-effort: a
-// failure is surfaced as a warning but does not fail the backend operation.
-// NewSQLiteManager wraps db without taking ownership, so it is not closed here.
+// invalidateBackendModelCache busts the cached model list for a backend so the
+// next run refetches from the provider. Best-effort.
 func invalidateBackendModelCache(ctx context.Context, errW io.Writer, db libdb.DBManager, backendID string) {
 	if err := runtimestate.InvalidateModelCache(ctx, libkvstore.NewSQLiteManager(db), backendID); err != nil {
 		fmt.Fprintf(errW, "warning: model cache invalidation failed for backend %s: %v\n", backendID, err)
@@ -73,10 +71,8 @@ Examples:
 }
 
 // defaultBaseURLForType infers --url for backend types with one sensible
-// default, and errors out for types where a default would be actively wrong
-// (vertex-google/bedrock carry account-specific info no default could guess).
-// Types not listed here (vllm, myvllm-style custom endpoints) return ""
-// unchanged — the caller must pass --url explicitly.
+// default, errors for types carrying account-specific info, and returns ""
+// for the rest, where the caller must pass --url.
 func defaultBaseURLForType(typ string) (string, error) {
 	switch typ {
 	case "ollama":
@@ -145,10 +141,8 @@ Examples:
 			apiKey = os.Getenv(apiKeyEnv)
 		}
 
-		// Sanity-check the URL: a double-slash in the path (after stripping the scheme)
-		// is almost always caused by an un-expanded environment variable such as
-		// $GOOGLE_CLOUD_PROJECT being empty.  Catch it early rather than silently
-		// registering a broken backend.
+		// A double-slash in the path is almost always an un-expanded environment
+		// variable such as an empty $GOOGLE_CLOUD_PROJECT.
 		if baseURL != "" {
 			pathPart := baseURL
 			if idx := strings.Index(baseURL, "://"); idx >= 0 {
@@ -305,9 +299,8 @@ func resolveDBPath(cmd *cobra.Command) (string, error) {
 	if dbFlag != "" {
 		return filepath.Abs(dbFlag)
 	}
-	// A unit dispatched by another contenox process inherits its parent's database,
-	// so its mission writes land on the row that dispatched it. An explicit --db
-	// still wins; see agentinstance.ChainDBEnvVar.
+	// A unit dispatched by another contenox process inherits its parent's
+	// database. An explicit --db still wins.
 	if inherited := strings.TrimSpace(os.Getenv(agentinstance.ChainDBEnvVar)); inherited != "" {
 		return filepath.Abs(inherited)
 	}

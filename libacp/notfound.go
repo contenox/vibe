@@ -7,11 +7,9 @@ import (
 	"strings"
 )
 
-// IsNotFound reports whether err is a peer's answer of "that resource does
-// not exist" (file/resource sense, not lifecycle): only a typed *Error with
-// Code == ErrResourceNotFound, or a subject-describing code whose message
-// says "not found", counts — a raw error's text and protocol-level codes are
-// never classified here.
+// IsNotFound reports whether err is a peer's answer of "that resource does not
+// exist": a typed *Error with Code == ErrResourceNotFound, or a
+// subject-describing code whose message says "not found".
 func IsNotFound(err error) bool {
 	if err == nil {
 		return false

@@ -12,12 +12,9 @@ import (
 
 const cloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
 
-// NewTokenSource returns a caching oauth2.TokenSource. Call it once per
-// provider and reuse the source: it caches the access token until expiry,
-// unlike the BearerToken* helpers, which mint a source per call and add
-// ~100-400ms of auth latency to every chat/stream call.
-//
-// credJSON is the service account key JSON; empty falls back to ADC.
+// NewTokenSource returns a caching oauth2.TokenSource. Call it once per provider
+// and reuse it: the BearerToken* helpers mint a source per call and add auth
+// latency to every call. credJSON is the service account key JSON; empty uses ADC.
 func NewTokenSource(ctx context.Context, credJSON string) (oauth2.TokenSource, error) {
 	if credJSON != "" {
 		creds, err := google.CredentialsFromJSON(ctx, []byte(credJSON), cloudPlatformScope)
@@ -33,8 +30,6 @@ func NewTokenSource(ctx context.Context, credJSON string) (oauth2.TokenSource, e
 	return ts, nil
 }
 
-// extractProjectFromVertexURL parses the GCP project ID from a Vertex AI base URL of the form
-// https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}.
 func extractProjectFromVertexURL(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {

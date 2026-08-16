@@ -30,11 +30,9 @@ type Config struct {
 	// "provider:model".
 	Tools  map[string]string `toml:"tools"`
 	Models map[string]string `toml:"models"`
-	// Agents holds per-agent overlays keyed by the agent's id, each carrying
-	// any subset of the sections above. Held raw so [For] can replay it through
-	// the same "omitted keys keep the inherited value" decode the roots use,
-	// which a typed struct cannot do: it could not tell `retry_on_failure = 0`
-	// from an absent key.
+	// Agents holds per-agent overlays keyed by the agent's id. Held raw so For
+	// can replay it through the same decode the roots use; a typed struct could
+	// not tell `retry_on_failure = 0` from an absent key.
 	Agents map[string]map[string]any `toml:"agents"`
 }
 
@@ -56,10 +54,8 @@ type RoutingDefaults struct {
 	// PinModel emits the source's own model instead of the templates, when the
 	// registry could resolve it.
 	PinModel bool `toml:"pin_model"`
-	// RouterModel and RouterProvider run a tree's classifier nodes. Choosing a
-	// branch is a one-word answer, so it does not need the model the branch
-	// itself will use — the shipped chains already route on the alt model.
-	// Empty falls back to Model/Provider.
+	// RouterModel and RouterProvider run a tree's classifier nodes. Empty falls
+	// back to Model/Provider.
 	RouterModel    string `toml:"router_model"`
 	RouterProvider string `toml:"router_provider"`
 	// AltModel and AltProvider run the recovery and terminal nodes: a second
@@ -136,10 +132,9 @@ func Shipped() (Config, error) {
 	return d, nil
 }
 
-// LoadDefaults returns the shipped defaults with each root's overlay applied in
-// order, so a later root overrides an earlier one. Roots are passed
-// weakest-first. A root without the file is skipped; an unreadable or malformed
-// one is an error rather than a silent fall back to shipped values.
+// Load returns the shipped defaults with each root's overlay applied in order,
+// weakest first. A root without the file is skipped; an unreadable or malformed
+// one is an error.
 func Load(roots ...string) (Config, error) {
 	d, err := Shipped()
 	if err != nil {
@@ -170,18 +165,12 @@ func Load(roots ...string) (Config, error) {
 	return d, nil
 }
 
-// For resolves the configuration one agent runs under: the root-wide values
-// with that agent's [agents.<id>] overlay applied. An agent without a section
-// gets the root-wide values unchanged.
-//
-// The overlay is replayed through toml.Unmarshal onto the already-resolved
-// values, so it inherits the same precedence the roots get — a key the overlay
-// omits keeps what it inherited, including zero values and false.
+// For resolves the configuration one agent runs under: the root-wide values with
+// that agent's [agents.<id>] overlay applied. A key the overlay omits keeps what
+// it inherited, including zero values and false.
 func (cfg Config) For(agent string) (Config, error) {
 	overlay, ok := cfg.Agents[agent]
 	if !ok || len(overlay) == 0 {
-		// Cleared even here: what comes back is one agent's resolved
-		// configuration, and other agents' overlays are not part of it.
 		out := cfg
 		out.Agents = nil
 		return out, nil
@@ -195,9 +184,7 @@ func (cfg Config) For(agent string) (Config, error) {
 	toolsPolicies, postures := out.ToolsPolicies, out.Policy.Postures
 	deny, allow := out.Policy.AlwaysDeny, out.Policy.AlwaysAllow
 	tools, models := out.Tools, out.Models
-	// Emptied so what survives the decode is exactly what the overlay declared,
-	// and so the decode cannot reach the root's maps: it merges into an existing
-	// map in place rather than replacing it, and every agent shares these.
+	// Emptied so the decode cannot merge into the root's maps, which every agent shares.
 	out.ToolsPolicies, out.Policy.Postures = nil, nil
 	out.Policy.AlwaysDeny, out.Policy.AlwaysAllow = nil, nil
 	out.Tools, out.Models = nil, nil
@@ -209,9 +196,8 @@ func (cfg Config) For(agent string) (Config, error) {
 
 	out.ToolsPolicies = mergeToolsPolicies(toolsPolicies, out.ToolsPolicies)
 	out.Policy.Postures = mergePostures(postures, out.Policy.Postures)
-	// Standing rules append rather than replace, and the root's come first:
-	// first match wins, so a per-agent grant can never reach past a credential
-	// deny the root declared.
+	// Standing rules append rather than replace, and the root's come first, so a
+	// per-agent grant can never reach past a credential deny the root declared.
 	out.Policy.AlwaysDeny = concatRules(deny, out.Policy.AlwaysDeny)
 	out.Policy.AlwaysAllow = concatRules(allow, out.Policy.AlwaysAllow)
 	// Copied before merging: mergeNames writes into its base, and the root's
@@ -268,8 +254,6 @@ func mergeNames(base, overlay map[string]string) map[string]string {
 	return base
 }
 
-// mergeToolsPolicies merges per-knob, not per-toolset: naming one shell knob
-// must not drop the rest of the shell policy, nor the other toolsets.
 func copyNames(base map[string]string) map[string]string {
 	out := make(map[string]string, len(base))
 	for k, v := range base {
@@ -301,8 +285,6 @@ func mergeToolsPolicies(base, overlay map[string]map[string]string) map[string]m
 	return out
 }
 
-// mergePostures merges per posture, so redefining one leaves the others as the
-// root declared them. Validate still requires the full set to survive.
 func mergePostures(base, overlay map[string]PostureGrants) map[string]PostureGrants {
 	if len(overlay) == 0 {
 		return base
@@ -317,8 +299,6 @@ func mergePostures(base, overlay map[string]PostureGrants) map[string]PostureGra
 	return out
 }
 
-// mergeAgents merges overlay sections per agent, so a workspace naming one knob
-// for one agent keeps what the home root said about the others.
 func mergeAgents(base, overlay map[string]map[string]any) map[string]map[string]any {
 	if len(overlay) == 0 {
 		return base
@@ -358,8 +338,6 @@ func mergeRaw(base, overlay map[string]any) map[string]any {
 	return out
 }
 
-// concatRules copies rather than appending in place: the root's slice is shared
-// by every agent resolved from the same Config.
 func concatRules(root, agent []StandingRule) []StandingRule {
 	if len(agent) == 0 {
 		return root

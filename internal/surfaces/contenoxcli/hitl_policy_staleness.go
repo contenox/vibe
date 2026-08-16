@@ -14,8 +14,7 @@ import (
 )
 
 // RefreshPoliciesCommand rewrites the shipped HITL policy presets and nothing
-// else — unlike `contenox init --force`, which also overwrites every chain
-// file in ~/.contenox.
+// else.
 const RefreshPoliciesCommand = "contenox init --refresh-policies"
 
 const catchAllToolset = "*"
@@ -25,7 +24,8 @@ type stalePolicyPreset struct {
 	Path string
 	// Toolsets are the shipped toolset names this file never mentions, sorted.
 	Toolsets []string
-	// DefaultAction is the on-disk file's default_action; empty means the loader's fail-closed default (approve).
+	// DefaultAction is the on-disk file's default_action; empty means the loader's
+	// fail-closed default.
 	DefaultAction string
 }
 
@@ -36,7 +36,7 @@ func policyToolsets(raw []byte) (map[string]bool, bool) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, false
 	}
-	// An unrecognized field shape reports "no claim" for the whole document rather than guessing.
+	// An unrecognized field shape reports "no claim" for the whole document.
 	field := func(rule map[string]json.RawMessage, key string) (string, bool) {
 		v, present := rule[key]
 		if !present {
@@ -55,8 +55,7 @@ func policyToolsets(raw []byte) (map[string]bool, bool) {
 			return nil, false
 		}
 		if tools == "" || tools == catchAllToolset {
-			// A wildcard on both axes covers every call; one pinned to a
-			// single tool name covers only that name.
+			// A wildcard on both axes covers every call.
 			tool, ok := field(rule, "tool")
 			if !ok {
 				return nil, false
@@ -103,8 +102,7 @@ func missingPolicyToolsets(shipped, onDisk []byte, gated map[string]bool) []stri
 
 // policyDirs is the envelope search path, strongest first: the resolved
 // .contenox dir, then ~/.contenox, then the envelopes rendered from agent
-// declarations. Generated last is what lets a hand-written envelope of the same
-// name shadow a rendered one — the same ordering the chain roots use.
+// declarations, so a hand-written envelope shadows a rendered one.
 func policyDirs(primaryDir string) []string {
 	var dirs []string
 	seen := map[string]bool{}
@@ -115,8 +113,7 @@ func policyDirs(primaryDir string) []string {
 		seen[dir] = true
 		dirs = append(dirs, dir)
 	}
-	// Joined only onto a named dir: filepath.Join("", ".generated") is a relative
-	// path, which would resolve against whatever cwd the process happens to hold.
+	// Joined only onto a named dir: filepath.Join("", ".generated") is relative.
 	addGenerated := func(dir string) {
 		if dir == "" {
 			return

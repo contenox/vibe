@@ -17,12 +17,10 @@ import (
 )
 
 // OpenAPIToolProtocol implements ToolProtocol using OpenAPI v3 specs.
-// SpecSource, when non-empty, is used as the spec location instead of
-// endpointURL+"/openapi.json". Supported formats:
-//   - https://... or http://...  — fetched over HTTP
-//   - file:///abs/path           — read from local filesystem
 type OpenAPIToolProtocol struct {
-	SpecSource string // optional; set by remoteprovider when RemoteTools.SpecURL is non-empty
+	// SpecSource, when non-empty, is the spec location instead of
+	// endpointURL+"/openapi.json": an http(s) URL, or file:///abs/path.
+	SpecSource string
 }
 
 func (p *OpenAPIToolProtocol) FetchSchema(ctx context.Context, endpointURL string, httpClient *http.Client) (*openapi3.T, error) {
@@ -85,7 +83,6 @@ type ParamArg struct {
 	In    ArgLocation
 }
 
-// operationDetails holds the schema information needed to execute a tool.
 type operationDetails struct {
 	Path      string
 	Method    string
@@ -93,8 +90,6 @@ type operationDetails struct {
 	PathItem  *openapi3.PathItem
 }
 
-// findOperationDetails fetches the OpenAPI schema and finds the specific
-// operation that corresponds to the given tool name.
 func (p *OpenAPIToolProtocol) findOperationDetails(
 	ctx context.Context,
 	endpointURL string,
@@ -306,7 +301,6 @@ func (p *OpenAPIToolProtocol) FetchTools(ctx context.Context, endpointURL string
 	return tools, nil
 }
 
-// extractToolName extracts the tool name using operationId, x-tool-name, or fallback.
 func (p *OpenAPIToolProtocol) extractToolName(path, method string, operation *openapi3.Operation) string {
 	if operation.OperationID != "" {
 		return operation.OperationID

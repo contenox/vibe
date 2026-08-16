@@ -27,10 +27,12 @@ var ErrInvalidSpec = errors.New("libsandbox: invalid spec")
 // host.
 var ErrInvalidCarveout = errors.New("libsandbox: invalid carve-out")
 
-// ErrIsolation is returned when building or enforcing the wall fails (unresolvable carve-out, unserializable plan, shim/syscall failure); the wall is fail-closed, so the agent is not spawned.
+// ErrIsolation is returned when building or enforcing the wall fails. The wall
+// is fail-closed, so the agent is not spawned.
 var ErrIsolation = errors.New("libsandbox: isolation failure")
 
-// Spec is the confinement spec for one spawned agent: the whole surface the process may touch; anything not named here is absent once the wall is enforced.
+// Spec is the confinement spec for one spawned agent. Anything not named here
+// is absent once the wall is enforced.
 type Spec struct {
 	// WorkspaceRoot is the one writable directory the agent works in
 	// (pinned via cmd.Dir).

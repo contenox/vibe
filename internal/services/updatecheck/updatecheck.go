@@ -23,10 +23,8 @@ type cacheEntry struct {
 	CheckedAt time.Time `json:"checked_at"`
 }
 
-// IsAvailable checks whether a newer version of contenox is available.
-// It caches results for 24 h in contenoxDir/update-check.json to avoid
-// hammering the GitHub API on every invocation.
-// Returns the latest tag, whether it is newer than currentVersion, and any error.
+// IsAvailable reports the latest contenox tag and whether it is newer than
+// currentVersion, caching the result for 24h in contenoxDir/update-check.json.
 func IsAvailable(ctx context.Context, currentVersion, contenoxDir string) (latestTag string, available bool, err error) {
 	cachePath := filepath.Join(contenoxDir, "update-check.json")
 	latestTag = readCache(cachePath)
@@ -96,7 +94,6 @@ func fetchFromGitHub(ctx context.Context) (string, error) {
 	return strings.TrimSpace(payload.TagName), nil
 }
 
-// isNewer reports whether latest is a semver string strictly greater than current.
 func isNewer(latest, current string) bool {
 	l := strings.TrimPrefix(strings.TrimSpace(latest), "v")
 	c := strings.TrimPrefix(strings.TrimSpace(current), "v")

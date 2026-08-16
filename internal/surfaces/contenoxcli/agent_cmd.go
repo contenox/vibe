@@ -199,9 +199,8 @@ func setAgentEnabled(cmd *cobra.Command, name string, enabled bool) error {
 	return nil
 }
 
-// legacyChainPrefixHint explains a name that would have resolved before
-// declared agents dropped the chain- prefix from their id. Returned empty for
-// anything else, so it can be appended unconditionally.
+// legacyChainPrefixHint explains a name that would have resolved before declared
+// agents dropped the chain- prefix from their id; empty for anything else.
 func legacyChainPrefixHint(name string) string {
 	bare := strings.TrimPrefix(name, "chain-")
 	if bare == name || bare == "" {
@@ -222,10 +221,7 @@ func openAgentService(cmd *cobra.Command) (libdb.DBManager, agentregistryservice
 	}
 	agents := agentregistryservice.New(db)
 	// Declarations are the source of truth, so inspecting the roster runs a
-	// discovery pass first: a file added since the last one is an agent now.
-	// Whatever that pass could not act on is printed here — the roster is where
-	// someone looks when an agent or a knob did not take effect, and a warning
-	// they never see is the same as no warning.
+	// discovery pass first, and prints whatever that pass could not act on.
 	if contenoxDir, dirErr := ResolveContenoxDir(cmd); dirErr == nil {
 		printSyncProblems(cmd.ErrOrStderr(), discoverChainAgentsReporting(dbCtx, agents, contenoxDir, libtracker.NoopTracker{}, DiscoverDeps{Store: runtimetypes.New(db.WithoutTransaction())}))
 	}

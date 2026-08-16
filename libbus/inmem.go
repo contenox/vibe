@@ -8,15 +8,12 @@ import (
 	"sync/atomic"
 )
 
-// inmemStreamBuffer mirrors the 1024-slot NATS ChanSubscribe buffer, so this
-// test/single-process stand-in reproduces NATS's drop-under-backpressure
-// policy rather than hiding the bugs that policy is meant to surface.
+// Mirrors the 1024-slot NATS ChanSubscribe buffer, reproducing its
+// drop-under-backpressure policy.
 const inmemStreamBuffer = 1024
 
-// InMem is an in-memory Messenger for single-process use: no NATS, no
-// network. It intentionally reproduces the NATS backend's observable
-// contract (at-most-once delivery, Request failing immediately with no
-// handler registered) — see the Messenger interface docs for the full matrix.
+// InMem is an in-memory Messenger for single-process use. It reproduces the NATS
+// backend's observable contract.
 type InMem struct {
 	mu       sync.RWMutex
 	closed   bool
@@ -25,22 +22,20 @@ type InMem struct {
 }
 
 // inmemSubscription owns a per-subscriber queue and the goroutine draining it
-// into the caller's channel, decoupling Publish from a slow consumer — without
-// it, Publish would block in-line and a stuck consumer could deadlock itself.
+// into the caller's channel, decoupling Publish from a slow consumer.
 type inmemSubscription struct {
 	subject string
 	ch      chan<- []byte
 	inmem   *InMem
 	queue   chan []byte
 	done    chan struct{}
-	// exited is closed by deliver when it returns, so Unsubscribe can promise
-	// that no goroutine will touch the caller's channel once it has returned.
+	// exited is closed by deliver when it returns.
 	exited  chan struct{}
 	once    sync.Once
 	dropped atomic.Uint64
 }
 
-// NewInMem returns a new in-memory Messenger. Use for local single-process mode (no NATS).
+// NewInMem returns a new in-memory Messenger.
 func NewInMem() *InMem {
 	return &InMem{
 		streams:  make(map[string][]*inmemSubscription),
@@ -48,12 +43,10 @@ func NewInMem() *InMem {
 	}
 }
 
-// Publish hands the message to every Stream subscriber's queue and returns.
-// It never blocks on a consumer: a full queue drops the message (see
-// inmemStreamBuffer) so that a wedged subscriber cannot take the publisher with it.
+// Publish hands the message to every Stream subscriber's queue and returns. It
+// never blocks on a consumer; a full queue drops the message.
 func (p *InMem) Publish(ctx context.Context, subject string, data []byte) error {
-	// Checked up-front so a cancelled context fails even when nobody is
-	// subscribed — the NATS backend behaves the same way.
+	// Checked up-front so a cancelled context fails even when nobody is subscribed.
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -63,7 +56,6 @@ func (p *InMem) Publish(ctx context.Context, subject string, data []byte) error 
 		p.mu.RUnlock()
 		return ErrConnectionClosed
 	}
-	// Copy subscriber list so we don't hold the lock while dispatching.
 	subs := make([]*inmemSubscription, len(p.streams[subject]))
 	copy(subs, p.streams[subject])
 	p.mu.RUnlock()
@@ -74,8 +66,7 @@ func (p *InMem) Publish(ctx context.Context, subject string, data []byte) error 
 	return nil
 }
 
-// enqueue is the non-blocking hand-off. Drops are logged once per subscription so
-// data loss is visible; silently discarding would make backpressure undebuggable.
+// enqueue is the non-blocking hand-off; drops are logged once per subscription.
 func (s *inmemSubscription) enqueue(data []byte) {
 	select {
 	case s.queue <- data:
@@ -90,8 +81,6 @@ func (s *inmemSubscription) enqueue(data []byte) {
 
 // Stream creates a subscription to a subject; messages are delivered to ch.
 func (p *InMem) Stream(ctx context.Context, subject string, ch chan<- []byte) (Subscription, error) {
-	// An already-cancelled context must not yield a live subscription; the NATS
-	// backend rejects this case too, so callers can rely on it uniformly.
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -120,8 +109,6 @@ func (p *InMem) Stream(ctx context.Context, subject string, ch chan<- []byte) (S
 		case <-ctx.Done():
 			_ = sub.Unsubscribe()
 		case <-sub.done:
-			// Already unsubscribed; stop watching so this goroutine cannot
-			// outlive the subscription when ctx is long-lived.
 		}
 	}()
 
@@ -129,8 +116,6 @@ func (p *InMem) Stream(ctx context.Context, subject string, ch chan<- []byte) (S
 }
 
 // deliver drains the queue into the caller's channel until the subscription ends.
-// Closing exited on the way out is what makes Unsubscribe's no-more-sends
-// guarantee real (see Unsubscribe).
 func (s *inmemSubscription) deliver() {
 	defer close(s.exited)
 	for {
@@ -148,8 +133,7 @@ func (s *inmemSubscription) deliver() {
 }
 
 // Request invokes the Serve handler registered for the subject, in the caller's
-// goroutine. Like the NATS backend it does NOT wait for a handler to appear: a
-// missing handler fails immediately rather than after the context deadline.
+// goroutine. A missing handler fails immediately rather than at the deadline.
 func (p *InMem) Request(ctx context.Context, subject string, data []byte) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -168,20 +152,17 @@ func (p *InMem) Request(ctx context.Context, subject string, data []byte) ([]byt
 	}
 
 	reply, err := handler(ctx, data)
-	// A cancelled caller must not see success regardless of what the handler
-	// returned; other backends surface this from the transport, but the
-	// handler runs in-process here, so the check must be explicit.
+	// The handler runs in-process here, so the cancellation check is explicit.
 	if cerr := ctx.Err(); cerr != nil {
 		return nil, cerr
 	}
 	if err != nil {
-		// A handler error is a reply, not a transport failure, matching NATS/SQLite.
 		return fmt.Appendf(nil, "error: %s", err.Error()), nil
 	}
 	return reply, nil
 }
 
-// Serve registers a handler for the subject. Request calls will invoke this handler.
+// Serve registers a handler for the subject.
 func (p *InMem) Serve(ctx context.Context, subject string, handler Handler) (Subscription, error) {
 	p.mu.Lock()
 	if p.closed {
@@ -191,7 +172,6 @@ func (p *InMem) Serve(ctx context.Context, subject string, handler Handler) (Sub
 	p.handlers[subject] = handler
 	p.mu.Unlock()
 
-	// Subscription that unregisters the handler on Unsubscribe
 	sub := &inmemServeSubscription{subject: subject, inmem: p}
 	go func() {
 		<-ctx.Done()
@@ -213,7 +193,6 @@ func (p *InMem) Close() error {
 	p.handlers = make(map[string]Handler)
 	p.mu.Unlock()
 
-	// Stop delivery goroutines outside the lock; stop() re-takes it via Unsubscribe.
 	for _, sub := range subs {
 		sub.stop()
 	}
@@ -231,9 +210,7 @@ func (s *inmemSubscription) Unsubscribe() error {
 	}
 	s.inmem.mu.Unlock()
 	s.stop()
-	// Wait for deliver to actually exit, not just be signalled: callers
-	// routinely close(ch) right after Unsubscribe, and a still-sending deliver
-	// would panic on a closed channel. The SQLite backend's Stream waits too.
+	// Wait for deliver to exit: callers routinely close(ch) right after this.
 	<-s.exited
 	return nil
 }

@@ -85,7 +85,7 @@ type LocalFSTools struct {
 
 }
 
-// Option customises a LocalFSTools instance.
+// FSOption customises a LocalFSTools instance.
 type FSOption func(*LocalFSTools)
 
 // WithSQLDialect selects the placeholder style for the read-tracking table;
@@ -207,8 +207,8 @@ func (h *LocalFSTools) baseDir(ctx context.Context) (string, error) {
 			if cwd := h.resolveCwd(ctx); cwd != "" {
 				return filepath.Clean(filepath.Join(cwd, cleaned)), nil
 			}
-			// Must not fall through to OS path resolution: that would silently
-			// scope calls to this process's cwd rather than refusing outright.
+			// Falling through to OS path resolution would silently scope calls to
+			// this process's cwd.
 			return "", fmt.Errorf(
 				"local_fs: tools_policies.local_fs._allowed_dir %q is relative but no session workspace root could be resolved to anchor it "+
 					"(this run has no live cwd resolver and its checkpoint carries no restored workspace root); "+
@@ -423,8 +423,7 @@ func (h *LocalFSTools) readFile(ctx context.Context, args map[string]any) (any, 
 	if err != nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("local_fs: failed to read file: %w", err)
 	}
-	// Belt and braces: a file whose first 512 bytes are ASCII but whose body is
-	// not still should not reach the transcript.
+	// A file whose first 512 bytes are ASCII but whose body is not.
 	if isBinarySample(sniffPrefix(content)) {
 		return nil, taskengine.DataTypeAny, recoverablef(
 			"local_fs: read_file: refusing to read %s: binary file (%s). Use shell tools for binaries.",
@@ -445,8 +444,7 @@ func (h *LocalFSTools) readFile(ctx context.Context, args map[string]any) (any, 
 
 	out := string(content)
 	if !unlimitedOut && int64(len(out)) > outLimit {
-		// A truncated read has not seen the whole file and must not authorize
-		// a blind overwrite, so only a range read is recorded here.
+		// A truncated read must not authorize a blind overwrite.
 		head, lastLine, nextLine, _ := streamRange(bytes.NewReader(content), 1, math.MaxInt, outLimit)
 		total := countTextLines(out)
 		h.recordRangeRead(ctx, absPath, content)
@@ -515,8 +513,7 @@ func (h *LocalFSTools) readFileRange(ctx context.Context, args map[string]any) (
 	h.recordRangeRead(ctx, absPath, content)
 
 	if budget > 0 && int64(len(out)) > budget {
-		// streamRange here is fed the extracted range from line 1, so its
-		// numbers must be rebased onto `start`.
+		// Fed the extracted range from line 1, so the numbers rebase onto start.
 		head, lastLine, nextLine, _ := streamRange(bytes.NewReader([]byte(out)), 1, math.MaxInt, budget)
 		absNext := start + nextLine - 1
 		notice := fmt.Sprintf(
@@ -604,8 +601,7 @@ func (h *LocalFSTools) writeFile(ctx context.Context, args map[string]any) (any,
 		return nil, taskengine.DataTypeAny, fmt.Errorf("local_fs: failed to create directories: %w", err)
 	}
 
-	// Re-hash immediately before overwriting to close the validate-then-write
-	// race as far as a single process can.
+	// Re-hash immediately before overwriting to narrow the validate-then-write race.
 	if gate.exists && gate.verified && !h.readTrackingDisabled(ctx) {
 		if unchanged, _ := h.confirmUnchanged(ctx, absPath, gate.hash); !unchanged {
 			h.invalidateReads(ctx, absPath)
@@ -830,8 +826,7 @@ func (h *LocalFSTools) sed(ctx context.Context, args map[string]any) (any, taske
 		return msg, taskengine.DataTypeString, nil
 	}
 
-	// Ambiguous matches are refused rather than guessed at: an explicit
-	// all=true or expect_replacements=N is required for a wide edit.
+	// Ambiguous matches are refused: a wide edit needs all=true or expect_replacements=N.
 	switch {
 	case hasExpected && count != expected:
 		at := occurrenceLines(window, pattern, scopeStart-1, 5)

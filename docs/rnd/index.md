@@ -8,6 +8,7 @@ description: The contenox Lab — research built, shipped, and run for real. The
 Research, built for real. Every line here was shipped and run — each one feeds the runtime, the envelope model, and the harness you use today.
 
 - **[The event plane](/docs/rnd/event-plane/)** — the consumer side of a durable event log extracted into the importable `libevents` — cursors, primary-key firing claims, stale-claim takeover — with operator-authored triggers firing task chains on durable events under human-in-the-loop envelopes.
+- **[Event-driven chains: three stories](/docs/rnd/event-driven-chains/)** — the trigger tier in use: a phone buzz when a mission asks for a human, a completion summary written when a mission ends, and the firing record that makes both inspectable.
 - **[Beam: the web UI](/docs/rnd/beam-web/)** — a full React admin + chat SPA served straight out of the `contenox` binary, with a diff-backed approval gate and a live workspace file tree.
 - **[Beam Desktop: the client as a peer](/docs/rnd/beam-desktop/)** — an Electron shell that deleted HTTP from the loading path, spawned the runtime as a child process, and carried both ACP and a private editor method family over one NDJSON pipe.
 - **[modeld](/docs/rnd/modeld/)** — a cross-backend local inference daemon with a live-hardware capacity planner, lease-based multi-client ownership, and llama.cpp/OpenVINO backends behind one gRPC contract.

@@ -13,7 +13,6 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// CreateBackend inserts a new LLM backend configuration into the database.
 func (s *store) CreateBackend(ctx context.Context, backend *Backend) error {
 	now := time.Now().UTC()
 	backend.CreatedAt = now
@@ -35,7 +34,6 @@ func (s *store) CreateBackend(ctx context.Context, backend *Backend) error {
 	return err
 }
 
-// GetBackend retrieves an LLM backend configuration by its unique ID.
 func (s *store) GetBackend(ctx context.Context, id string) (*Backend, error) {
 	var backend Backend
 	err := s.Exec.QueryRowContext(ctx, `
@@ -58,7 +56,6 @@ func (s *store) GetBackend(ctx context.Context, id string) (*Backend, error) {
 	return &backend, err
 }
 
-// UpdateBackend modifies an existing LLM backend configuration.
 func (s *store) UpdateBackend(ctx context.Context, backend *Backend) error {
 	backend.UpdatedAt = time.Now().UTC()
 
@@ -83,7 +80,6 @@ func (s *store) UpdateBackend(ctx context.Context, backend *Backend) error {
 	return checkRowsAffected(result)
 }
 
-// DeleteBackend removes an LLM backend configuration by its ID.
 func (s *store) DeleteBackend(ctx context.Context, id string) error {
 	result, err := s.Exec.ExecContext(ctx, `
 		DELETE FROM llm_backends
@@ -98,7 +94,6 @@ func (s *store) DeleteBackend(ctx context.Context, id string) error {
 	return checkRowsAffected(result)
 }
 
-// ListAllBackends returns all configured LLM backends ordered by creation date descending.
 func (s *store) ListAllBackends(ctx context.Context) ([]*Backend, error) {
 	rows, err := s.Exec.QueryContext(ctx, `
         SELECT id, name, base_url, type, created_at, updated_at
@@ -133,7 +128,6 @@ func (s *store) ListAllBackends(ctx context.Context) ([]*Backend, error) {
 	return backends, nil
 }
 
-// ListBackends returns a paginated list of LLM backends created before the cursor.
 func (s *store) ListBackends(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*Backend, error) {
 	cursor := time.Now().UTC()
 	if createdAtCursor != nil {
@@ -177,7 +171,6 @@ func (s *store) ListBackends(ctx context.Context, createdAtCursor *time.Time, li
 	return backends, nil
 }
 
-// GetBackendByName fetches an LLM backend configuration by its unique name.
 func (s *store) GetBackendByName(ctx context.Context, name string) (*Backend, error) {
 	var backend Backend
 	err := s.Exec.QueryRowContext(ctx, `
@@ -211,7 +204,6 @@ func checkRowsAffected(result sql.Result) error {
 	return nil
 }
 
-// EstimateBackendCount estimates the total number of backend records.
 func (s *store) EstimateBackendCount(ctx context.Context) (int64, error) {
 	return s.estimateCount(ctx, "llm_backends")
 }

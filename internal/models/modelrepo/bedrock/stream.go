@@ -13,10 +13,6 @@ import (
 
 type bedrockStreamClient struct{ bedrockClient }
 
-// Stream implements modelrepo.LLMStreamClient via Bedrock ConverseStream. The
-// SDK decodes the binary event stream into a typed event union;
-// relayConverseEvents maps it onto modelrepo.StreamParcel deltas. Assembly
-// belongs to the engine-side modelrepo.StreamAssembler.
 func (c *bedrockStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
 	in, toOriginal, err := buildConverseInput(c.modelName, messages, chatConfigFromArgs(args), c.maxOutputTokens)
 	if err != nil {
@@ -61,15 +57,6 @@ func (c *bedrockStreamClient) Stream(ctx context.Context, messages []modelrepo.M
 	return parcels, nil
 }
 
-// relayConverseEvents translates the ConverseStream event union into
-// raw-delta parcels: text/reasoning deltas, tool-call fragments (toolUse
-// start carries id+name, deltas carry argument-JSON fragments), and a
-// terminal parcel from messageStop + metadata usage. toOriginal maps
-// sanitized tool names back to the caller's originals. Returns the parcel
-// count sent; the caller owns error reporting for the underlying stream.
-//
-// Bedrock indexes content blocks per message, so ContentBlockIndex groups a
-// call's toolUse fragments exactly as ToolCallDelta.Index requires.
 func relayConverseEvents(ctx context.Context, events <-chan types.ConverseStreamOutput, toOriginal map[string]string, parcels chan<- *modelrepo.StreamParcel) int {
 	send := func(p *modelrepo.StreamParcel) bool {
 		select {

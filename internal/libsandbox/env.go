@@ -25,7 +25,8 @@ func scrubEnv(parentEnv []string, allow []string, set map[string]string, home st
 	for k, v := range set {
 		out[k] = v
 	}
-	// PATH is forced to canonicalPATH unless the caller overrides it via EnvSet (validated against carve-outs); HOME is always forced and never overridable.
+	// PATH is forced to canonicalPATH unless overridden via EnvSet; HOME is
+	// always forced and never overridable.
 	if _, ok := set["PATH"]; !ok {
 		out["PATH"] = canonicalPATH()
 	}

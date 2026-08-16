@@ -11,9 +11,7 @@ import (
 
 // TestLoopback_NewAndSessionsCommands_WorkWithoutASessionUI pins the core half
 // of session management: an editor with no session UI of its own can start a
-// second session and see the roster, both over an ordinary prompt. /new
-// reports the id the client must session/load — ACP has no agent→client switch
-// — and /sessions marks which one the client is on.
+// second session and see the roster, both over an ordinary prompt.
 func TestLoopback_NewAndSessionsCommands_WorkWithoutASessionUI(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()

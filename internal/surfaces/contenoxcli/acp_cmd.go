@@ -100,15 +100,8 @@ type acpProfile struct {
 	chainEnv     string
 	embedFleet   bool
 	seedFIMChain func(contenoxDir string) error
-	// host runs a long-lived host instead of an ACP connection over stdio:
-	// the same runtime, the same relay tunnel, but nothing reading stdin. It
-	// is a field on the profile rather than a separate bootstrap because the
-	// two differ only in what happens once the transport factory exists —
-	// duplicating three hundred lines of setup to change the last twenty is
-	// how the two drift apart.
+	// host runs a long-lived host instead of an ACP connection over stdio.
 	host bool
-	// name labels the startup operation in the logs, so a serve host's
-	// startup is not reported as an editor session's.
 	name string
 }
 
@@ -121,9 +114,7 @@ var acpProfileACP = acpProfile{
 	name:         "acp",
 }
 
-// acpProfileServe is the editor profile with the stdio connection removed: a
-// host that keeps this machine reachable through the relay so the app can
-// attach to it without an editor running.
+// acpProfileServe is the editor profile with the stdio connection removed.
 var acpProfileServe = acpProfile{
 	hitlPolicy:   "hitl-policy-acp.json",
 	chainFile:    chainAgentACPFilename,
@@ -187,15 +178,12 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 
 	workspaceFlag, _ := cmd.Flags().GetString("workspace-id")
 
-	// A host owns the terminal to draw a status screen on, so its structured
-	// logs go to a rotating file instead of over the top of it. An editor
-	// session keeps stderr, which is where its client reads diagnostics from.
+	// A host draws a status screen on the terminal, so its logs go to a file.
 	logDest := io.Writer(os.Stderr)
 	var serveLog *liblog.Writer
 	if profile.host {
 		rot, logErr := openHostLog(cmd)
 		if logErr != nil {
-			// A host that cannot write its log still serves; it just says so.
 			fmt.Fprintf(os.Stderr, "contenox serve: logging to a file is unavailable, using stderr: %v\n", logErr)
 		} else {
 			serveLog = rot
@@ -224,9 +212,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	defer db.Close()
 	reportChange("phase", "open_db")
 
-	// The host log booted on defaults because it had to exist before the
-	// database did; now that config is readable, move it onto the operator's
-	// bounds. Anything unset stays on the default it started with.
+	// The host log booted on defaults before the database was readable.
 	if serveLog != nil {
 		applyStoredLogSettings(ctx, runtimetypes.New(db.WithoutTransaction()), serveLog)
 		reportChange("phase", "apply_log_settings")
@@ -259,15 +245,12 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	defer closeLogs()
 	reportChange("phase", "setup_telemetry")
 
-	// transport is this process's own connection, when it has one: the stdio
-	// client an editor drives. A host has none, and every session it serves
-	// arrives over the relay instead.
+	// transport is this process's own stdio connection; a host has none, and
+	// every session it serves arrives over the relay instead.
 	var transport *acpsvc.Transport
 
-	// One registry for every connection: without it, an approval raised by
-	// remote work would be answered on the local desk instead, and a tool call
-	// in a relay-attached session would look for a connection this process may
-	// not have. Built here because the toolset below resolves through it.
+	// One registry for every connection, so an approval raised by remote work is
+	// answered on the connection that drives the session.
 	sessionRouter := acpsvc.NewSessionRouter()
 
 	if acpsvc.ReadConfigValue(ctx, db, "default-model") == "" &&
@@ -306,7 +289,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	end()
 	fimChains := loadOptionalFIMChain(ctx, tracker, profile)
 
-	// Shared bus: the engine doesn't own it, so this defer closes it.
+	// The engine doesn't own the bus, so this defer closes it.
 	bus := libbus.NewSQLite(db.WithoutTransaction())
 	defer bus.Close()
 	trigHook := eventlog.NewTriggerHolder()
@@ -317,8 +300,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	// /policy and `contenox config set hitl-policy-name` both write this workspace's row; the evaluator must read the same one.
 	hitlservice.SetWorkspaceID(acpHITL, workspaceID)
 
-	// Declared here, assigned once the fleet is built below: the toolset's
-	// subagent-start tool resolves it per call, so the ordering holds.
+	// Assigned once the fleet is built below; the toolset resolves it per call.
 	var inProcessFleet fleetservice.Service
 
 	tools := acpToolset(db, tracker, workspaceID,
@@ -328,10 +310,8 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 
 	oracleStore := runtimetypes.New(db.WithoutTransaction())
 	oracleCfg := resolveOracleConfig(ctx, oracleStore, cmd)
-	// A dispatched unit does not adjudicate. Its own gated calls are ruled on by
-	// the host that fired it, which holds the mission envelope; mounting a second
-	// oracle here makes two models judge one ask, doubling spend and leaving the
-	// winner to a race — the same reason a unit embeds no fleet.
+	// A dispatched unit does not adjudicate: the host that fired it holds the
+	// mission envelope and rules on its gated calls.
 	if strings.TrimSpace(os.Getenv(profile.chainEnv)) != "" {
 		oracleCfg.chain = ""
 	}
@@ -390,7 +370,6 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		if err != nil {
 			return fmt.Errorf("build engine: %w", err)
 		}
-		// Needs the engine's chat path, which now exists (same post-construction ordering as engine.go).
 		defer engine.Stop()
 		// A verdict landing with no waiter parked resumes the suspended run here.
 		hitlservice.SetResumeHook(acpHITL, agentservice.ResumeHook(agentservice.Deps{
@@ -416,7 +395,6 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			})
 			fmt.Fprintln(os.Stderr, oracleMountedLine(oracleCfg))
 		}
-		// Live in-process trigger dispatch on this host's appends (beta; nil when no triggers load).
 		trigHook.Set(buildInProcessTriggerHook(ctx, db, contenoxDir, workspaceID, engine, triggerOpts, os.Stderr))
 		// Deferred AFTER engine.Stop so LIFO drains in-flight firings before teardown.
 		defer trigHook.Drain(eventlog.DefaultDrainTimeout)
@@ -426,7 +404,8 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 
 	presenceStore := presence.NewStore(libkvstore.NewSQLiteManager(db))
 
-	// embedFleet gates the mission fleet to the editor profile; a dispatched unit must not host its own fleet or it would double-route its report and recursively spawn fleets.
+	// A dispatched unit must not host its own fleet: it would double-route its
+	// report and recursively spawn fleets.
 	var (
 		missionFleet      acpsvc.MissionDispatcher
 		missionAgents     acpsvc.MissionAgentResolver
@@ -441,39 +420,34 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			Bus:      bus,
 			Missions: missions,
 			Tracker:  tracker,
-			// Late-binds this connection's live Transport (nil until the conn factory runs below).
+			// Late-bound: nil until the conn factory runs below.
 			Transport:    func() *acpsvc.Transport { return transport },
 			HITL:         acpHITL,
 			PolicySource: hitlPolicySource(contenoxDir),
 			DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
 				discoverChainAgents(dctx, agents, contenoxDir, tracker, DiscoverDeps{Store: runtimetypes.New(db.WithoutTransaction()), Bus: bus})
 			},
-			// The workspace missionPub stamps; a dispatched unit's own publisher must stamp the same one.
 			WorkspaceID: workspaceID,
-			// The database this host resolved; a dispatched unit must write its reports into the same one.
-			DBPath: dbPath,
+			DBPath:      dbPath,
 		})
 		if buildErr != nil {
 			return buildErr
 		}
 		missionFleet, missionAgents, stopFleetTeardown = fleet, agents, stop
-		// Late-bound for the toolset's subagent-start tool (see acpToolset).
 		inProcessFleet = fleet
 	}
 	if stopFleetTeardown != nil {
-		// Children die with the parent: stops the report router and kills every dispatched child subprocess.
+		// Children die with the parent.
 		defer stopFleetTeardown()
 	}
 
-	// Default root for a client that proposes no workspace; also bounds every relay attachment.
 	launchDir, err := os.Getwd()
 	if err != nil {
 		reportErr(err)
 		return fmt.Errorf("resolve working directory: %w", err)
 	}
 	// A host serves where it was told to, not where it happened to be started
-	// from: this is the root the screen names AND the first entry in the
-	// workspace allowlist, so the two cannot disagree about what is reachable.
+	// from. This root is both what the screen names and the first allowlist entry.
 	defaultRoot := launchDir
 	if profile.host {
 		defaultRoot = defaultHostRoot(cmd, launchDir)
@@ -485,32 +459,28 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	}
 
 	transportFactory := acpsvc.New(acpsvc.Deps{
-		Engine:             engine,
-		DB:                 db,
-		WorkspaceRoots:     workspaceRoots,
-		ChainRegistry:      chains,
-		FIMChainRegistry:   fimChains,
-		DefaultModel:       defaultModel,
-		DefaultProvider:    defaultProvider,
-		DefaultAltModel:    defaultAltModel,
-		DefaultAltProvider: defaultAltProvider,
-		DefaultMaxTokens:   defaultMaxTokens,
-		DefaultThink:       defaultThink,
-		WorkspaceID:        workspaceID,
-		ContenoxDir:        contenoxDir,
-		// Every transport this factory builds registers here, so an approval goes to the connection driving the session.
+		Engine:                engine,
+		DB:                    db,
+		WorkspaceRoots:        workspaceRoots,
+		ChainRegistry:         chains,
+		FIMChainRegistry:      fimChains,
+		DefaultModel:          defaultModel,
+		DefaultProvider:       defaultProvider,
+		DefaultAltModel:       defaultAltModel,
+		DefaultAltProvider:    defaultAltProvider,
+		DefaultMaxTokens:      defaultMaxTokens,
+		DefaultThink:          defaultThink,
+		WorkspaceID:           workspaceID,
+		ContenoxDir:           contenoxDir,
 		SessionRouter:         sessionRouter,
 		KnownPolicies:         embeddedPolicyNames(),
 		HITLDefaultPolicyName: profile.hitlPolicy,
 		UpdateBanner:          updateBanner,
-		// Nil-safe throughout acpsvc when unwired (acpx, a dispatched unit, or a setup-only editor).
-		Fleet:  missionFleet,
-		Agents: missionAgents,
-		// Same values the mission toolset uses, so the command and the tool cannot disagree about who owns an ask.
-		Asks: acpHITL,
-		// Read from the same search path the unit's policy loader reads.
-		MissionEnvelopes: newMissionEnvelopes(contenoxDir),
-		OptInBeta:        optInBeta,
+		Fleet:                 missionFleet,
+		Agents:                missionAgents,
+		Asks:                  acpHITL,
+		MissionEnvelopes:      newMissionEnvelopes(contenoxDir),
+		OptInBeta:             optInBeta,
 		EnvSetup: &acpsvc.EnvSetupSpec{
 			Vars: acpEnvSetupVars(),
 			Complete: func(cctx context.Context) error {
@@ -523,7 +493,6 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		buildRelayChainTriggers(db, contenoxDir, workspaceID, engine, triggerOpts), tracker, os.Stderr)
 	defer stopRelay()
 
-	// Best-effort: never blocks or fails serving.
 	acpCwd, _ := os.Getwd()
 	presenceKind := presence.KindACP
 	if profile.host {
@@ -535,8 +504,8 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	})
 	defer presenceReporter.Stop()
 
-	// A host has no stdin to serve ACP over: the relay tunnel above is its
-	// only inbound path, so it draws its screen and waits to be stopped.
+	// A host has no stdin to serve ACP over; the relay tunnel is its only
+	// inbound path.
 	if profile.host {
 		return runHost(ctx, cmd, hostScreen{
 			contenoxDir:  contenoxDir,
@@ -567,10 +536,8 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	return nil
 }
 
-// acpPolicySource is the same search path every other host uses, which is what
-// puts .generated on it: a declared agent's emitted envelope lives there, and a
-// source that could not read it would silently evaluate the agent under the
-// built-in default instead of the envelope it was given.
+// acpPolicySource is the same search path every other host uses, including
+// .generated, where a declared agent's emitted envelope lives.
 func acpPolicySource(contenoxDir string) hitlservice.PolicySource {
 	if contenoxDir == "" {
 		home, err := os.UserHomeDir()

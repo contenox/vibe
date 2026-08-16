@@ -27,9 +27,6 @@ func missionToolSchemas() []missionToolSchema {
 	}
 }
 
-// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract:
-// one request/response pair per declared tool, plus the shape of the document
-// mission_list returns as text.
 func (p *provider) GetSchemasForSupportedTools(context.Context) (map[string]*openapi3.T, error) {
 	declared := missionToolSchemas()
 	schemas := make(map[string]*openapi3.SchemaRef, 2*len(declared)+1)

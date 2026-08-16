@@ -14,9 +14,7 @@ import (
 	libdb "github.com/contenox/contenox/libdbexec"
 )
 
-// Environment variables of the non-interactive ACP setup route: process-level
-// config overrides on every `acp`/`acpx` launch, and the ACP env_var auth
-// method's contract that a client relaunches the agent with set.
+// Environment variables of the non-interactive ACP setup route.
 const (
 	envDefaultModel       = "CONTENOX_DEFAULT_MODEL"
 	envDefaultProvider    = "CONTENOX_DEFAULT_PROVIDER"
@@ -25,13 +23,12 @@ const (
 	envDefaultMaxTokens   = "CONTENOX_DEFAULT_MAX_TOKENS"
 	envDefaultThink       = "CONTENOX_DEFAULT_THINK"
 	// envBaseURL supplies the endpoint URL for account-specific providers whose
-	// URL cannot be defaulted (currently vertex-google: project + region).
+	// URL cannot be defaulted.
 	envBaseURL = "CONTENOX_BASE_URL"
 )
 
 // configValueWithEnv reads a global config value with environment-first
-// precedence: a set env var overrides the stored config for this process
-// without persisting anything.
+// precedence, without persisting anything.
 func configValueWithEnv(ctx context.Context, db libdb.DBManager, key, envKey string) string {
 	if v := strings.TrimSpace(os.Getenv(envKey)); v != "" {
 		return v
@@ -40,7 +37,7 @@ func configValueWithEnv(ctx context.Context, db libdb.DBManager, key, envKey str
 }
 
 // acpEnvSetupVars is the variable list advertised via the ACP env_var auth
-// method: which environment the client should collect to configure contenox.
+// method.
 func acpEnvSetupVars() []libacp.AuthEnvVar {
 	notSecret := false
 	providerKeys := setupProviderKeys()
@@ -53,15 +50,12 @@ func acpEnvSetupVars() []libacp.AuthEnvVar {
 			vars = append(vars, libacp.AuthEnvVar{Name: sp.envKey, Label: sp.label + " API key", Optional: true})
 		}
 	}
-	// envBaseURL is honored by completeEnvSetup but intentionally not advertised
-	// here; acpEnvSetupVars keeps a fixed shape guarded by a test.
+	// envBaseURL is honored by completeEnvSetup but not advertised here.
 	return vars
 }
 
 // completeEnvSetup performs the setup wizard's effects non-interactively from
-// the environment, registering the provider backend and persisting
-// default-provider/default-model. Errors name the missing variable so an ACP
-// client can show an actionable message.
+// the environment. Errors name the missing variable.
 func completeEnvSetup(ctx context.Context, db libdb.DBManager) error {
 	provider := strings.ToLower(strings.TrimSpace(os.Getenv(envDefaultProvider)))
 	model := strings.TrimSpace(os.Getenv(envDefaultModel))
@@ -122,8 +116,8 @@ func completeEnvSetup(ctx context.Context, db libdb.DBManager) error {
 	return nil
 }
 
-// backendExists reports whether a backend of the given provider type is
-// already registered (its stored API key then suffices).
+// backendExists reports whether a backend of the given provider type is already
+// registered.
 func backendExists(ctx context.Context, db libdb.DBManager, providerType string) bool {
 	svc := backendservice.New(db)
 	backends, err := svc.List(ctx, nil, 100)

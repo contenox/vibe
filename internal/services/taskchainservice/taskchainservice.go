@@ -52,9 +52,8 @@ func validateChain(chain *taskengine.TaskChainDefinition) error {
 	if len(chain.Tasks) == 0 {
 		return fmt.Errorf("task chain must contain at least one task")
 	}
-	// The full load-time linter gates both writes and reads: a chain that
-	// cannot execute is refused where the author can fix it, and stays
-	// refused until repaired instead of failing mid-run.
+	// The full load-time linter gates both writes and reads, so a chain that
+	// cannot execute is refused rather than failing mid-run.
 	return taskengine.LintChain(chain)
 }
 
@@ -80,9 +79,8 @@ func (s *localStore) Get(ctx context.Context, ref string) (*taskengine.TaskChain
 			continue
 		}
 		if chain.ID == ref {
-			// The id resolves to this file, so a lint failure must surface as
-			// "found but refused" with the reason — not roll on to NotFound,
-			// which would teach the operator the wrong lesson entirely.
+			// The id resolves to this file, so a lint failure surfaces as "found but
+			// refused" rather than rolling on to NotFound.
 			if lintErr := taskengine.LintChain(chain); lintErr != nil {
 				return nil, disabledChainError(path, lintErr)
 			}
@@ -92,9 +90,6 @@ func (s *localStore) Get(ctx context.Context, ref string) (*taskengine.TaskChain
 	return nil, fmt.Errorf("task chain %q: %w", ref, libdb.ErrNotFound)
 }
 
-// disabledChainError is the sticky read-side refusal: the file parses but
-// the linter proves it cannot execute, wrapping taskengine.ErrChainLint so
-// callers can tell "invalid" from "missing".
 func disabledChainError(path string, lintErr error) error {
 	return fmt.Errorf("task chain file %q is disabled until it is fixed: %w", path, lintErr)
 }

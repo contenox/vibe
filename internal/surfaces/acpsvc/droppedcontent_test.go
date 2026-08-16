@@ -110,10 +110,7 @@ func TestUnit_NativeResultToResponse_DroppedContentSurvivesReattach(t *testing.T
 // TestLoopback_DroppedImage_ReachesTheClientOnTheWire is the regression for the
 // incident: a prompt whose image could not be forwarded produced a normal,
 // successful turn with the loss recorded only in the tracker, so a client with
-// a camera button got an answer written as if no photo had been sent. It drives
-// a lossy prompt through a real ACP wire and pins both halves of the report —
-// the envelope on the response and the agent message every editor renders —
-// against an intact prompt on the same session, which carries neither.
+// a camera button got an answer written as if no photo had been sent.
 func TestLoopback_DroppedImage_ReachesTheClientOnTheWire(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -160,8 +157,7 @@ func TestLoopback_DroppedImage_ReachesTheClientOnTheWire(t *testing.T) {
 
 // TestLoopback_SlashCommandDropsItsAttachment pins the command path, which
 // discards an image that decoded perfectly well — a slash command is a text
-// verb and has no use for it. The turn still succeeds; what changes is that the
-// client is now told.
+// verb and has no use for it.
 func TestLoopback_SlashCommandDropsItsAttachment(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()

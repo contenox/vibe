@@ -1,9 +1,6 @@
 // Package bedrock is a provider for AWS Bedrock via the unified Converse API.
-// Credentials are optional: a stored JSON blob of static AWS keys, or the
-// ambient aws-sdk default chain (env / profile / IAM role / IMDS) when empty.
-// The region is parsed from the backend `--url`. Unlike the other providers,
-// the wire format is the AWS SDK's typed API, not hand-rolled JSON; the
-// Bedrock-specific "codec" (converse.go) maps neutral types to SDK types.
+// Credentials are optional: a stored JSON blob of static AWS keys, or the ambient
+// aws-sdk default chain when empty. The region is parsed from the backend URL.
 package bedrock
 
 import (
@@ -26,10 +23,6 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-// classifyBedrockError maps the SDK's typed errors onto the modelrepo
-// sentinels: ThrottlingException → ErrRateLimited; ValidationException whose
-// message matches the documented "input is too long" phrasing →
-// ErrContextLengthExceeded. Anything else passes through unchanged.
 func classifyBedrockError(err error) error {
 	if err == nil {
 		return nil
@@ -45,9 +38,6 @@ func classifyBedrockError(err error) error {
 	return err
 }
 
-// bedrockBaseModelID strips a cross-region inference-profile geo prefix
-// (us. / eu. / apac. / jp. / global.) so capability checks see the vendor
-// model id regardless of how the model is invoked.
 func bedrockBaseModelID(modelID string) string {
 	for _, prefix := range []string{"us.", "eu.", "apac.", "jp.", "global."} {
 		if strings.HasPrefix(modelID, prefix) {
@@ -57,8 +47,6 @@ func bedrockBaseModelID(modelID string) string {
 	return modelID
 }
 
-// bedrockClient is the shared transport: a constructed SDK runtime client plus
-// the model id and tracker.
 type bedrockClient struct {
 	api             *bedrockruntime.Client
 	modelName       string
@@ -66,16 +54,12 @@ type bedrockClient struct {
 	tracker         libtracker.ActivityTracker
 }
 
-// staticCreds is the optional stored credential blob (mirrors vertex's stored
-// service-account JSON). Empty/absent → the ambient AWS default chain.
 type staticCreds struct {
 	AccessKeyID     string `json:"access_key_id"`
 	SecretAccessKey string `json:"secret_access_key"`
 	SessionToken    string `json:"session_token"`
 }
 
-// loadAWSConfig builds an aws.Config for the region, using the stored static
-// credentials when present and otherwise the default credential chain.
 func loadAWSConfig(ctx context.Context, region, credBlob string, httpClient *http.Client) (aws.Config, error) {
 	opts := []func(*awsconfig.LoadOptions) error{}
 	if region != "" {
@@ -95,9 +79,6 @@ func loadAWSConfig(ctx context.Context, region, credBlob string, httpClient *htt
 	return awsconfig.LoadDefaultConfig(ctx, opts...)
 }
 
-// regionFromURL parses the AWS region from a Bedrock runtime URL of the form
-// https://bedrock-runtime.<region>.amazonaws.com, or accepts a bare region
-// string.
 func regionFromURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -129,14 +110,10 @@ func chatConfigFromArgs(args []modelrepo.ChatArgument) *modelrepo.ChatConfig {
 	return cfg
 }
 
-// documentToJSONString renders a smithy document (tool_use input) to a JSON
-// string, matching the neutral ToolCall.Arguments contract.
 func documentToJSONString(doc document.Interface) string {
 	if doc == nil {
 		return "{}"
 	}
-	// MarshalSmithyDocument yields the JSON representation directly and round-trips
-	// for both wire-decoded documents and locally-built lazy documents.
 	b, err := doc.MarshalSmithyDocument()
 	if err != nil || len(b) == 0 {
 		return "{}"
@@ -144,8 +121,6 @@ func documentToJSONString(doc document.Interface) string {
 	return string(b)
 }
 
-// jsonStringToDocument parses a neutral ToolCall.Arguments JSON string into a
-// smithy document for a Converse tool_use block.
 func jsonStringToDocument(args string) document.Interface {
 	var v any
 	if strings.TrimSpace(args) == "" {

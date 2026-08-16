@@ -59,10 +59,8 @@ type openAIResponseInput struct {
 }
 
 type openAIResponse struct {
-	// Output carries the response items, including "reasoning" items whose
-	// summary parts are the actual reasoning content. The wire also has a
-	// top-level `reasoning` field, but it is a request-config echo and must
-	// never be read as reasoning output — deliberately not modeled here.
+	// The wire's top-level `reasoning` field is a request-config echo, not
+	// reasoning output, and is deliberately not modeled.
 	Output []openAIResponseOutputItem `json:"output"`
 	// Usage is reported on the completed response object, and therefore on
 	// the response.completed stream event.
@@ -81,9 +79,6 @@ type openAIResponse struct {
 	} `json:"incomplete_details"`
 }
 
-// openAIResponsesUsage is the Responses API usage report. input_tokens is the
-// total prompt count including cached tokens; the cached count is broken out
-// under input_tokens_details.cached_tokens.
 type openAIResponsesUsage struct {
 	InputTokens        int `json:"input_tokens"`
 	OutputTokens       int `json:"output_tokens"`
@@ -132,20 +127,12 @@ type openAIResponseContent struct {
 	Text string `json:"text"`
 }
 
-// openAIResponseInputContent is one element of a Responses input message's
-// content-parts array, used only when the message carries image attachments.
-// The Responses API names the parts input_text / input_image, and image_url is
-// a bare data-URI string (not the nested {url} object the Chat Completions API
-// uses).
 type openAIResponseInputContent struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
 	ImageURL string `json:"image_url,omitempty"`
 }
 
-// openAIResponsesImageContent renders a message's text plus its image
-// attachments as the Responses content-parts array: a leading input_text part
-// (when present) then one input_image part per image, in attachment order.
 func openAIResponsesImageContent(msg modelrepo.Message) []openAIResponseInputContent {
 	parts := make([]openAIResponseInputContent, 0, len(msg.Images)+1)
 	if msg.Content != "" {
@@ -271,8 +258,7 @@ func buildOpenAIResponsesRequestWithCapabilities(modelName string, messages []mo
 					Content: msg.Content,
 				})
 			}
-			// Each tool call becomes a function_call item so the model can
-			// correlate it with the following function_call_output items.
+			// One function_call item per call, correlated with the outputs that follow.
 			for _, tc := range msg.ToolCalls {
 				name := tc.Function.Name
 				if san, ok := origToSanitized[name]; ok && san != "" {
@@ -319,8 +305,6 @@ func buildOpenAIResponsesRequestWithCapabilities(modelName string, messages []mo
 	return req, nameMap
 }
 
-// responsesReasoningSummaryText collects the reasoning summaries from output
-// items of type "reasoning" (summary parts of type "summary_text").
 func responsesReasoningSummaryText(resp *openAIResponse) string {
 	if resp == nil {
 		return ""
@@ -420,9 +404,8 @@ func parseOpenAIResponsesResponseFromObject(nameMap map[string]string, response 
 		return modelrepo.ChatResult{}, fmt.Errorf("responses: empty output")
 	}
 
-	// A truncated response reports status "incomplete" with the reason in
-	// incomplete_details — surfaced verbatim as the finish reason so the
-	// engine can tell a truncated success from a complete one.
+	// A truncated response reports status "incomplete"; the reason is surfaced
+	// verbatim as the finish reason.
 	finishReason := ""
 	if resp.Status == "incomplete" && resp.IncompleteDetails != nil {
 		finishReason = resp.IncompleteDetails.Reason

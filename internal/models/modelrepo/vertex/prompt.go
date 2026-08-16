@@ -12,7 +12,6 @@ type vertexPromptClient struct {
 	vertexClient
 }
 
-// Prompt implements modelrepo.LLMPromptExecClient.
 func (c *vertexPromptClient) Prompt(ctx context.Context, systemInstruction string, temperature float32, prompt string) (string, *modelrepo.TokenUsage, error) {
 	reportErr, reportChange, end := c.tracker.Start(ctx, "prompt", "vertex", "model", c.modelName)
 	defer end()

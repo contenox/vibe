@@ -25,16 +25,10 @@ import (
 	libdb "github.com/contenox/contenox/libdbexec"
 )
 
-// sessionListTitleMaxLen bounds SessionInfo.Title derived from a session's
-// first user message, so a session picker never renders a multi-paragraph prompt.
 const sessionListTitleMaxLen = 60
 
-// acpClientIdentity is the message_indices identity every ACP session is
-// created under; the store reads that list sessions must filter by it.
 const acpClientIdentity = "acp-client"
 
-// truncateSessionListTitle collapses whitespace and clips to
-// sessionListTitleMaxLen runes, appending an ellipsis when it clips.
 func truncateSessionListTitle(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	runes := []rune(s)
@@ -145,27 +139,16 @@ func (t *Transport) LoadSession(ctx context.Context, req libacp.LoadSessionReque
 	t.bindContenoxSession(contenoxSessionID, req.SessionID)
 	t.sessionMu.Unlock()
 	t.persistSessionCwd(ctx, store, req.SessionID, sessionCwd)
-	// Re-flag an external session from its persisted agent name; the
-	// downstream process is lazily respawned on the next prompt, not here.
 	t.markExternalIfPersisted(ctx, store, req.SessionID, entry)
-	// A reloaded session that fired missions is still their supervisor.
 	entry.FiredMissions = t.readSessionFiredMission(ctx, store, req.SessionID)
-	// And a reloaded session that IS a mission still holds its mission tools.
 	t.restoreSessionMission(ctx, store, req.SessionID, entry)
 
 	t.clearToolCallState(req.SessionID)
-	// The flag reflects how tool messages were persisted: external stored each
-	// tool call as a self-contained ACP record, native stored assistant
-	// CallTools + tool-result text.
 	_, isExternal := entry.driver.(*externalDriver)
 	t.replayMessages(ctx, req.SessionID, messages, isExternal)
-	// Join an in-flight native turn as a viewer so the client resumes the
-	// live stream; ordered after the replay, which the journal never overlaps.
 	t.reattachNativeTurn(ctx, req.SessionID)
 	t.reofferParkedAsks(ctx, req.SessionID, contenoxSessionID)
-	// Emit the slash-command menu only after the session/load result is on
-	// the wire. External re-emits its downstream agent's persisted menu (the
-	// live bridge died with the pre-load connection).
+	// The menu goes out only after the session/load result is on the wire.
 	if _, isExternal := entry.driver.(*externalDriver); isExternal {
 		t.reemitExternalCommandMenu(ctx, store, req.SessionID)
 	} else if entry.driver.AvailableCommands() != nil {
@@ -191,14 +174,12 @@ func (t *Transport) replayMessages(ctx context.Context, sessionID libacp.Session
 	_, reportChange, end := t.tracker().Start(ctx, "replay", "acp_session", "session_id", string(sessionID), "message_count", len(messages))
 	defer end()
 
-	// A call's outcome lives only in its later result message, so status must
-	// be resolved in a pre-pass — otherwise every replayed tool_call shows
-	// "completed" regardless of what actually happened.
+	// A call's outcome lives only in its later result message, so status must be
+	// resolved in a pre-pass.
 	statuses := replayToolStatuses(messages, external)
 
 	var users, assistantText, toolCalls, toolResults, failedTools int
-	// One messageId per historical message: the spec groups replayed chunks by
-	// id, so thinking + text of one assistant turn render as one message.
+	// One messageId per historical message: the spec groups replayed chunks by id.
 	for i, m := range messages {
 		messageID := fmt.Sprintf("replay-%d", i)
 		switch m.Role {
@@ -243,8 +224,6 @@ func (t *Transport) replayMessages(ctx context.Context, sessionID libacp.Session
 				}
 			}
 		case "tool":
-			// External carries a self-contained ACP tool record; native is raw
-			// result text paired with the assistant's CallTools above.
 			update := toolCallUpdateFromResult(m)
 			if external {
 				if u, ok := externalToolReplayUpdate(m); ok {
@@ -266,17 +245,9 @@ func (t *Transport) replayMessages(ctx context.Context, sessionID libacp.Session
 		"failed_tools": failedTools,
 	})
 
-	// A loaded session must carry the used half too, or the gauge reads
-	// "0 of N used" over a full history until the next turn corrects it.
 	t.sendUsageUpdate(ctx, sessionID, estimateHistoryTokens(messages))
 }
 
-// replayToolStatuses maps each replayed tool call id to the terminal status
-// its persisted result records. External is exact (the stored ACP record
-// carries a status field); native is recovered from the two shapes the engine
-// writes for a failure — taskexec's "tool <name> execution failed: <err>"
-// string and toolErrorContent's single-key {"error": ...} object — which
-// couples to the engine's error-formatting and breaks silently if it changes.
 func replayToolStatuses(messages []taskengine.Message, external bool) map[string]libacp.ToolCallStatus {
 	out := make(map[string]libacp.ToolCallStatus)
 	for _, m := range messages {
@@ -298,9 +269,6 @@ func replayToolStatuses(messages []taskengine.Message, external bool) map[string
 	return out
 }
 
-// replayStatusFor resolves the status to replay a tool call with. A call with
-// no result message in the transcript keeps "completed": no recorded outcome
-// is not evidence of failure, and a red cross would be a louder lie.
 func replayStatusFor(statuses map[string]libacp.ToolCallStatus, toolCallID string) libacp.ToolCallStatus {
 	if status, ok := statuses[toolCallID]; ok && status != "" {
 		return status
@@ -308,30 +276,24 @@ func replayStatusFor(statuses map[string]libacp.ToolCallStatus, toolCallID strin
 	return libacp.ToolCallStatusCompleted
 }
 
-// toolExecFailedRE matches the sentence taskengine substitutes for a tool
-// result when the tool returned an error. Anchored to a single unspaced tool
-// name so ordinary tool output discussing a failure isn't mistaken for one.
+// toolExecFailedRE matches the sentence taskengine substitutes for a failed tool
+// result; it couples to the engine's error formatting.
 var toolExecFailedRE = regexp.MustCompile(`^tool [^\s]+ execution failed: `)
 
-// replayToolStatus derives one native tool call's terminal status from its
-// persisted result content. The {"error": ...} test requires exactly that one
-// key: a result carrying an error field alongside other fields (local_shell's
-// `error` beside `exit_code`) is a successful call reporting what it found
-// and must replay as completed, agreeing with the live path.
+// replayToolStatus derives a native tool call's terminal status from its persisted
+// result. The {"error": ...} test requires exactly that one key, so a result
+// carrying an error field beside others replays as completed.
 func replayToolStatus(content string) libacp.ToolCallStatus {
 	s := strings.TrimSpace(content)
 	if s == "" {
 		return libacp.ToolCallStatusCompleted
 	}
-	// The engine serializes a tool result through json.Marshal on every error
-	// path, so the failure sentence arrives as a JSON string literal.
 	if strings.HasPrefix(s, `"`) {
 		var unquoted string
 		if err := json.Unmarshal([]byte(s), &unquoted); err == nil {
 			s = strings.TrimSpace(unquoted)
 		}
 	}
-	// A persisted policy denial replays as failed, matching the live wire.
 	if _, denied := policyDenialReason(s); denied {
 		return libacp.ToolCallStatusFailed
 	}
@@ -353,10 +315,8 @@ func replayToolStatus(content string) libacp.ToolCallStatus {
 }
 
 // estimateHistoryTokens estimates the "used" half of a reloaded session's
-// usage_update from its transcript, using the same arithmetic as the engine's
-// tokenizer (runes/4, floor 1 per non-empty string). It under-counts by the
-// system prelude and tool-schema JSON, and snaps to exact on the next
-// token_usage event; deliberately not corrected by a guessed constant.
+// usage_update, using the same arithmetic as the engine's tokenizer. It
+// under-counts and snaps to exact on the next token_usage event.
 func estimateHistoryTokens(messages []taskengine.Message) int {
 	total := 0
 	for _, m := range messages {
@@ -365,7 +325,6 @@ func estimateHistoryTokens(messages []taskengine.Message) int {
 	return total
 }
 
-// estimateContentTokens mirrors ollamatokenizer.EstimateTokenizer.CountTokens.
 func estimateContentTokens(s string) int {
 	r := utf8.RuneCountInString(s)
 	if r == 0 {
@@ -377,9 +336,6 @@ func estimateContentTokens(s string) int {
 	return 1
 }
 
-// toolCallUpdateFromCall renders one replayed tool call from the assistant
-// message that opened it; status comes from the transcript's later
-// tool-result message (see replayToolStatuses).
 func toolCallUpdateFromCall(tc taskengine.ToolCall, status libacp.ToolCallStatus) libacp.SessionUpdate {
 	title := tc.Function.Name
 	var argsMap map[string]any
@@ -402,9 +358,6 @@ func toolCallUpdateFromCall(tc taskengine.ToolCall, status libacp.ToolCallStatus
 	return update
 }
 
-// externalToolReplayUpdate decodes a persisted externalToolRecord into the
-// tool_call update that reconstructs its card verbatim; false means not an
-// external record, and the caller falls back to the native result mapping.
 func externalToolReplayUpdate(m taskengine.Message) (libacp.SessionUpdate, bool) {
 	var rec externalToolRecord
 	if err := json.Unmarshal([]byte(m.Content), &rec); err != nil {
@@ -423,7 +376,6 @@ func externalToolReplayUpdate(m taskengine.Message) (libacp.SessionUpdate, bool)
 	}
 	title := rec.Title
 	if title == "" {
-		// The spec requires a title; fall back to the id for strict clients.
 		title = toolCallID
 	}
 	return libacp.SessionUpdate{
@@ -439,9 +391,6 @@ func externalToolReplayUpdate(m taskengine.Message) (libacp.SessionUpdate, bool)
 	}, true
 }
 
-// toolCallUpdateFromResult renders the closing update of one replayed native
-// tool call, deriving status from the result content — the same derivation
-// replayToolStatuses applies to the opening card, so both halves agree.
 func toolCallUpdateFromResult(m taskengine.Message) libacp.SessionUpdate {
 	update := libacp.SessionUpdate{
 		SessionUpdate: libacp.SessionUpdateToolCallUpdate,
@@ -457,29 +406,12 @@ func toolCallUpdateFromResult(m taskengine.Message) libacp.SessionUpdate {
 	return update
 }
 
-// errSetupRequired is returned by session operations when running setup-only
-// (no default-model, engine nil). The code is the spec's -32000 auth_required,
-// so a conformant client offers the advertised auth methods — the setup flow.
 func errSetupRequired() error {
 	return libacp.NewError(libacp.ErrAuthRequired, "contenox is not configured yet: no default-model is set. Run the \"Setup Contenox\" auth method, set the CONTENOX_DEFAULT_* environment variables (or run `contenox acp --setup`), then reconnect.")
 }
 
-// requireSessionCwd rejects a malformed session cwd on session/new,
-// session/load and session/resume before any of them touches the engine or
-// the store, so a bad request costs no side effects.
-//
-// Only one rule is this transport's own: the ACP spec makes cwd mandatory, so
-// an absent one is a client bug rather than an unspecified workspace. The path
-// rules are not restated here — the check runs vfs.ResolveSessionCwd against a
-// nil allowlist, which applies exactly its syntactic half (absolute, and never
-// inside the runtime's control plane) and leaves the allowlist decision to the
-// real resolution later. One procedure, one implementation.
-//
-// The "/" sentinel deliberately survives. It means "the machine's default
-// root", it is what every browser client sends, and the duplicated
-// filepath.IsAbs check this replaced refused it before the allowlist was ever
-// consulted — which on Windows, where "/" is not an absolute path, refused
-// every remote session outright.
+// requireSessionCwd rejects a malformed session cwd before any side effects. The
+// "/" sentinel deliberately survives: it means the machine's default root.
 func requireSessionCwd(cwd string) error {
 	if strings.TrimSpace(cwd) == "" {
 		return libacp.NewError(libacp.ErrInvalidParams, "cwd is required")
@@ -490,13 +422,8 @@ func requireSessionCwd(cwd string) error {
 	return nil
 }
 
-// resolveWorkspaceCwd maps a requested session cwd onto the concrete root to
-// use, delegating the decision to vfs.ResolveSessionCwd (shared with
-// fleetservice's dispatch path) and translating a refusal into a wire error.
-// This is the enforcement point for the workspace-root allowlist: a cwd a
-// client proposes is untrusted input, and when Deps.WorkspaceRoots is
-// configured anything outside it is refused rather than adopted.
-// See vfs.ResolveSessionCwd for the full rule set.
+// resolveWorkspaceCwd maps a requested session cwd onto the concrete root to use.
+// This is the enforcement point for the workspace-root allowlist.
 func (t *Transport) resolveWorkspaceCwd(cwd string) (string, error) {
 	resolved, err := vfs.ResolveSessionCwd(t.deps.WorkspaceRoots, cwd, "")
 	if err != nil {
@@ -505,10 +432,8 @@ func (t *Transport) resolveWorkspaceCwd(cwd string) (string, error) {
 	return resolved, nil
 }
 
-// resolveExistingSessionCwd is resolveWorkspaceCwd plus one extra rule: the
-// sentinel "/" or empty cwd sent on every load/resume must not clobber the
-// session's stored workspace back to the default, so the persisted cwd wins
-// when still allowlisted.
+// resolveExistingSessionCwd is resolveWorkspaceCwd plus one rule: the sentinel "/"
+// sent on every load/resume must not clobber the session's stored workspace.
 func (t *Transport) resolveExistingSessionCwd(ctx context.Context, store runtimetypes.Store, sid libacp.SessionID, cwd string) (string, error) {
 	if f := t.deps.WorkspaceRoots; f != nil && (cwd == "" || cwd == "/") {
 		if existing := t.sessionCwd(ctx, store, sid); existing != "" {
@@ -546,9 +471,7 @@ func (t *Transport) NewSession(ctx context.Context, req libacp.NewSessionRequest
 
 	store := runtimetypes.New(t.deps.DB.WithoutTransaction())
 
-	// contenox.adopt `_meta` adopts an already-running instance+session,
-	// taking precedence over contenox.agent (nothing is spawned).
-	// Absent/malformed falls through unchanged.
+	// contenox.adopt takes precedence over contenox.agent: nothing is spawned.
 	if ref, ok := parseAdoptMeta(req.Meta); ok {
 		resp, adoptErr := t.newAdoptedSession(ctx, internalID, sessionID, sessionCwd, workspaceID, store, ref, reportChange)
 		if adoptErr != nil {
@@ -558,11 +481,9 @@ func (t *Transport) NewSession(ctx context.Context, req libacp.NewSessionRequest
 		return resp, nil
 	}
 
-	// A client binds this session to a registered external ACP agent via the
-	// contenox.agent `_meta` key; absent, the native chain path below runs.
 	if agentName := parseAgentMeta(req.Meta); agentName != "" {
-		// Bring up the downstream agent first: any spawn/handshake failure
-		// must fail session/new cleanly with no session and no leaked process.
+		// Bring the downstream agent up first, so a spawn failure fails
+		// session/new with no session and no leaked process.
 		att, spawnErr := t.bringUpExternal(ctx, sessionID, sessionCwd, agentName, false)
 		if spawnErr != nil {
 			reportErr(spawnErr)
@@ -604,14 +525,11 @@ func (t *Transport) NewSession(ctx context.Context, req libacp.NewSessionRequest
 		t.sessionMu.Unlock()
 		t.persistSessionCwd(ctx, store, sessionID, sessionCwd)
 		t.persistSessionAgent(ctx, store, sessionID, agentName)
-		// Persist the instance and downstream session ids so a later
-		// session/load re-attaches to this same running instance.
 		t.persistSessionInstance(ctx, sessionID, att.instanceID)
 		t.persistSessionDownstream(ctx, sessionID, att.downstreamID)
 		t.clearToolCallState(sessionID)
 
-		// The downstream menu was cached (it references a session id the
-		// client hasn't learned yet); re-emit once the result is on the wire.
+		// The menu was cached before the client could resolve the session id.
 		libacp.AfterResponse(ctx, func() {
 			bridge.markBound(ctx)
 		})
@@ -650,9 +568,7 @@ func (t *Transport) NewSession(ctx context.Context, req libacp.NewSessionRequest
 	}
 
 	// A dispatched unit's session/new carries its mission id and compute
-	// allowlists in `_meta`, scoping mission tools and model resolution to
-	// that mission (see missionservice.MissionMeta). Absent/empty for an
-	// ordinary chat session or an unbounded mission.
+	// allowlists in `_meta`.
 	missionMeta, _ := missionservice.ParseMissionMetaFull(req.Meta)
 	missionID := missionMeta.MissionID
 
@@ -668,8 +584,7 @@ func (t *Transport) NewSession(ctx context.Context, req libacp.NewSessionRequest
 		Provider:          t.provider(),
 		Model:             t.model(),
 		Think:             t.thinkDefault(),
-		// A unit is gated by the envelope its mission was fired under, not by its host's policy.
-		HITLPolicy: missionHITLPolicy(missionMeta.HITLPolicyName),
+		HITLPolicy:        missionHITLPolicy(missionMeta.HITLPolicyName),
 	}
 	t.sessionMu.Lock()
 	t.sessions[sessionID] = entry
@@ -679,8 +594,7 @@ func (t *Transport) NewSession(ctx context.Context, req libacp.NewSessionRequest
 	t.persistSessionMission(ctx, store, sessionID, missionMeta)
 	t.clearToolCallState(sessionID)
 
-	// An available_commands_update sent before the session/new result is
-	// dropped as unknown; defer until libacp has written the result.
+	// An available_commands_update sent before the session/new result is dropped.
 	libacp.AfterResponse(ctx, func() {
 		t.sendAvailableCommands(ctx, sessionID)
 		if banner := t.takeBanner(); banner != "" {
@@ -702,8 +616,8 @@ func (t *Transport) NewSession(ctx context.Context, req libacp.NewSessionRequest
 	}, nil
 }
 
-// ResumeSession is session/load without the history replay: the client kept
-// its transcript and only needs the server-side session re-bound.
+// ResumeSession is session/load without the history replay: the client kept its
+// transcript and only needs the server-side session re-bound.
 func (t *Transport) ResumeSession(ctx context.Context, req libacp.ResumeSessionRequest) (libacp.ResumeSessionResponse, error) {
 	reportErr, reportChange, end := t.tracker().Start(ctx, "resume", "acp_session", "session_id", string(req.SessionID))
 	defer end()
@@ -771,18 +685,12 @@ func (t *Transport) ResumeSession(ctx context.Context, req libacp.ResumeSessionR
 	t.sessionMu.Unlock()
 	t.persistSessionCwd(ctx, store, req.SessionID, sessionCwd)
 	t.markExternalIfPersisted(ctx, store, req.SessionID, entry)
-	// Mirror LoadSession: a resumed session keeps both halves of its mission
-	// relationship — the units it fired, and the mission it is.
 	entry.FiredMissions = t.readSessionFiredMission(ctx, store, req.SessionID)
 	t.restoreSessionMission(ctx, store, req.SessionID, entry)
 	t.clearToolCallState(req.SessionID)
-	// Join an in-flight native turn so the resumed session picks the live
-	// stream back up; a no-op when no turn is in flight (see LoadSession).
 	t.reattachNativeTurn(ctx, req.SessionID)
 	t.reofferParkedAsks(ctx, req.SessionID, contenoxSessionID)
 
-	// Mirror LoadSession: native re-advertises its menu; external re-emits
-	// its downstream agent's persisted menu.
 	if _, isExternal := entry.driver.(*externalDriver); isExternal {
 		t.reemitExternalCommandMenu(ctx, store, req.SessionID)
 	} else if entry.driver.AvailableCommands() != nil {
@@ -791,9 +699,8 @@ func (t *Transport) ResumeSession(ctx context.Context, req libacp.ResumeSessionR
 		})
 	}
 
-	// Resume keeps the client's transcript but not its gauge, so the history
-	// is read here rather than replayed. Pushed after the result: resume's
-	// contract is that nothing precedes its response (unlike load).
+	// Resume keeps the client's transcript but not its gauge, and nothing may
+	// precede its response.
 	libacp.AfterResponse(ctx, func() {
 		t.sendResumedUsageUpdate(ctx, req.SessionID, entry)
 	})
@@ -804,26 +711,22 @@ func (t *Transport) ResumeSession(ctx context.Context, req libacp.ResumeSessionR
 	return libacp.ResumeSessionResponse{ConfigOptions: t.reloadedConfigOptions(ctx, store, req.SessionID, entry)}, nil
 }
 
-// SetSessionMode is not supported: the equivalent controls are session
-// config options. Initialize never returns a Modes state, so a conformant
-// client never calls this.
+// SetSessionMode is not supported: the equivalent controls are session config
+// options, and initialize never returns a Modes state.
 func (t *Transport) SetSessionMode(_ context.Context, _ libacp.SetSessionModeRequest) (libacp.SetSessionModeResponse, error) {
 	return libacp.SetSessionModeResponse{}, libacp.MethodNotFound(libacp.MethodSessionSetMode)
 }
 
-// SetSessionModel is not supported: the runtime never advertises a `models`
-// state. An external session's model picker is surfaced as the synthetic
-// AgentModelConfigOptionID config option instead.
+// SetSessionModel is not supported: an external session's model picker is
+// surfaced as the AgentModelConfigOptionID config option instead.
 func (t *Transport) SetSessionModel(_ context.Context, _ libacp.SetSessionModelRequest) (libacp.SetSessionModelResponse, error) {
 	return libacp.SetSessionModelResponse{}, libacp.MethodNotFound(libacp.MethodSessionSetModel)
 }
 
-// CloseSession releases a session's connection-local resources without
-// touching its stored history; closing an unknown session succeeds. Close
-// detaches, delete stops: the kernel's per-session state is deliberately left
-// behind so a reconnect can re-attach with the downstream agent's context and
-// fleetservice.Cancel / resolveAdoptTarget can still reach the session. The
-// retention is bounded and fully reclaimed when DeleteSession stops the instance.
+// CloseSession releases a session's connection-local resources without touching
+// its stored history; closing an unknown session succeeds. Close detaches, delete
+// stops: the kernel's per-session state is left behind so a reconnect can
+// re-attach with the downstream agent's context.
 func (t *Transport) CloseSession(ctx context.Context, req libacp.CloseSessionRequest) (libacp.CloseSessionResponse, error) {
 	_, reportChange, end := t.tracker().Start(ctx, "close", "acp_session", "session_id", string(req.SessionID))
 	defer end()
@@ -836,14 +739,11 @@ func (t *Transport) CloseSession(ctx context.Context, req libacp.CloseSessionReq
 		store := runtimetypes.New(t.deps.DB.WithoutTransaction())
 		t.cleanupMcpServers(ctx, store, entry.McpServerNames)
 	}
-	// Tear down the driver now rather than waiting for connection teardown to
-	// reap it (external closes its downstream agent; native is a no-op).
 	if entry != nil {
 		_ = entry.driver.Close()
 	}
 	t.clearToolCallState(req.SessionID)
-	// Unlike a bare connection drop, which keeps the shell alive for reconnect,
-	// an explicit close tears it down (the idle reaper handles abandonment).
+	// Unlike a bare connection drop, an explicit close tears the shell down.
 	reportChange(string(req.SessionID), map[string]any{"was_open": entry != nil})
 	return libacp.CloseSessionResponse{}, nil
 }
@@ -875,20 +775,15 @@ func (t *Transport) DeleteSession(ctx context.Context, req libacp.DeleteSessionR
 	if entry != nil {
 		t.cleanupMcpServers(ctx, store, entry.McpServerNames)
 	}
-	// Unlike close, which only detaches, a delete must terminate the instance
-	// outright; entry.driver.Close() alone leaves a Manager-owned instance Running.
+	// Unlike close, a delete must terminate the instance outright.
 	if entry != nil {
 		_ = entry.driver.Close()
 	}
-	// Stop the Manager-owned instance from the persisted instanceID (the
-	// durable source of truth, since entry may be nil if not open here).
 	if t.deps.Instances != nil {
 		if instanceID := t.readSessionInstance(ctx, store, req.SessionID); instanceID != "" {
 			_ = t.deps.Instances.Stop(instanceID)
 		}
 	}
-	// Unlike a plain close/disconnect, which keeps a native turn alive for
-	// reconnect, a delete terminates it.
 	if t.deps.NativeTurns != nil {
 		t.deps.NativeTurns.Cancel(req.SessionID)
 	}
@@ -906,7 +801,6 @@ func (t *Transport) DeleteSession(ctx context.Context, req libacp.DeleteSessionR
 	}
 	_ = store.DeleteKV(ctx, acpSessionCwdKVPrefix+string(req.SessionID))
 	_ = store.DeleteKV(ctx, acpSessionAgentKVPrefix+string(req.SessionID))
-	// These keys are meaningful only alongside the agent-name key; drop them with it.
 	_ = store.DeleteKV(ctx, acpSessionAgentCommandsKVPrefix+string(req.SessionID))
 	_ = store.DeleteKV(ctx, acpSessionAgentConfigOptionsKVPrefix+string(req.SessionID))
 	_ = store.DeleteKV(ctx, acpSessionHITLPolicyKVPrefix+string(req.SessionID))
@@ -918,11 +812,7 @@ func (t *Transport) DeleteSession(ctx context.Context, req libacp.DeleteSessionR
 	return libacp.DeleteSessionResponse{}, nil
 }
 
-// dropSessionEntry removes a session from the in-memory maps and returns the
-// removed entry (nil if it was not open on this connection).
 func (t *Transport) dropSessionEntry(sid libacp.SessionID) *sessionEntry {
-	// Abort any in-flight turn before this connection-local state goes away,
-	// so a racing prompt doesn't keep running against a dropped session.
 	t.cancelInflightPrompt(sid)
 	t.sessionMu.Lock()
 	defer t.sessionMu.Unlock()
@@ -1022,9 +912,7 @@ func (t *Transport) runtimeToolsAllowlist(ctx context.Context, store runtimetype
 }
 
 // CleanupStaleACPManagedMCPServers removes client-scoped ACP MCP registrations
-// left behind by a previous process. Durable MCP configuration must be created
-// through the normal `contenox mcp` commands or HTTP API; session/new and
-// session/load MCP servers are temporary by ACP contract.
+// left behind by a previous process.
 func CleanupStaleACPManagedMCPServers(ctx context.Context, db libdb.DBManager) error {
 	if db == nil {
 		return nil
@@ -1116,8 +1004,7 @@ func sessionNamespace(t *Transport) string {
 func (t *Transport) Close(ctx context.Context) error {
 	store := runtimetypes.New(t.deps.DB.WithoutTransaction())
 
-	// A bare connection drop stops streaming but does not kill shells: a
-	// reload reconnects and re-subscribes. Idle-timeout reclaims the rest.
+	// A bare connection drop stops streaming but does not kill shells.
 
 	t.sessionMu.Lock()
 	entries := make([]*sessionEntry, 0, len(t.sessions))
@@ -1125,23 +1012,18 @@ func (t *Transport) Close(ctx context.Context) error {
 	for sid, e := range t.sessions {
 		entries = append(entries, e)
 		sids = append(sids, sid)
-		// Deregister from the shared router so approvals stop routing here.
 		t.deps.SessionRouter.unbind(e.InternalSessionID, t)
 	}
 	t.sessions = make(map[libacp.SessionID]*sessionEntry)
 	t.contenoxToACPID = make(map[string]libacp.SessionID)
 	t.sessionMu.Unlock()
 
-	// The server owns cancellation here too, rather than depending solely on
-	// libacp cancelling the prompt contexts it substituted when Run ends.
 	for _, sid := range sids {
 		t.cancelInflightPrompt(sid)
 	}
 
 	for _, e := range entries {
 		t.cleanupMcpServers(ctx, store, e.McpServerNames)
-		// External closes its downstream agent (idempotent with the
-		// connCtx-cancel teardown in New()); native is a no-op.
 		_ = e.driver.Close()
 	}
 	return nil
@@ -1166,12 +1048,8 @@ func (t *Transport) resolveSessionWorkspace(ctx context.Context, name string) (s
 	return workspaceID, true
 }
 
-// listSessionsPageSize bounds one session/list page; a var so tests can
-// exercise paging without minting hundreds of sessions.
 var listSessionsPageSize = 100
 
-// sessionListRow is one session/list candidate before pagination
-// (hasTime=false when the session has no messages yet).
 type sessionListRow struct {
 	internalID string
 	name       string
@@ -1179,9 +1057,8 @@ type sessionListRow struct {
 	hasTime    bool
 }
 
-// sessionListRowLess is the freshest-first total order session/list returns:
-// timed rows sort by time descending, untimed rows sort last, ties fall back
-// to internal id. The order must be total or the pagination cursor is ambiguous.
+// sessionListRowLess is the freshest-first total order session/list returns. It
+// must be total, or the pagination cursor is ambiguous.
 func sessionListRowLess(a, b sessionListRow) bool {
 	if a.hasTime != b.hasTime {
 		return a.hasTime
@@ -1192,9 +1069,6 @@ func sessionListRowLess(a, b sessionListRow) bool {
 	return a.internalID > b.internalID
 }
 
-// listSessionsCursor encodes a page boundary as "<unixnano>|<internal id>",
-// opaque to clients. The full sort key lets listSessionsResume position
-// correctly even if the boundary row changed or vanished between pages.
 func listSessionsCursor(r sessionListRow) string {
 	ts := ""
 	if r.hasTime {
@@ -1203,9 +1077,6 @@ func listSessionsCursor(r sessionListRow) string {
 	return ts + "|" + r.internalID
 }
 
-// listSessionsResume returns the index of the first row sorting strictly
-// after the cursor's boundary key. A malformed cursor degrades to comparing
-// by internal id alone.
 func listSessionsResume(rows []sessionListRow, cursor string) int {
 	tsPart, id, found := strings.Cut(cursor, "|")
 	boundary := sessionListRow{internalID: id}
@@ -1228,11 +1099,9 @@ func listSessionsResume(rows []sessionListRow, cursor string) int {
 func (t *Transport) ListSessions(ctx context.Context, req libacp.ListSessionsRequest) (libacp.ListSessionsResponse, error) {
 	exec := t.deps.DB.WithoutTransaction()
 
-	// The ACP session id is the message-index name; unnamed rows predate ACP
-	// naming and aren't listed. Ordering/pagination happen in Go: mi.id is a
-	// random UUID and the store's session order is not this surface's order.
-	// The cwd filter applies after pagination, so a filtered page may carry
-	// fewer items but the cursor still advances.
+	// The ACP session id is the message-index name; unnamed rows predate ACP naming
+	// and aren't listed. Ordering and pagination happen in Go, and the cwd filter
+	// applies after pagination.
 	indices, err := runtimetypes.NewMessageStore(exec, t.workspaceID()).
 		ListMessageSessions(ctx, acpClientIdentity)
 	if err != nil {
@@ -1267,9 +1136,8 @@ func (t *Transport) ListSessions(ctx context.Context, req libacp.ListSessionsReq
 			Title:     t.sessionListTitle(ctx, exec, row.internalID, row.name),
 			Cwd:       t.sessionCwd(ctx, store, libacp.SessionID(row.name)),
 		}
-		// `_meta` attribution: which agent runs an external session, which
-		// mission a dispatched unit belongs to — without it a unit's session
-		// is indistinguishable from the operator's own chats.
+		// `_meta` attribution: which agent runs an external session, and which
+		// mission a dispatched unit belongs to.
 		info.Meta = sessionListMeta(
 			t.readSessionAgent(ctx, store, libacp.SessionID(row.name)),
 			t.readSessionMission(ctx, store, libacp.SessionID(row.name)),
@@ -1290,9 +1158,6 @@ func (t *Transport) ListSessions(ctx context.Context, req libacp.ListSessionsReq
 	return resp, nil
 }
 
-// sessionListTitle resolves a session/list Title in the fixed precedence:
-// the /rename override, then the derived heuristic, then fallback (also on
-// read failure — session/list must never error out over a title).
 func (t *Transport) sessionListTitle(ctx context.Context, exec libdb.Exec, internalSessionID, fallback string) string {
 	if title := sessionTitleOverride(ctx, runtimetypes.New(exec), internalSessionID); title != "" {
 		return title
@@ -1303,23 +1168,11 @@ func (t *Transport) sessionListTitle(ctx context.Context, exec libdb.Exec, inter
 	return fallback
 }
 
-// sessionTitleScanPage is how many messages one firstUserMessageTitle keyset
-// page reads. Small on purpose: the answer is almost always in the first page,
-// and session/list runs this once per listed session.
 const sessionTitleScanPage = 20
 
 // firstUserMessageTitle derives a session title from the first non-empty,
-// non-command-shaped user message, whitespace-collapsed and clipped. Returns
-// "" when there is no such message or on read failure. Shared by session/list
-// and sessionInfoTitle, so both readers agree. Command turns are skipped:
-// persistCommandTurn stores "/doctor" as an ordinary user message, but it is
-// an instruction, not a title-worthy subject.
-//
-// Reads by keyset page rather than pulling the thread: a title lives at the
-// front of a conversation, so a session/list over N sessions must not load N
-// full histories to find N first lines. Each page resumes from the previous
-// page's last row, so a message appended mid-scan cannot shift a boundary and
-// hide the very message being looked for.
+// non-command-shaped user message. It reads by keyset page so a session/list over
+// N sessions does not load N full histories.
 func (t *Transport) firstUserMessageTitle(ctx context.Context, exec libdb.Exec, internalSessionID string) string {
 	store := runtimetypes.NewMessageStore(exec, t.workspaceID())
 	filter := runtimetypes.MessagePageFilter{Limit: sessionTitleScanPage}
@@ -1349,10 +1202,8 @@ func (t *Transport) firstUserMessageTitle(ctx context.Context, exec libdb.Exec, 
 	}
 }
 
-// isCommandShapedText reports whether text is shaped like a slash command,
-// known or not, reusing the same recognition Prompt's dispatch uses so the
-// two can never drift. A path like "/etc/passwd contains x" fails the shape
-// test (second slash) and reads as an ordinary title.
+// isCommandShapedText reports whether text is shaped like a slash command, reusing
+// the recognition Prompt's dispatch uses so the two cannot drift.
 func isCommandShapedText(s string) bool {
 	if _, _, ok := parseCommand(s); ok {
 		return true
@@ -1361,10 +1212,6 @@ func isCommandShapedText(s string) bool {
 	return ok
 }
 
-// sessionInfoTitle resolves the live Title pushed on session_info_update, in
-// the same precedence as sessionListTitle so both readers agree. Empty when
-// the session has neither; callers then omit the Title so the notification
-// stays a pure freshness ping.
 func (t *Transport) sessionInfoTitle(ctx context.Context, internalSessionID string) string {
 	if t.deps.DB == nil || internalSessionID == "" {
 		return ""
@@ -1376,18 +1223,12 @@ func (t *Transport) sessionInfoTitle(ctx context.Context, internalSessionID stri
 	return t.firstUserMessageTitle(ctx, exec, internalSessionID)
 }
 
-// acpSessionTitleKVPrefix namespaces operator session titles, keyed by the
-// internal session id: in ACP the name is the session id, so renaming the
-// message index would break every stored reference — the title lives beside it.
 const acpSessionTitleKVPrefix = "acp:session_title:"
 
 type sessionTitleRecord struct {
 	Title string `json:"title"`
 }
 
-// setSessionTitleOverride stores (or, on an empty title, clears) the
-// operator's own title for a session; clearing hands the label back to the
-// derived heuristic.
 func setSessionTitleOverride(ctx context.Context, store runtimetypes.Store, internalSessionID, title string) error {
 	if internalSessionID == "" {
 		return fmt.Errorf("acpsvc: session title: no session")
@@ -1406,8 +1247,6 @@ func setSessionTitleOverride(ctx context.Context, store runtimetypes.Store, inte
 	return store.SetKV(ctx, key, raw)
 }
 
-// sessionTitleOverride reads the operator's own title for a session, or ""
-// when never set. A read failure is "" too — never fail a listing over a label.
 func sessionTitleOverride(ctx context.Context, store runtimetypes.Store, internalSessionID string) string {
 	if internalSessionID == "" {
 		return ""
@@ -1425,9 +1264,6 @@ type sessionCwdRecord struct {
 	Cwd string `json:"cwd"`
 }
 
-// persistSessionCwd records the session's cwd durably so session/list can
-// report and filter by it across process restarts (the spec requires cwd on
-// SessionInfo).
 func (t *Transport) persistSessionCwd(ctx context.Context, store runtimetypes.Store, sid libacp.SessionID, cwd string) {
 	if cwd == "" {
 		return
@@ -1443,8 +1279,6 @@ func (t *Transport) persistSessionCwd(ctx context.Context, store runtimetypes.St
 	}
 }
 
-// sessionCwd resolves a session's cwd: live entry first, then the durable KV
-// record. Empty when neither knows (sessions created before cwd persistence).
 func (t *Transport) sessionCwd(ctx context.Context, store runtimetypes.Store, sid libacp.SessionID) string {
 	t.sessionMu.Lock()
 	entry, ok := t.sessions[sid]

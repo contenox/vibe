@@ -1,8 +1,7 @@
-// Package operatorinbox is the durable attention surface for mission
-// reports that reached no live supervising session — a sibling store to
-// hitlservice's approval inbox (informational, not answerable), not an
-// overloaded row in it. An item is appended by the router, announced on
-// AddedSubject, and later acked by the operator; Ack sets a flag, never deletes.
+// Package operatorinbox is the durable attention surface for mission reports
+// that reached no live supervising session. An item is appended by the router,
+// announced on AddedSubject, and later acked by the operator; Ack sets a flag,
+// never deletes.
 package operatorinbox
 
 import (
@@ -19,16 +18,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// inboxKVPrefix namespaces operator-inbox items in the KV store; each item
-// is stored at inboxKVPrefix+ID. Shares no prefix with the mission or
-// mission-report keys, so the prefix scans never collide.
 const inboxKVPrefix = "fleet:operator_inbox:"
 
-// AddedSubject is the bus subject a successfully-stored inbox Item is
-// announced on, carrying the JSON of the stored Item. It is a best-effort
-// nudge on top of the durable write: the Item is already stored by the time
-// this publishes, a publish failure is swallowed (see Add), and a
-// subscriber that was down misses the nudge but never the item.
+// AddedSubject is the bus subject a successfully-stored inbox Item is announced
+// on, carrying its JSON. A best-effort nudge on top of the durable write.
 const AddedSubject = "operatorinbox.events.added"
 
 // ErrNotFound is returned by Get and Ack for an unknown id. It wraps
@@ -171,10 +164,6 @@ func (s *service) Add(ctx context.Context, item *Item) error {
 	return nil
 }
 
-// publishAdded announces a stored item on AddedSubject, best effort: the
-// item is already durable by the time this runs, so a publish failure never
-// fails Add. A no-op when no publisher is wired. raw is the same JSON that
-// was stored.
 func (s *service) publishAdded(ctx context.Context, item *Item, raw json.RawMessage) {
 	if s.pub == nil {
 		return
@@ -205,13 +194,8 @@ func (s *service) List(ctx context.Context, limit int) ([]*Item, error) {
 	return items, nil
 }
 
-// defaultListLimit bounds a List/ListUnacked call that names no limit.
 const defaultListLimit = 100
 
-// unackedScanPage is how many stored rows one ListUnacked pass reads.
-// Acked-ness lives inside the JSON document, so it cannot be a WHERE clause;
-// the scan over-reads to still return `limit` unacked items, and paging
-// keeps that bounded rather than loading the whole inbox.
 const unackedScanPage = 200
 
 func (s *service) ListUnacked(ctx context.Context, limit int) ([]*Item, error) {
@@ -265,9 +249,6 @@ func (s *service) Get(ctx context.Context, id string) (*Item, error) {
 	return &it, nil
 }
 
-// Ack marks an item read: a read-modify-write of the stored document,
-// deliberately not a delete, so the record that a report reached no live
-// supervisor survives. Acking twice is a no-op success.
 func (s *service) Ack(ctx context.Context, id string) error {
 	item, err := s.Get(ctx, id)
 	if err != nil {

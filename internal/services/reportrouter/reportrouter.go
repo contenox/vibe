@@ -1,8 +1,7 @@
-// Package reportrouter delivers missionservice's report, ask, status, and
-// plan-revision events to the session that fired the mission, falling back
-// to the operator inbox when none is live. Reports and asks always land
-// somewhere; status and plan-revision events are dropped when undeliverable,
-// since both are already durable on the mission record.
+// Package reportrouter delivers missionservice's report, ask, status and
+// plan-revision events to the session that fired the mission, falling back to
+// the operator inbox when none is live. Status and plan-revision events are
+// dropped when undeliverable, since both are already durable on the mission.
 package reportrouter
 
 import (
@@ -19,9 +18,8 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-// SessionDeliverer injects a report update into a supervising session's
-// stream. A non-nil error means the session is unreachable, which the router
-// treats as "route to the inbox", never a fault.
+// SessionDeliverer injects a report update into a supervising session's stream.
+// A non-nil error means the session is unreachable, never a fault.
 type SessionDeliverer interface {
 	DeliverToSession(ctx context.Context, sessionID libacp.SessionID, n libacp.SessionNotification) error
 }
@@ -36,34 +34,30 @@ type Subscriber interface {
 	Stream(ctx context.Context, subject string, ch chan<- []byte) (libbus.Subscription, error)
 }
 
-// Deps are the router's collaborators. Bus, Sessions, and Inbox are
-// required; Tracker defaults to a Noop when nil.
+// Deps are the router's collaborators. Bus, Sessions and Inbox are required.
 type Deps struct {
 	Bus      Subscriber
 	Sessions SessionDeliverer
 	Inbox    InboxWriter
 	Tracker  libtracker.ActivityTracker
 	// AgentSupervisor is optional and consulted only for a question, after it
-	// has already been delivered to the firing session. Nil means every
-	// question goes to a human only.
+	// has already been delivered to the firing session.
 	AgentSupervisor AgentSupervisor
 }
 
-// AgentSupervisor offers a unit's question to the agent driving the session
-// that fired the mission. A decline is reported as a nil error: the question
-// is already durable and delivered, so nothing here can lose it.
+// AgentSupervisor offers a unit's question to the agent driving the session that
+// fired the mission. A decline is reported as a nil error.
 type AgentSupervisor interface {
 	OfferToSupervisingAgent(ctx context.Context, ev missionservice.AttentionAskedEvent) error
 }
 
-// Router subscribes to report-added events and routes each to a session or
-// the inbox. Build with New, run with Start.
+// Router subscribes to report-added events and routes each to a session or the
+// inbox.
 type Router struct {
 	deps Deps
 }
 
-// New validates deps and returns a Router. Bus, Sessions, and Inbox are
-// required; a nil value is rejected immediately.
+// New validates deps and returns a Router.
 func New(deps Deps) (*Router, error) {
 	if deps.Bus == nil {
 		return nil, fmt.Errorf("reportrouter: Bus is required")
@@ -80,14 +74,11 @@ func New(deps Deps) (*Router, error) {
 	return &Router{deps: deps}, nil
 }
 
-// streamBuffer bounds the per-subscription event channel size.
 const streamBuffer = 64
 
 // Start subscribes to every subject the router handles and processes events
 // until the returned stop function is called or ctx is cancelled. It returns
-// only after the subscriptions are established, so events published after
-// Start returns are not missed. stop cancels the loops, unsubscribes, and
-// waits for all loop goroutines to exit before returning.
+// only after the subscriptions are established; stop waits for the loops to exit.
 func (r *Router) Start(ctx context.Context) (func(), error) {
 	runCtx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
@@ -141,22 +132,15 @@ func (r *Router) handleAsk(ctx context.Context, data []byte) {
 	r.routeAsk(ctx, ev)
 }
 
-// routeAsk delivers a unit's question to the session that fired its mission.
-// There is no inbox fallback: an ask is already durable and answerable from
-// hitlservice's own queue, so an unreachable parent leaves it pending there
-// rather than lost.
 func (r *Router) routeAsk(ctx context.Context, ev missionservice.AttentionAskedEvent) {
 	reportErr, reportChange, end := r.deps.Tracker.Start(ctx, "fleet", "route_attention_ask",
 		"mission_id", ev.MissionID, "ask_id", ev.AskID)
 	defer end()
 
 	if ev.ParentSessionID == "" {
-		// Operator-fired mission: their queue is the inbox already. The
-		// question is still offered on the supervisor seam — the oracle
-		// attention driver mounts here as the a2a offer's sibling; each
-		// supervisor self-selects (the firing-agent offer declines a
-		// parentless ask, the driver declines a parented one). A decline or
-		// failure changes nothing: the ask is durable either way.
+		// Operator-fired mission: their queue is the inbox already. The question
+		// is still offered on the supervisor seam, where each supervisor
+		// self-selects.
 		reportChange("routed", "queue_operator_fired")
 		if r.deps.AgentSupervisor != nil {
 			if err := r.deps.AgentSupervisor.OfferToSupervisingAgent(ctx, ev); err != nil {
@@ -183,8 +167,6 @@ func (r *Router) routeAsk(ctx context.Context, ev missionservice.AttentionAskedE
 	}
 }
 
-// askUpdateMeta namespaces the ask attribution on a delivered update so a
-// client renders it as an answerable ask rather than plain chat text.
 type askUpdateMeta struct {
 	Ask *askAttribution `json:"contenox.missionAsk,omitempty"`
 }
@@ -198,12 +180,9 @@ type askAttribution struct {
 	Detail    string `json:"detail,omitempty"`
 }
 
-// buildAskNotification renders a question as an agent_message_chunk carrying
-// the contenox.missionAsk meta a client builds its answer box from.
 func buildAskNotification(ev missionservice.AttentionAskedEvent) libacp.SessionNotification {
 	update := libacp.NewAgentMessageChunk(askText(ev))
-	// Own message id: without one, chunks fold into whatever message the
-	// session is currently streaming.
+	// Without an own message id, chunks fold into whatever is currently streaming.
 	update.MessageID = "mission-ask-" + ev.AskID
 	meta := askUpdateMeta{Ask: &askAttribution{
 		MissionID: ev.MissionID,
@@ -222,7 +201,6 @@ func buildAskNotification(ev missionservice.AttentionAskedEvent) libacp.SessionN
 	}
 }
 
-// askText composes the human-readable body of a delivered question.
 func askText(ev missionservice.AttentionAskedEvent) string {
 	unit := strings.TrimSpace(ev.AgentName)
 	if unit == "" {
@@ -237,8 +215,6 @@ func askText(ev missionservice.AttentionAskedEvent) string {
 	return b.String()
 }
 
-// loop drains one subscription's channel into handle until ctx is cancelled
-// or the channel closes.
 func (r *Router) loop(ctx context.Context, ch <-chan []byte, handle func(context.Context, []byte)) {
 	for {
 		select {
@@ -265,8 +241,6 @@ func (r *Router) handle(ctx context.Context, data []byte) {
 	r.route(ctx, ev)
 }
 
-// route is called directly by tests to assert the branch table without
-// driving the bus.
 func (r *Router) route(ctx context.Context, ev missionservice.ReportAddedEvent) {
 	reportErr, reportChange, end := r.deps.Tracker.Start(ctx, "fleet", "route_report",
 		"mission_id", ev.MissionID, "report_id", ev.Report.ID, "report_kind", string(ev.Report.Kind))
@@ -279,8 +253,7 @@ func (r *Router) route(ctx context.Context, ev missionservice.ReportAddedEvent) 
 			reportChange("routed", "session")
 			return
 		}
-		// Parent named but unreachable: fall back to inbox, marked as missed
-		// rather than dropped.
+		// Parent named but unreachable: fall back to the inbox.
 		reportChange("routed", "inbox_parent_gone")
 		if err := r.toInbox(ctx, ev, operatorinbox.ReasonParentGone); err != nil {
 			reportErr(err)
@@ -309,8 +282,6 @@ func (r *Router) toInbox(ctx context.Context, ev missionservice.ReportAddedEvent
 	return nil
 }
 
-// reportUpdateMeta namespaces the mission-report attribution a delivered
-// update carries in its ACP _meta envelope.
 type reportUpdateMeta struct {
 	Report *reportAttribution `json:"contenox.missionReport,omitempty"`
 }
@@ -322,8 +293,6 @@ type reportAttribution struct {
 	AgentName string `json:"agentName,omitempty"`
 }
 
-// buildReportNotification renders a report as an agent_message_chunk plus a
-// _meta envelope carrying the mission/report attribution.
 func buildReportNotification(ev missionservice.ReportAddedEvent) libacp.SessionNotification {
 	update := libacp.NewAgentMessageChunk(reportText(ev))
 	// Own message id, same reasoning as buildAskNotification.
@@ -343,7 +312,6 @@ func buildReportNotification(ev missionservice.ReportAddedEvent) libacp.SessionN
 	}
 }
 
-// reportText composes a deterministic, human-readable report body.
 func reportText(ev missionservice.ReportAddedEvent) string {
 	unit := strings.TrimSpace(ev.AgentName)
 	if unit == "" {
@@ -362,11 +330,6 @@ func reportText(ev missionservice.ReportAddedEvent) string {
 	return b.String()
 }
 
-// Status changes and plan revisions are already durable on the mission
-// record and re-readable via Get, so routing them is a best-effort
-// notification, not a delivery: an unreachable parent means DROP (recorded
-// on the tracker), never a write to the inbox.
-
 func (r *Router) handleStatus(ctx context.Context, data []byte) {
 	var ev missionservice.StatusChangedEvent
 	if err := json.Unmarshal(data, &ev); err != nil {
@@ -378,8 +341,6 @@ func (r *Router) handleStatus(ctx context.Context, data []byte) {
 	r.routeStatus(ctx, ev)
 }
 
-// routeStatus notifies the firing session of a terminal transition; dropped
-// when there is no live parent (see the comment above).
 func (r *Router) routeStatus(ctx context.Context, ev missionservice.StatusChangedEvent) {
 	reportErr, reportChange, end := r.deps.Tracker.Start(ctx, "fleet", "route_status_change",
 		"mission_id", ev.MissionID, "old_status", string(ev.OldStatus), "new_status", string(ev.NewStatus))
@@ -410,8 +371,6 @@ func (r *Router) handlePlan(ctx context.Context, data []byte) {
 	r.routePlan(ctx, ev)
 }
 
-// routePlan notifies the firing session of a plan revision; same drop rule
-// as routeStatus.
 func (r *Router) routePlan(ctx context.Context, ev missionservice.PlanRevisedEvent) {
 	reportErr, reportChange, end := r.deps.Tracker.Start(ctx, "fleet", "route_plan_revision",
 		"mission_id", ev.MissionID, "revision", ev.Revision)
@@ -430,8 +389,6 @@ func (r *Router) routePlan(ctx context.Context, ev missionservice.PlanRevisedEve
 	reportChange("routed", "session")
 }
 
-// statusUpdateMeta namespaces the terminal-transition attribution a
-// delivered update carries.
 type statusUpdateMeta struct {
 	Status *statusAttribution `json:"contenox.missionStatus,omitempty"`
 }
@@ -445,9 +402,6 @@ type statusAttribution struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
-// planUpdateMeta namespaces the plan-revision attribution, carrying the
-// counts a client draws a progress line from without reading the mission
-// back.
 type planUpdateMeta struct {
 	Plan *planAttribution `json:"contenox.missionPlan,omitempty"`
 }
@@ -463,8 +417,6 @@ type planAttribution struct {
 	Completed   int    `json:"completed"`
 }
 
-// buildStatusNotification renders a terminal transition as an
-// agent_message_chunk plus a dotted _meta envelope, same shape as a report.
 func buildStatusNotification(ev missionservice.StatusChangedEvent) libacp.SessionNotification {
 	update := libacp.NewAgentMessageChunk(statusText(ev))
 	update.MessageID = statusMessageID(ev)
@@ -485,16 +437,10 @@ func buildStatusNotification(ev missionservice.StatusChangedEvent) libacp.Sessio
 	}
 }
 
-// statusMessageID derives the id from the (mission, old, new) transition,
-// not a counter: Finish accepts only non-terminal-to-terminal transitions on
-// an otherwise immutable mission, so the triple is collision-free and stable
-// under the bus's at-least-once redelivery.
 func statusMessageID(ev missionservice.StatusChangedEvent) string {
 	return fmt.Sprintf("mission-status-%s-%s-%s", ev.MissionID, ev.OldStatus, ev.NewStatus)
 }
 
-// statusText composes the transition's body; the status value doubles as the
-// verb so no per-status phrase table can fall out of sync.
 func statusText(ev missionservice.StatusChangedEvent) string {
 	unit := strings.TrimSpace(ev.AgentName)
 	if unit == "" {
@@ -509,8 +455,6 @@ func statusText(ev missionservice.StatusChangedEvent) string {
 	return b.String()
 }
 
-// buildPlanNotification renders a plan revision as the session update
-// delivered into the firing session.
 func buildPlanNotification(ev missionservice.PlanRevisedEvent) libacp.SessionNotification {
 	update := libacp.NewAgentMessageChunk(planText(ev))
 	// Revision is the mission's own monotonic counter, so it is already
@@ -535,8 +479,6 @@ func buildPlanNotification(ev missionservice.PlanRevisedEvent) libacp.SessionNot
 	}
 }
 
-// planText composes the revision body: what changed on the first line, the
-// plan's current counts on the second.
 func planText(ev missionservice.PlanRevisedEvent) string {
 	unit := strings.TrimSpace(ev.AgentName)
 	if unit == "" {

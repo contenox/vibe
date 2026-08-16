@@ -123,9 +123,8 @@ func BuildInProcess(ctx context.Context, deps InProcessDeps) (Service, agentregi
 	var opts []Option
 	if deps.PolicySource != nil {
 		opts = append(opts, WithPolicyValidator(hitlservice.NewPolicyValidator(deps.PolicySource, runtimetypes.LocalTenantID, "")))
-		// Read-only over the same source: a nil KVReader leaves the approval
-		// and checkpoint seams unbound, so this instance can only load and
-		// parse a policy's compute half.
+		// A nil KVReader leaves the approval and checkpoint seams unbound, so this
+		// instance can only read a policy's compute half.
 		if reader, ok := hitlservice.New(deps.PolicySource, runtimetypes.LocalTenantID, nil, deps.Tracker).(hitlservice.ComputeBoundsReader); ok {
 			opts = append(opts, WithComputeBounds(reader))
 		}
@@ -150,8 +149,8 @@ func BuildInProcess(ctx context.Context, deps InProcessDeps) (Service, agentregi
 		return nil, nil, nil, err
 	}
 
-	// Every unit this host opens dies with it, so a host coming up is the
-	// moment to collect what a dead one left behind.
+	// Every unit this host opens dies with it, so startup collects what a dead
+	// host left behind.
 	sweepAbandonedMissions(ctx, deps.Missions, deps.Tracker)
 
 	stop := func() {
