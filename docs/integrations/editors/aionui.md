@@ -41,11 +41,11 @@ That's it — pick **Contenox** as the active agent and start a session.
 
 ## What you get
 
-**Your agent, in a chat UI.** Every prompt runs the ACP session chain, `chain-agent-acp.json` — the same agent behavior you'd get from the CLI or any other ACP client, in AionUi's conversation surface.
+**Your agent, in a chat UI.** Every prompt runs the ACP session chain, compiled from the `acp` agent declaration — the same agent behavior you'd get from the CLI or any other ACP client, in AionUi's conversation surface.
 
 **Tool steps with real context.** When the chain runs a tool, AionUi's step view shows the actual operation — `local_shell: ls -l`, `local_fs.read_file: README.md` — not just a bare tool name.
 
-**Native filesystem.** `local_fs.read_file` / `local_fs.write_file` route through AionUi's own filesystem capability.
+**Native filesystem.** `local_fs.read_file` / `local_fs.write_file` / `local_fs.edit_file` route through AionUi's own filesystem capability.
 
 **Approvals in the UI.** When the chain hits a tool in your active [HITL policy](/docs/guide/hitl/), AionUi shows an Allow/Deny dialog instead of a terminal prompt.
 
@@ -59,12 +59,11 @@ AionUi layers its own chat UI and skill ecosystem on top; the agent itself — d
 
 ## Choosing the chain
 
-ACP sessions use a dedicated chain file separate from the CLI's default chain:
+ACP sessions load a chain compiled from the `acp` agent declaration (router + coding/general/review loops, under `.contenox/agents/`). Contenox resolves it in order, first match wins: an operator copy at `~/.contenox/<name>.json`, then the compiled `~/.contenox/.generated/<name>.json`, then the shipped `~/.contenox/system/<name>.json`.
 
-- Loaded from `~/.contenox/chain-agent-acp.json`, falling back to the shipped copy in `~/.contenox/system/`. Copy it up a level to edit it.
-- Override with the `CONTENOX_ACP_CHAIN_PATH` environment variable.
+Override the path entirely with the `CONTENOX_ACP_CHAIN_PATH` environment variable.
 
-The default chain uses `"tools": ["*"]`, exposing everything the engine has registered — `local_fs`, `local_shell`, `webtools`, plus any MCP servers you've added.
+The ACP chain's `"tools": ["*"]` exposes everything the engine has registered — `local_fs`, `local_shell`, plus any MCP servers you've added.
 
 ---
 
@@ -77,7 +76,7 @@ contenox config set default-model qwen3:8b
 contenox config set default-provider ollama
 ```
 
-Models are global; chains resolve workspace-first. Switching the model for ACP also switches it for `contenox chat`.
+Models are global config, shared across every surface that reads `default-model` — switching it here switches it everywhere.
 
 ---
 

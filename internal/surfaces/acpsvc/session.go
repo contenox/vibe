@@ -154,7 +154,6 @@ func (t *Transport) LoadSession(ctx context.Context, req libacp.LoadSessionReque
 	t.restoreSessionMission(ctx, store, req.SessionID, entry)
 
 	t.clearToolCallState(req.SessionID)
-	t.subscribeTerminal(req.SessionID, contenoxSessionID)
 	// The flag reflects how tool messages were persisted: external stored each
 	// tool call as a self-contained ACP record, native stored assistant
 	// CallTools + tool-result text.
@@ -679,7 +678,6 @@ func (t *Transport) NewSession(ctx context.Context, req libacp.NewSessionRequest
 	t.persistSessionCwd(ctx, store, sessionID, sessionCwd)
 	t.persistSessionMission(ctx, store, sessionID, missionMeta)
 	t.clearToolCallState(sessionID)
-	t.subscribeTerminal(sessionID, contenoxSessionID)
 
 	// An available_commands_update sent before the session/new result is
 	// dropped as unknown; defer until libacp has written the result.
@@ -778,7 +776,6 @@ func (t *Transport) ResumeSession(ctx context.Context, req libacp.ResumeSessionR
 	entry.FiredMissions = t.readSessionFiredMission(ctx, store, req.SessionID)
 	t.restoreSessionMission(ctx, store, req.SessionID, entry)
 	t.clearToolCallState(req.SessionID)
-	t.subscribeTerminal(req.SessionID, contenoxSessionID)
 	// Join an in-flight native turn so the resumed session picks the live
 	// stream back up; a no-op when no turn is in flight (see LoadSession).
 	t.reattachNativeTurn(ctx, req.SessionID)
@@ -847,7 +844,6 @@ func (t *Transport) CloseSession(ctx context.Context, req libacp.CloseSessionReq
 	t.clearToolCallState(req.SessionID)
 	// Unlike a bare connection drop, which keeps the shell alive for reconnect,
 	// an explicit close tears it down (the idle reaper handles abandonment).
-	t.closeTerminal(req.SessionID, entry)
 	reportChange(string(req.SessionID), map[string]any{"was_open": entry != nil})
 	return libacp.CloseSessionResponse{}, nil
 }
@@ -897,7 +893,6 @@ func (t *Transport) DeleteSession(ctx context.Context, req libacp.DeleteSessionR
 		t.deps.NativeTurns.Cancel(req.SessionID)
 	}
 	t.clearToolCallState(req.SessionID)
-	t.closeTerminal(req.SessionID, entry)
 
 	ag := agentservice.New(agentservice.Deps{
 		Engine:      t.deps.Engine,
@@ -1123,7 +1118,6 @@ func (t *Transport) Close(ctx context.Context) error {
 
 	// A bare connection drop stops streaming but does not kill shells: a
 	// reload reconnects and re-subscribes. Idle-timeout reclaims the rest.
-	t.unsubscribeAllTerminals()
 
 	t.sessionMu.Lock()
 	entries := make([]*sessionEntry, 0, len(t.sessions))

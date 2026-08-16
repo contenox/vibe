@@ -7,14 +7,14 @@ description: The scrub-and-inject design for the shells contenox runs in its own
 
 An agent that can run a shell can read its environment. By default that environment is the contenox process's own, with every variable it was started with. The usual way an agent gets a value it needs — say a `DATABASE_URL` — is to read your `.env`, but reading `.env` for one variable also hands it the `STRIPE_SECRET_KEY` two lines below.
 
-This surface gives each spawned shell — the `local_shell` tool, the `shell_session` / `!` PTY, and an ACP session's own shell — exactly the environment a task needs, in two steps:
+This surface gives every spawned shell — the `local_shell` tool, forwarded to an ACP session's own shell — exactly the environment a task needs, in two steps:
 
 - **scrub** — strip the runtime's own credentials out of the shell
 - **inject** — add back only the variables you choose, with the values you set
 
 > **What the scrub is, and is not.** It removes the credentials from the shell's *own* environment, so a task that reads `env`, echoes `$STRIPE_SECRET_KEY`, or hands its environment to a subprocess finds nothing. It is not a kernel boundary. These shells are ordinary child processes of the runtime, running as you, and on Linux a shell that can read files can read `/proc/<contenox-pid>/environ` — the runtime's own pre-scrub environment, which it still needs in order to reach your providers. Closing that would take the [sandbox](/docs/guide/agent-sandbox/), which confines foreign agents, not contenox's own chains. The scrub is the environment slice of least privilege against accident and casual reach; a shell you have allowed to run arbitrary read commands is trusted with what it can read.
 
-This is the environment slice of least privilege: deny by default, grant what the job needs. It is live today across every agent-reachable shell this CLI spawns — `contenox chat` / `contenox run` (`local_shell`), and `contenox acp` / `contenox acpx` (the ACP session's shell and its terminal passthrough).
+This is the environment slice of least privilege: deny by default, grant what the job needs. It is live today across every agent-reachable shell this CLI spawns — `contenox acp` / `contenox acpx` (the ACP session's shell and its terminal passthrough), and a `contenox serve` session's `local_shell`.
 
 ## How it works
 
@@ -27,13 +27,13 @@ The scrub policy is set per surface:
 
 | Surface | Who drives it | Scrub variable | Default |
 |---|---|---|---|
-| `local_shell` and the `!` / `shell_session` PTY | the agent | `SANDBOX_SHELL_SCRUB` | `deny-secrets` |
+| `local_shell` | the agent | `SANDBOX_SHELL_SCRUB` | `deny-secrets` |
 | the interactive terminal panel | the operator, typing directly | `SANDBOX_TERMINAL_SCRUB` | `off` |
 
 Agent-reachable shells scrub by default because the agent is untrusted. The terminal panel is the operator's own shell, so it defaults to `off`; set it to `deny-secrets` or `strict` for the same guarantees there.
 
 > **Note:**
-> `SANDBOX_TERMINAL_SCRUB` and `contenox sandbox env --terminal` are real, working config and preview today — they just have no consumer yet: contenox does not currently spawn a distinct operator-facing terminal panel (as opposed to the agent-reachable `local_shell` / `!` PTY covered by `SANDBOX_SHELL_SCRUB` above). Configure it now for when that surface lands, or ignore it — it governs nothing yet.
+> `SANDBOX_TERMINAL_SCRUB` and `contenox sandbox env --terminal` are real, working config and preview today — they just have no consumer yet: contenox does not currently spawn a distinct operator-facing terminal panel (as opposed to the agent-reachable `local_shell` covered by `SANDBOX_SHELL_SCRUB` above). Configure it now for when that surface lands, or ignore it — it governs nothing yet.
 
 ## Scrub: deny by default
 
@@ -108,4 +108,4 @@ contenox shell-env list
 
 ## How it relates to the agent sandbox
 
-This is the environment slice of a larger least-privilege architecture: an agent should reach only what its task needs, and nothing else. The [agent sandbox](/docs/guide/agent-sandbox/) is the rest of the wall — the filesystem and exec surface of a spawned foreign agent, made absent by construction, so it cannot read your `.env` off disk any more than from the environment. This page's scrub is the same idea applied to the shells contenox runs in its own process (`local_shell`, the `!` PTY, an ACP session's shell) — a different surface from the agent sandbox's foreign-process wall, and one that is wired and applying today.
+This is the environment slice of a larger least-privilege architecture: an agent should reach only what its task needs, and nothing else. The [agent sandbox](/docs/guide/agent-sandbox/) is the rest of the wall — the filesystem and exec surface of a spawned foreign agent, made absent by construction, so it cannot read your `.env` off disk any more than from the environment. This page's scrub is the same idea applied to the shell contenox runs in its own process (`local_shell`, forwarded to an ACP session's own shell) — a different surface from the agent sandbox's foreign-process wall, and one that is wired and applying today.

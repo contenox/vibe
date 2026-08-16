@@ -231,9 +231,11 @@ you do not control.
 
 ## Tools you connect
 
-contenox hosts `local_fs`, `local_shell`, `webtools` and git. Everything else
-you connect as an [MCP server](/docs/guide/mcp/), an OpenAPI spec, or a shell
-command.
+contenox hosts `local_fs` and `local_shell`, both forwarded to your ACP
+client's `fs/*` and `terminal/*` capabilities. Everything else you connect as
+an [MCP server](/docs/guide/mcp/), an OpenAPI spec, or a shell command
+(`local_shell` reaches `git`, search tools, and anything else your shell can
+run).
 
 A declaration naming `WebSearch` keeps its other tools and reports the drop:
 
@@ -376,11 +378,13 @@ recovery_rounds = 8
 ### The shipped agents are declarations
 
 `contenox init` seeds `triage/` as a worked example — and the agents contenox
-runs for itself are the same thing. `contenox`, `acp`, `beam` are trees;
-`run` and `acpx` are single declarations. They are written to
-`~/.contenox/agents/` and transpiled into `.generated/` at init, so the agent
-answering you is authored the way this page tells you to author yours, and you
-can read and edit it.
+runs for itself are the same thing. `acp` is a tree (router, plus coding,
+general, and review leaves); `acpx` is a single flat declaration. They are
+written to `~/.contenox/agents/` and transpiled into `.generated/` at init, so
+the agent answering you is authored the way this page tells you to author
+yours, and you can read and edit it. Both exist to demonstrate the authoring
+convention and give a working default, not as a product catalogue — the
+operator brings their own agents beyond these.
 
 Four chains are still shipped as JSON, because a declaration does not describe
 them: `compact` and `fim` are single-task chains with no tool loop, and

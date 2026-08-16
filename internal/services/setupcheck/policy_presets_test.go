@@ -12,7 +12,6 @@ func readyInput() Input {
 	return Input{
 		DefaultModel:      "qwen2.5:7b",
 		DefaultProvider:   "ollama",
-		DefaultEmbedModel: "nomic-embed-text",
 		RegisteredBackends: []runtimetypes.Backend{{
 			ID: "b1", Name: "local", Type: "ollama", BaseURL: "http://127.0.0.1:11434",
 		}},

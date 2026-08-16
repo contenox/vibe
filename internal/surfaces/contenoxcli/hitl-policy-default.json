@@ -601,17 +601,6 @@
       "tools": "webtools",
       "tool": "web_delete",
       "action": "approve"
-    },
-    {
-      "//": "workspace_search only reads the semantic index the operator already built, so it is allowed; revisit before any write is added.",
-      "tools": "workspace",
-      "action": "allow"
-    },
-    {
-      "//": "Allowed because the sandbox has no ambient I/O by construction — no filesystem, network or module loader — so there is nothing here for approval to protect; any reach to a tool is evaluated by this same policy. Compute is bounded by a deadline, call-stack cap and output cap; only memory is a soft, rate-bounded limit until the deadline fires.",
-      "tools": "goja",
-      "tool": "goja_eval",
-      "action": "allow"
     }
   ],
   "//attention": "Bounded delegation on the mission path's default envelope: an agent (the firing session's own, or the attention oracle mounted by `contenox mission fire --oracle`) may answer up to 3 of a mission's routine questions; the rest wait for a human. The count is durable per mission, and whatever the unit then DOES stays gated by this same envelope.",

@@ -1,13 +1,8 @@
 package contenoxcli
 
 import (
-	"context"
 	"testing"
 
-	"github.com/contenox/contenox/internal/services/gojatool"
-	"github.com/contenox/contenox/internal/services/missionservice"
-	"github.com/contenox/contenox/libtracker"
-	"github.com/stretchr/testify/require"
 )
 
 func TestReadinessDefaults(t *testing.T) {
@@ -105,34 +100,4 @@ func TestReadinessDefaults(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestUnit_LocalToolset_GitIsAlwaysOnAndShellIsGated asserts git is always registered regardless of --shell, while local_shell stays gated behind it.
-func TestUnit_LocalToolset_GitIsAlwaysOnAndShellIsGated(t *testing.T) {
-	tracker := libtracker.NoopTracker{}
-
-	// No ScriptDir: the provider still registers, carrying goja_eval alone.
-	gt, err := gojatool.New(gojatool.Config{})
-	require.NoError(t, err)
-	t.Cleanup(gt.Shutdown)
-
-	off := localToolset(chatOpts{EffectiveEnableLocalExec: false}, nil, tracker, gt, missionservice.New(nil))
-	require.Contains(t, off, "git", "git must be registered even with the shell off")
-	require.Contains(t, off, "local_fs")
-	require.NotContains(t, off, gojatool.ToolsProviderName, "goja is a beta surface, absent without opt-in-beta")
-	require.NotContains(t, off, "local_shell", "the shell stays opt-in")
-
-	on := localToolset(chatOpts{EffectiveEnableLocalExec: true, EffectiveHITL: true, EffectiveOptInBeta: true}, nil, tracker, gt, missionservice.New(nil))
-	require.Contains(t, on, "git")
-	require.Contains(t, on, "local_shell")
-	require.Contains(t, on, gojatool.ToolsProviderName, "goja registers under opt-in-beta")
-
-	supported, err := off["git"].Supports(context.Background())
-	require.NoError(t, err)
-	require.Contains(t, supported, "git_status")
-	require.Contains(t, supported, "git_commit")
-
-	gojaSupported, err := on[gojatool.ToolsProviderName].Supports(context.Background())
-	require.NoError(t, err)
-	require.Contains(t, gojaSupported, gojatool.ToolEval)
 }

@@ -23,7 +23,6 @@ Write a HITL (human-in-the-loop) policy that pauses only on the tool calls you n
      "default_action": "deny",
      "rules": [
        { "tools": "local_fs",    "tool": "read_file",   "action": "allow" },
-       { "tools": "local_fs",    "tool": "list_dir",    "action": "allow" },
        { "tools": "local_fs",    "tool": "write_file",  "action": "approve" },
        { "tools": "local_fs",    "tool": "sed",         "action": "approve" },
        { "tools": "local_shell", "tool": "local_shell", "action": "approve" },
@@ -32,7 +31,7 @@ Write a HITL (human-in-the-loop) policy that pauses only on the tool calls you n
    }
    ```
 
-   Reading files passes silently, writing files pauses, shell commands pause, sending a Zendesk reply pauses, and everything else is denied.
+   Reading files passes silently, writing files pauses, shell commands (including directory listing and search, which now go through `local_shell`) pause, sending a Zendesk reply pauses, and everything else is denied.
 
 3. Save it as `~/.contenox/hitl-policy-<name>.json`.
 
@@ -50,12 +49,12 @@ Reads and other `allow` rules run without interruption. Every `approve` rule pau
 
 ## Built-in presets
 
-Contenox ships seven policy presets under `~/.contenox/`. Switch between them with `contenox config set hitl-policy-name <file>`.
+Contenox ships several policy presets under `~/.contenox/`. Switch between them with `contenox config set hitl-policy-name <file>`.
 
 | Preset | File | Behavior |
 |---|---|---|
-| Default | `hitl-policy-default.json` | Prompts on writes, `edit_file`, `sed`, shell commands, and mutating HTTP verbs; allows reads and safe HTTP methods; fails closed to approval otherwise. Runs out of the box. |
-| Strict | `hitl-policy-strict.json` | Deny-by-default. Plain reads (`read_file`, `list_dir`, `grep`, `web_get`, …) pass silently; every other explicitly listed tool still prompts for approval; anything not listed is denied. For runs where you want everything to ask first. |
+| Default | `hitl-policy-default.json` | Prompts on writes, `edit_file`, `sed`, and shell commands; allows reads; fails closed to approval otherwise. Runs out of the box. |
+| Strict | `hitl-policy-strict.json` | Deny-by-default. Plain reads (`read_file`, …) pass silently; every other explicitly listed tool still prompts for approval; anything not listed is denied. For runs where you want everything to ask first. |
 | Dev | `hitl-policy-dev.json` | Allow-all by default — most tool calls pass silently. `local_shell` itself still prompts for approval (with a handful of destructive commands denied outright even here). For local development when you trust the chain and don't want interruptions outside the shell. |
 | ACP | `hitl-policy-acp.json` | Transport-specific: editor (ACP) sessions — Zed, JetBrains, AionUi. |
 | ACPX | `hitl-policy-acpx.json` | Transport-specific: headless/untrusted-driver sessions (OpenClaw). Deny-by-default with no approval tier. |

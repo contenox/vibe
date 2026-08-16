@@ -13,11 +13,8 @@ import (
 // legacySeededNames is the old-install fixture set: every basename a pre-v0.38
 // init seeded, mirroring legacyChainRenames' keys.
 var legacySeededNames = []string{
-	"default-chain.json",
-	"default-run-chain.json",
 	"default-acp-chain.json",
 	"headless-acp-chain.json",
-	"default-beam-chain.json",
 	"default-fim-chain.json",
 	"chain-compact.json",
 	"agent-planner.json",
@@ -180,15 +177,12 @@ func TestUnit_InitChainFiles_MatchConventionAndGlobalParity(t *testing.T) {
 		require.Contains(t, systemNames, f.Name)
 	}
 	// A legacy rename target only has to be a seeded file when that agent is
-	// still shipped as JSON. The five that became declarations are renamed on
+	// still shipped as JSON. The two that became declarations are renamed on
 	// disk for an operator who customised them, then read as an ordinary
 	// operator copy — they are simply no longer written by init.
 	declared := map[string]bool{
-		chainAgentContenoxFilename: true,
-		chainAgentRunFilename:      true,
-		chainAgentACPFilename:      true,
-		chainAgentACPXFilename:     true,
-		chainAgentBeamFilename:     true,
+		chainAgentACPFilename:  true,
+		chainAgentACPXFilename: true,
 	}
 	for _, newName := range legacyChainRenames {
 		if declared[newName] {

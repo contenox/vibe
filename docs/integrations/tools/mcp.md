@@ -4,7 +4,7 @@ description: Connect any MCP server — local, SSE, or HTTP — with persistent,
 
 # Model Context Protocol (MCP)
 
-Contenox is a full native MCP client. Every chat session and `contenox run` invocation can connect to any MCP-compatible server—local child processes, remote SSE streams, or HTTP endpoints.
+Contenox is a full native MCP client. Every session can connect to any MCP-compatible server — local child processes, remote SSE streams, or HTTP endpoints.
 
 > Servers you register here are available to every agent. An agent can also **bring its own**: `mcpServers:` in an [agent declaration](/docs/guide/agents/#tools-an-agent-brings-with-it) registers a server scoped to that one agent and retires it when the declaration is deleted. Both show in `contenox mcp list`, distinguished by an `OWNER` column.
 
@@ -18,7 +18,7 @@ Think of it as USB-C for AI: one standard connection, unlimited devices.
 
 Most clients treat MCP as a one-shot API call. Contenox does more: it keeps **persistent, session-scoped connections** to every registered MCP server.
 
-- Each chat session gets its own dedicated connections.  
+- Each session gets its own dedicated connections.  
 - State is preserved across all tool calls within that session.  
 
 Your agent doesn't just call a tool—it builds a lasting relationship with it.
@@ -118,10 +118,9 @@ contenox mcp add smoke-files \
   --args "-y,@modelcontextprotocol/server-filesystem,/tmp/contenox-mcp-smoke"
 
 contenox mcp show smoke-files
-contenox run "Use the smoke-files MCP tools to read note.txt and quote its contents."
 ```
 
-This exercises the same MCP client path used by real stdio servers without requiring you to write or host a test server.
+Then, from an ACP session connected to this workspace (`contenox acp`), ask the agent to "Use the smoke-files MCP tools to read note.txt and quote its contents." This exercises the same MCP client path used by real stdio servers without requiring you to write or host a test server.
 
 ## Use MCP servers in a chain
 

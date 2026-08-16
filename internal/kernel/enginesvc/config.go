@@ -22,12 +22,6 @@ type Config struct {
 	AltDefaultModel    string
 	AltDefaultProvider string
 
-	// DefaultEmbedModel/DefaultEmbedProvider select the embedding model; empty
-	// falls back to the default-embed-model/-provider config keys, then the
-	// chat model.
-	DefaultEmbedModel    string
-	DefaultEmbedProvider string
-
 	// DefaultAudioModel/DefaultAudioProvider select the model preferred for
 	// audio-bearing requests; empty falls back to the default-audio-model/
 	// -provider config keys.
@@ -83,9 +77,6 @@ type Engine struct {
 	// Models is the shared model repo the engine built — the ONE resolved
 	// route to a provider.
 	Models llmrepo.ModelRepo
-	// EmbeddingModel is the model/provider Models embeds with, already resolved
-	// through config keys and the chat-model fallback.
-	EmbeddingModel llmrepo.ModelConfig
 	// AudioModel is the model/provider role preferred for audio-bearing
 	// requests, already resolved through config keys; zero-valued when unset.
 	AudioModel    llmrepo.ModelConfig

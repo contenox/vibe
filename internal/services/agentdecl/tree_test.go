@@ -322,7 +322,7 @@ func TestUnit_Tree_PreseedShipsAWorkingTreeExample(t *testing.T) {
 // the engine applies to a hand-written one.
 func TestUnit_Tree_EmittedChainsLint(t *testing.T) {
 	cfg := mustShipped(t)
-	for _, name := range []string{"acp", "beam", "contenox", "triage"} {
+	for _, name := range []string{"acp", "triage"} {
 		t.Run(name, func(t *testing.T) {
 			tree, err := agentdecl.LoadTree(filepath.Join("preseed", "agents", name), cfg)
 			require.NoError(t, err)

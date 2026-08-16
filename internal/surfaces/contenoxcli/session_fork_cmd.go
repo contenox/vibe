@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/contenox/contenox/internal/services/agentdecl"
 	"os"
 	"path/filepath"
 
@@ -189,7 +190,8 @@ func resolveSystemChain(cmd *cobra.Command, contenoxDir, name string) (string, e
 }
 
 // lookupSystemFile finds a config file by name, strongest first: the workspace
-// .contenox/, then ~/.contenox/, then the shipped copies in ~/.contenox/system/.
+// .contenox/, then ~/.contenox/, then the transpiled chains in .generated/,
+// then the shipped copies in ~/.contenox/system/.
 //
 // The two operator-owned locations come first on purpose — copying a shipped
 // file up one level is how you take ownership of it, and that has to keep
@@ -208,6 +210,16 @@ func lookupSystemFile(contenoxDir, name string) (string, error) {
 	homePath := filepath.Join(homeDir, name)
 	if _, err := os.Stat(homePath); err == nil {
 		return homePath, nil
+	}
+	if contenoxDir != "" {
+		generatedPath := filepath.Join(contenoxDir, agentdecl.GeneratedDirName, name)
+		if _, err := os.Stat(generatedPath); err == nil {
+			return generatedPath, nil
+		}
+	}
+	generatedHome := filepath.Join(homeDir, agentdecl.GeneratedDirName, name)
+	if _, err := os.Stat(generatedHome); err == nil {
+		return generatedHome, nil
 	}
 	systemPath := filepath.Join(systemDir(homeDir), name)
 	if _, err := os.Stat(systemPath); err == nil {

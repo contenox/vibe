@@ -14,13 +14,11 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/enginesvc"
 	"github.com/contenox/contenox/internal/kernel/reasoning"
-	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/eventlog"
 	"github.com/contenox/contenox/internal/services/fleetservice"
-	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/missionservice"
@@ -44,9 +42,10 @@ var acpCmd = &cobra.Command{
 	Short: "Run the Contenox ACP server over stdio.",
 	Long: `Speak Agent Client Protocol over stdio so editors like Zed can run local Contenox chains.
 
-The chain executed for each session/prompt is loaded from ~/.contenox/chain-agent-acp.json
-(override with the CONTENOX_ACP_CHAIN_PATH environment variable). Populate it like any other
-contenox chain.
+The chain executed for each session/prompt is compiled from its agents/ declaration into
+~/.contenox/.generated/chain-agent-acp.json (an operator copy at ~/.contenox/chain-agent-acp.json
+wins if present, then .generated/, then the system/ fallback). Override the path entirely with
+the CONTENOX_ACP_CHAIN_PATH environment variable.
 
 The default model is read from the global 'default-model' / 'default-provider' configuration
 (set via 'contenox config set default-model …'). Logging goes to stderr; stdin/stdout are
@@ -66,8 +65,9 @@ var acpxCmd = &cobra.Command{
 	Long: `Same Agent Client Protocol server as 'acp', for drivers that are not the
 device owner — OpenClaw and other non-editor clients. It loads the hardened
 hitl-policy-acpx.json (local_shell denied, web mutations denied, web reads
-gated) and the chain at ~/.contenox/chain-agent-acpx.json (override with
-CONTENOX_ACPX_CHAIN_PATH).
+gated) and the chain compiled from its agents/ declaration into
+~/.contenox/.generated/chain-agent-acpx.json (operator copy, then .generated/,
+then system/ — override the path entirely with CONTENOX_ACPX_CHAIN_PATH).
 
 Containment for the untrusted driver is the HITL policy, not an in-chain
 step. IDE clients (Zed, GoLand, AionUi) should keep using 'acp'. Selection
@@ -98,7 +98,6 @@ type acpProfile struct {
 	hitlPolicy   string
 	chainFile    string
 	chainEnv     string
-	seedChain    func(contenoxDir string) error
 	embedFleet   bool
 	seedFIMChain func(contenoxDir string) error
 	// host runs a long-lived host instead of an ACP connection over stdio:
@@ -117,7 +116,6 @@ var acpProfileACP = acpProfile{
 	hitlPolicy:   "hitl-policy-acp.json",
 	chainFile:    chainAgentACPFilename,
 	chainEnv:     "CONTENOX_ACP_CHAIN_PATH",
-	seedChain:    seedACPChainIfMissing,
 	embedFleet:   true,
 	seedFIMChain: seedFIMChainIfMissing,
 	name:         "acp",
@@ -130,7 +128,6 @@ var acpProfileServe = acpProfile{
 	hitlPolicy:   "hitl-policy-acp.json",
 	chainFile:    chainAgentACPFilename,
 	chainEnv:     "CONTENOX_ACP_CHAIN_PATH",
-	seedChain:    seedACPChainIfMissing,
 	embedFleet:   true,
 	seedFIMChain: seedFIMChainIfMissing,
 	host:         true,
@@ -141,7 +138,6 @@ var acpProfileACPX = acpProfile{
 	hitlPolicy: "hitl-policy-acpx.json",
 	chainFile:  chainAgentACPXFilename,
 	chainEnv:   "CONTENOX_ACPX_CHAIN_PATH",
-	seedChain:  seedHeadlessACPChainIfMissing,
 	name:       "acpx",
 }
 
@@ -252,13 +248,6 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		return fmt.Errorf("seed HITL policy presets: %w", err)
 	}
 	reportChange("phase", "seed_hitl")
-	if profile.seedChain != nil {
-		if err := profile.seedChain(contenoxDir); err != nil {
-			reportErr(err)
-			return fmt.Errorf("seed ACP chain preset: %w", err)
-		}
-	}
-	reportChange("phase", "seed_chain")
 	seedOptionalFIMChain(profile, contenoxDir)
 	reportChange("phase", "seed_fim_chain")
 
@@ -328,35 +317,13 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	// /policy and `contenox config set hitl-policy-name` both write this workspace's row; the evaluator must read the same one.
 	hitlservice.SetWorkspaceID(acpHITL, workspaceID)
 
-	// Same SANDBOX_* scrub composition BuildEngine wires for local_shell (see sandbox_scrub.go).
-	shellScrub, _, err := resolvedSandboxEnv(db, tracker, os.Stderr)
-	if err != nil {
-		return fmt.Errorf("resolve sandbox env: %w", err)
-	}
-
-	// Opt-in-beta gated: without it the scripts are never loaded and the provider stays unregistered.
-	gojaScriptDir := filepath.Join(contenoxDir, "tools")
-	if !optInBeta {
-		gojaScriptDir = ""
-	}
-	gt, err := gojatool.New(gojatool.Config{ScriptDir: gojaScriptDir})
-	if err != nil {
-		return fmt.Errorf("build goja sandbox: %w", err)
-	}
-	toolsOwned := false
-	defer func() {
-		if !toolsOwned {
-			gt.Shutdown()
-		}
-	}()
-
 	// Declared here, assigned once the fleet is built below: the toolset's
 	// subagent-start tool resolves it per call, so the ordering holds.
 	var inProcessFleet fleetservice.Service
 
-	tools := acpToolset(db, tracker, gt, workspaceID,
+	tools := acpToolset(db, tracker, workspaceID,
 		routedTransport(sessionRouter, func() *acpsvc.Transport { return transport }),
-		shellScrub, missions, acpHITL, missionPub, optInBeta,
+		missions, acpHITL, missionPub, optInBeta,
 		func() fleetservice.Service { return inProcessFleet })
 
 	oracleStore := runtimetypes.New(db.WithoutTransaction())
@@ -409,10 +376,6 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			Tracker:            tracker,
 			WorkspaceID:        workspaceID,
 			Bus:                bus, // reuse the one bus, not a second
-			// Closes the goja sandbox's construction cycle: host.tool needs the aggregate repo the sandbox is itself registered inside.
-			OnToolsRepoReady: func(repo taskengine.ToolsRepo) {
-				gt.SetHost(gojatool.HostFromRepo(repo))
-			},
 		}
 		if enableHITL {
 			cfg.EnableHITL = true
@@ -428,14 +391,6 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			return fmt.Errorf("build engine: %w", err)
 		}
 		// Needs the engine's chat path, which now exists (same post-construction ordering as engine.go).
-		bindAudioTranscriber(tools, engine)
-		// Rides the engine's chainable stop so the goja sandbox joins on shutdown.
-		toolsOwned = true
-		oldStop := engine.Stop
-		engine.Stop = func() {
-			gt.Shutdown()
-			oldStop()
-		}
 		defer engine.Stop()
 		// A verdict landing with no waiter parked resumes the suspended run here.
 		hitlservice.SetResumeHook(acpHITL, agentservice.ResumeHook(agentservice.Deps{

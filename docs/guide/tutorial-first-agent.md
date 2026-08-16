@@ -24,7 +24,7 @@ mkdir -p .contenox/agents
 ---
 name: reviewer
 description: Reviews a Go file for correctness problems
-tools: Read, Glob, Grep
+tools: read_file, write_file
 ---
 
 You are a Go code reviewer. Read the file you are asked about using the tools
@@ -51,13 +51,6 @@ reviewer  discovered  chain  true
 
 ```bash
 contenox mission fire reviewer "review payments.go" --wait
-```
-
-Or drive it directly while you are iterating:
-
-```bash
-contenox run --chain .contenox/.generated/chain-agent-reviewer.json \
-  --input-type chat "Review payments.go in the current directory."
 ```
 
 Reading files is allowed under the default posture, so it runs without asking.

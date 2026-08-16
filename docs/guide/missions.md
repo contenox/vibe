@@ -9,15 +9,16 @@ A mission is a one-line intent fired at a declared agent, run unattended inside 
 
 This page is the lifecycle: what a mission is, what fires one, what the states mean, how a question gets answered, and what the runtime does when nobody is left to ask.
 
-## Mission, chain run, session
+## Mission, session
 
-Three things run work in contenox, and they are not interchangeable.
+Two things run work in contenox, and they are not interchangeable.
 
 | | What it is | Who drives it | What survives |
 |---|---|---|---|
-| **Chain run** (`contenox run`) | One stateless execution of a chain file | The invoking process, start to finish | The captured execution state (`contenox state show <reqID>`) |
-| **Session** (`contenox acp`, `contenox chat`) | An attended conversation: you prompt, you approve each gated call | You, turn by turn | The session history |
+| **Session** (`contenox acp`, `contenox serve`) | An attended conversation: you prompt, you approve each gated call | You, turn by turn | The session history |
 | **Mission** (`mission fire`, `/mission`) | An unattended work order: one intent, one agent, one envelope | The runtime's drive loop, unattended | The mission record, its reports, its plan, and its asks |
+
+Either one leaves a captured execution state you can read back with `contenox state show <reqID>`.
 
 A mission dispatches a **unit**: a child subprocess running the agent, with its own session underneath. You do not prompt that session. The runtime does, under the rules below.
 

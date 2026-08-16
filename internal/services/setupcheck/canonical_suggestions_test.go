@@ -37,7 +37,6 @@ func TestUnit_CanonicalSuggestions_NoStaleStrings(t *testing.T) {
 		outputs["providerAddCommand("+p+")"] = providerAddCommand(p)
 		outputs["noChatModelsCommand("+p+")"] = noChatModelsCommand(p)
 		outputs["primaryDiagnosticCommand("+p+")"] = primaryDiagnosticCommand(p)
-		outputs["embedModelCommand("+p+")"] = embedModelCommand(p, "some-embed-model")
 		outputs["repairBackendCommand("+p+")"] = repairBackendCommand(&BackendCheck{Name: p, Type: p})
 	}
 	outputs["repairBackendCommand(ollama-cloud)"] = repairBackendCommand(&BackendCheck{Name: "ollama-cloud", Type: "ollama", BaseURL: "https://ollama.com/api"})

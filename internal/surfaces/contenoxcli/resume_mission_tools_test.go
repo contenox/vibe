@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
@@ -76,12 +75,8 @@ func TestUnit_LocalToolset_MissionToolsCarryTheAskerAndThePublisher(t *testing.T
 	m := &missionservice.Mission{Intent: "resolve ambiguity", AgentName: "unit", HITLPolicyName: "envelope.json"}
 	require.NoError(t, missions.Create(ctx, m))
 
-	gt, err := gojatool.New(gojatool.Config{})
-	require.NoError(t, err)
-	t.Cleanup(gt.Shutdown)
-
 	asker := &recordingAsker{answer: "the main branch"}
-	tools := localToolset(chatOpts{}, db, libtracker.NoopTracker{}, gt, missions, missiontools.WithAttentionAsker(asker))
+	tools := localToolset(chatOpts{}, db, libtracker.NoopTracker{}, missions, missiontools.WithAttentionAsker(asker))
 	repo := tools[missiontools.ToolsProviderName]
 	require.NotNil(t, repo, "the resume path needs the mission tools registered")
 

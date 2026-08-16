@@ -13,15 +13,13 @@ This page is the mechanism. For the argument — what belongs in the file, what 
 
 ## How it loads
 
-When `contenox chat` starts a new session, it walks up from the current working directory to find the closest `AGENTS.md`. If found, it's prepended to the chat history as a single `system` message — once per session, not once per turn — and persisted alongside the conversation.
+When a new session starts — an ACP session (`contenox acp` / `acpx`) or one created with `contenox session new` — contenox walks up from the current working directory to find the closest `AGENTS.md`. If found, it's prepended to the chat history as a single `system` message — once per session, not once per turn — and persisted alongside the conversation.
 
 Because it lands in chat history (not the system prompt), it's:
 
 - **Cached** by providers on subsequent turns — no re-render cost
 - **Persisted** in the message store — survives restarts, visible in `sqlite3 ~/.contenox/local.db`
 - **Reference material**, not unconditional rules — the model treats it as project context to consult, not directives to obey blindly
-
-`contenox run` is stateless, so it loads `AGENTS.md` afresh on every invocation when input type is `chat`.
 
 ## Closest-wins precedence
 
@@ -56,7 +54,7 @@ The spec is open — any markdown — but useful sections include:
 
 ## Project conventions
 - Mutating local_fs operations require a prior `read_file` (read-before-write contract)
-- HITL is on by default for write_file, edit_file, sed, local_shell, and mutating web verbs
+- HITL is on by default for write_file, edit_file, sed, and local_shell
 
 ## Don't do
 - Never run `git push --force` unprompted

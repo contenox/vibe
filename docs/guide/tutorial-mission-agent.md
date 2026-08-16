@@ -5,8 +5,8 @@ description: Declare an agent in a file, fire it at an intent, and walk away. Wh
 
 # Tutorial: a mission agent
 
-In [the vault tutorial](/docs/guide/tutorial-vault-agent/) you drove an agent by
-typing a prompt and watching it work. This one you fire and leave:
+In [the vault tutorial](/docs/guide/tutorial-vault-agent/) you fired an agent and
+stood there waiting for it. This one you fire and leave:
 
 ```bash
 contenox mission fire vaultfiler "File every file in inbox/ into the vault as a note" \
@@ -39,25 +39,15 @@ Four things, and it is worth knowing why before you write any JSON:
 4. **The agent needs a name**, because you fire at a name rather than pointing
    at a file.
 
-## 1. Name the file so the agent exists
+## 1. The file already has a name
 
 A [declared agent](/docs/guide/agents/) already has a name — its frontmatter
-gave it one. The vault agent is a chain you wrote by hand, so it needs the file
-convention instead: discovery registers every `chain-agent-*.json` file as a
-dispatchable agent. Rename your chain:
-
-```bash
-mv .contenox/vault-filer.json .contenox/chain-agent-vaultfiler.json
-```
-
-Then set the chain's `id`, because **the `id` is the agent's name — not the
-filename**:
-
-```json
-{ "id": "vaultfiler", ... }
-```
-
-Confirm it exists:
+gave it one. The vault agent is a chain you wrote by hand, so it earns its name
+the file convention's way instead: discovery registers every `chain-agent-*.json`
+file as a dispatchable agent, using the chain's `id` — **not the filename** — as
+the agent's name. The vault tutorial already saved its chain as
+`.contenox/chain-agent-vaultfiler.json` with `"id": "vaultfiler"`, so there is
+nothing to rename here. Confirm it is visible:
 
 ```bash
 contenox agent list
@@ -77,7 +67,7 @@ renamed the agent. See [chain naming](/docs/guide/chain-naming/).
 This is the one that catches everyone. Add `mission` to the task's tools:
 
 ```json
-"tools": ["local_fs", "mission"]
+"tools": ["local_fs", "local_shell", "mission"]
 ```
 
 Without it the agent can do the work and still fail the mission, because
@@ -181,8 +171,8 @@ you route them. Point `on_failure` at a task that reports:
 }
 ```
 
-The shipped `chain-agent-run.json` does the same thing with a `recovery_run` and
-a `summarise_failure` task. Copy that shape when the work is worth retrying.
+The shipped `acp` agent does the same thing with a `recovery.md` per branch and
+a root `failure.md`. Copy that shape when the work is worth retrying.
 
 ## 5. Write the envelope for a room with nobody in it
 
@@ -204,7 +194,8 @@ into an empty room. Write the mission envelope with `allow` and `deny` only:
   "rules": [
     { "tools": "mission",  "tool": "*",          "action": "allow" },
     { "tools": "local_fs", "tool": "read_file",  "action": "allow" },
-    { "tools": "local_fs", "tool": "list_dir",   "action": "allow" },
+    { "tools": "local_shell", "tool": "local_shell", "action": "allow",
+      "when": [ { "key": "command", "op": "command_prefix_allowlist", "value": "ls" } ] },
     { "tools": "local_fs", "tool": "write_file", "action": "allow",
       "when": [ { "key": "path", "op": "glob", "value": "**/vault/**" } ] },
     { "tools": "local_fs", "tool": "write_file", "action": "deny" }

@@ -15,8 +15,6 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-var osFallback = localtools.NewOSFileIO()
-
 type acpFileIO struct {
 	transport TransportResolver
 }
@@ -24,11 +22,6 @@ type acpFileIO struct {
 // NewACPFileIO reads and writes through the ACP client attached to the calling
 // session, so an editor's unsaved buffers are what the agent sees.
 //
-// With no client attached to that session it reads the disk instead. That is
-// the same fallback a client advertising no filesystem capability already
-// takes, and it is what lets a host serve work nobody is watching — a chain
-// fired by a trigger has no editor to proxy through, and failing such a call
-// would make file tools unusable outside an editor.
 func NewACPFileIO(transport TransportResolver) localtools.FileIO {
 	return &acpFileIO{transport: transport}
 }
@@ -44,7 +37,7 @@ func (a *acpFileIO) resolve(ctx context.Context) *Transport {
 func (a *acpFileIO) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	t := a.resolve(ctx)
 	if t == nil || !t.getClientCaps().FS.ReadTextFile {
-		return osFallback.ReadFile(ctx, path)
+		return nil, localtools.ErrNoFilesystem
 	}
 	req := libacp.ReadTextFileRequest{Path: path}
 	if sid := resolveACPSessionID(ctx, t); sid != "" {
@@ -60,7 +53,7 @@ func (a *acpFileIO) ReadFile(ctx context.Context, path string) ([]byte, error) {
 func (a *acpFileIO) WriteFile(ctx context.Context, path string, data []byte) error {
 	t := a.resolve(ctx)
 	if t == nil || !t.getClientCaps().FS.WriteTextFile {
-		return osFallback.WriteFile(ctx, path, data)
+		return localtools.ErrNoFilesystem
 	}
 	req := libacp.WriteTextFileRequest{Path: path, Content: string(data)}
 	if sid := resolveACPSessionID(ctx, t); sid != "" {

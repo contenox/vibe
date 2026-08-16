@@ -32,11 +32,6 @@ If you haven't installed Contenox yet, do the [Quickstart](/docs/guide/quickstar
 ├── hitl-policy-acp.json        ← editor (ACP) sessions
 ├── hitl-policy-acpx.json       ← headless / untrusted-driver (ACPX) sessions
 └── system/                     ← the shipped chains: machinery, not yours to author
-    ├── chain-agent-contenox.json   ← the interactive chat chain
-    ├── chain-agent-run.json        ← the one-shot pipeline chain
-    ├── chain-agent-acp.json        ← editor (ACP) sessions
-    ├── chain-agent-acpx.json       ← headless / untrusted-driver (ACPX) sessions
-    ├── chain-agent-beam.json       ← attended terminal sessions
     ├── chain-planner-default.json  ← the default mission planner
     ├── chain-compact-default.json  ← history compaction
     └── chain-fim-default.json      ← editor autocomplete
@@ -47,35 +42,27 @@ If you haven't installed Contenox yet, do the [Quickstart](/docs/guide/quickstar
 
 To make any directory a workspace, run `contenox init` inside it. Workspace-scoped config (like `default-chain` and `hitl-policy-name`) is stored per-workspace in the SQLite database.
 
-**Taking ownership of a shipped chain is a copy.** Files resolve by name — the workspace `.contenox/` first, then `~/.contenox/`, then `~/.contenox/system/`. So copying one up a level makes it yours, and `contenox init` will not write over it or put a shipped copy back underneath:
-
-```bash
-cp ~/.contenox/system/chain-agent-run.json ~/.contenox/
-```
+**Taking ownership of a shipped chain is a copy.** Files resolve by name — the workspace `.contenox/` first, then `~/.contenox/`, then `~/.contenox/system/`. So copying one up a level makes it yours, and `contenox init` will not write over it or put a shipped copy back underneath.
 
 > **Note:** `contenox init --local` seeds the shipped chains and HITL policy presets into the workspace `.contenox/` for you — the supported way to create workspace-local overrides without copying files by hand. `contenox doctor` lists which workspace copies are currently shadowing global ones.
 
 ## What `contenox init` already gave you
 
-Look in `~/.contenox/system/`. Every chain file follows the `chain-<role>-<variant>.json` naming convention ([the full grammar](/docs/guide/chain-naming/)). Two of them carry the CLI's day-to-day work:
-
-- `chain-agent-contenox.json` — the interactive chat loop, used by `contenox chat` **and** by a bare `contenox "..."` (a bare prompt is session-backed chat, not a stateless run)
-- `chain-agent-run.json` — the one-shot, stateless pipeline loop, used only by `contenox run`
-
-The second one is a real authored chain: a main agentic loop with a 10-round budget, a recovery loop with another 10 rounds, and a final `summarise_failure` task that runs when both budgets are exhausted. Tool allowlists, retry policies, edge-traversal counters — every decision is a JSON key. The loop structure itself — why it is staged that way, and how to derive your own — is explained in [The agentic loop](/docs/guide/agentic-loop/).
+Look in `~/.contenox/system/`. Every chain file follows the `chain-<role>-<variant>.json` naming convention ([the full grammar](/docs/guide/chain-naming/)).
 
 You don't have to start there. You can write your own.
 
-Chains live as files in `~/.contenox/` (and your workspace `.contenox/`); the
-CLI picks one per invocation with `--chain`, or falls back to the configured
-`default-chain`. Sessions in ACP editors run the workspace's default chain the
-same way.
+Chains live as files in `~/.contenox/` (and your workspace `.contenox/`). Name
+one `chain-agent-<something>.json` and it's discovered as a fleet-dispatchable
+agent, fireable by its `id` (below); a session instead falls back to the
+configured `default-chain`, and ACP editor sessions run the workspace's
+default chain the same way.
 
 ---
 
 ## A minimal chain
 
-Create `./my-chain.json`:
+Create `.contenox/chain-agent-my-chain.json`:
 
 ```json
 {
@@ -98,10 +85,10 @@ Create `./my-chain.json`:
 }
 ```
 
-Run it:
+Fire it:
 
 ```bash
-contenox run --chain ./my-chain.json "what is the capital of France?"
+contenox mission fire my-chain "what is the capital of France?" --wait
 ```
 
 That's the smallest working chain: one task, one default branch out. Now we'll author behavior into it.

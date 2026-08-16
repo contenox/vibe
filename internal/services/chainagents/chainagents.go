@@ -27,11 +27,8 @@ const AgentChainFilePrefix = "chain-agent-"
 
 // shippedAgentChains are the ids of the runtime's own agent-shaped (not utility) chains.
 var shippedAgentChains = map[string]bool{
-	"chain-contenox": true, // default interactive chat agent (chain-agent-contenox.json)
-	"chain-acp":      true, // the ACP agent surface (chain-agent-acp.json)
-	"chain-acpx":     true, // the headless/untrusted-driver ACP agent (chain-agent-acpx.json)
-	"chain-beam":     true, // the attended-session agent surface (chain-agent-beam.json)
-	"chain-run":      true, // the one-shot `contenox run` agent (chain-agent-run.json)
+	"chain-acp":  true, // the ACP agent surface (chain-agent-acp.json)
+	"chain-acpx": true, // the headless/untrusted-driver ACP agent (chain-agent-acpx.json)
 }
 
 // shippedPlannerAgent is the shipped default-mission planner's chain id and

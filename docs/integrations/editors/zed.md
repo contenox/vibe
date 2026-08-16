@@ -33,11 +33,11 @@ Restart Zed (or reload the window). Open the agent panel — Contenox now appear
 
 ## What you get
 
-**Tool cards with real context.** When the chain runs a shell command, the card shows `local_shell: git status --short` — the actual command, not just the tool name. Same for `local_fs.read_file`, `local_fs.write_file`, `grep`, `sed`, and other built-in tools. This is the card you approve from, so it shows what will actually run.
+**Tool cards with real context.** When the chain runs a shell command, the card shows `local_shell: git status --short` — the actual command, not just the tool name. Same for `local_fs.read_file`, `local_fs.write_file`, `local_fs.sed`, and any other `local_shell` command (`grep`, `rg`, `find`, ...). This is the card you approve from, so it shows what will actually run.
 
-**Native editor surfaces.** `local_fs.read_file`/`local_fs.write_file` route through Zed's own filesystem capability — sandboxed, with a read-before-write contract. `local_shell` runs in a real Zed terminal you can interact with.
+**Native editor surfaces.** `local_fs.read_file`/`local_fs.write_file`/`local_fs.edit_file` route through Zed's own filesystem capability — sandboxed, with a read-before-write contract. `local_shell` runs in a real Zed terminal you can interact with.
 
-**HITL through the editor.** When your chain calls a tool listed in your active HITL policy, Contenox's [HITL policy](/docs/guide/hitl/) applies — and the approval dialog is routed to Zed's permission UI instead of a terminal prompt. The default policy gates `local_fs.write_file`, `local_fs.edit_file`, `local_fs.sed`, `local_shell.*`, and mutating `webtools` calls.
+**HITL through the editor.** When your chain calls a tool listed in your active HITL policy, Contenox's [HITL policy](/docs/guide/hitl/) applies — and the approval dialog is routed to Zed's permission UI instead of a terminal prompt. The default policy gates `local_fs.write_file`, `local_fs.edit_file`, `local_fs.sed`, and `local_shell.*` calls.
 
 **Session history that replays.** Close Zed mid-conversation and reopen the project — your prompts, the agent's responses, and every tool call (with its output) come back. State lives in `~/.contenox/local.db`.
 
@@ -45,12 +45,11 @@ Restart Zed (or reload the window). Open the agent panel — Contenox now appear
 
 ## Choosing the chain
 
-ACP sessions use a dedicated chain file separate from the CLI's default chain:
+ACP sessions load a chain compiled from the `acp` agent declaration (router + coding/general/review loops, under `.contenox/agents/`). Contenox resolves it in order, first match wins: an operator copy at `~/.contenox/<name>.json`, then the compiled `~/.contenox/.generated/<name>.json`, then the shipped `~/.contenox/system/<name>.json`.
 
-- Loaded from `~/.contenox/chain-agent-acp.json`, falling back to the shipped copy in `~/.contenox/system/`. Copy it up a level to edit it.
-- Override path with the `CONTENOX_ACP_CHAIN_PATH` environment variable (set it in the shell that launches Zed).
+Override the path entirely with the `CONTENOX_ACP_CHAIN_PATH` environment variable (set it in the shell that launches Zed).
 
-The ACP chain looks like any other Contenox chain. The default chain uses `"tools": ["*"]`, which exposes everything the engine has registered — `local_fs`, `local_shell`, `webtools`, plus any MCP servers you've added via `contenox mcp add`.
+The ACP chain looks like any other Contenox chain. Its `"tools": ["*"]` exposes everything the engine has registered — `local_fs`, `local_shell`, plus any MCP servers you've added via `contenox mcp add`.
 
 ---
 
@@ -63,13 +62,13 @@ contenox config set default-model qwen3:8b
 contenox config set default-provider ollama
 ```
 
-Models are global; the ACP chain loads from `~/.contenox/` as described above. Switching the model for ACP also switches it for `contenox chat`.
+Models are global config, shared across every surface that reads `default-model` — switching it here switches it everywhere.
 
 ---
 
 ## HITL approval flow
 
-When the chain calls a tool listed in your active HITL policy (default: `local_fs.write_file`, `local_fs.edit_file`, `local_fs.sed`, `local_shell.*`, mutating `webtools`), Contenox emits an ACP permission request which Zed renders as an approval dialog. The card shows the actual command/path, so you approve the specific operation — not a bare tool name.
+When the chain calls a tool listed in your active HITL policy (default: `local_fs.write_file`, `local_fs.edit_file`, `local_fs.sed`, `local_shell.*`), Contenox emits an ACP permission request which Zed renders as an approval dialog. The card shows the actual command/path, so you approve the specific operation — not a bare tool name.
 
 To skip Contenox HITL entirely (trusted/scripted contexts), launch with `--auto`:
 

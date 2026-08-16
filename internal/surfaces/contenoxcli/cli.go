@@ -7,12 +7,10 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/reasoning"
@@ -104,8 +102,6 @@ func dispatchSubcommand(args []string, onlyHelp bool) string {
 	switch {
 	case containsExperimentalACPFlag(args) && !firstNonFlagIsReserved(args):
 		return "acp"
-	case !onlyHelp && !firstNonFlagIsReserved(args):
-		return "chat"
 	}
 	return ""
 }
@@ -229,71 +225,14 @@ vLLM.
 	SilenceErrors: true,
 }
 
-var chatCmd = &cobra.Command{
-	Use:   "chat",
-	Short: "Run a stateful chat session (default when no subcommand is given).",
-	Long: `Send a message to the active chat session and get a response.
-Input is passed as positional args, --input, or piped via stdin.
-
-  contenox "what can you do?"
-  echo "summarise README.md" | contenox
-  contenox chat --shell "list files in the current dir"
-
-Sessions persist conversation history across invocations.
-Each session remembers previous messages so the model has context.
-The first run auto-creates a "default" session. Manage sessions with:
-
-  contenox session list              list active-scope sessions (* = active)
-  contenox session list --all        list every session across the whole DB
-  contenox session new <name>        create a new named session (becomes active)
-  contenox session switch <name>     switch to a different session
-  contenox session show [name|id]    print a session (active, by name, or by id)
-  contenox session delete <name>     delete a session and all its messages
-  contenox session workspaces        list workspaces and namespaces (whole DB)
-  contenox session fork --summary    compact older history into a summary and continue
-                                     in a new session (useful when context fills up)
-
-Giving the model tools (file system and shell access):
-
-  --local-exec-allowed-dir <dir>     allow local_fs tools inside <dir>
-  --shell                            enable local_shell (command policy is defined in the chain)
-
-Human-in-the-loop is on by default. The workflow pauses for terminal approval before
-write_file, sed, and local_shell calls. The active policy is defined in
-~/.contenox/hitl-policy-default.json (override per workspace via
-.contenox/hitl-policy-*.json or via 'contenox config set hitl-policy-name').
-
-  --auto                             non-interactive mode: skip approval prompts
-                                     entirely. Use only in trusted environments
-                                     or for scripted workflows.
-
-Examples:
-  # Chat with file system access to the current project:
-  contenox chat --local-exec-allowed-dir . "summarise the README"
-
-  # Shell access (policy comes from the chain's tools_policies; default chains allow common dev tools):
-  contenox chat --shell "suggest a commit message from git diff"
-
-  # Non-interactive shell run — no approvals, runs everything allowed by policy (USE WITH CARE):
-  contenox chat --shell --local-exec-allowed-dir . --auto "refactor main.go to use slog"
-
-  # Trim context: only send last 10 messages from session history to the model:
-  contenox chat --trim 10 "let's continue where we left off"
-
-  # Show last 6 turns of the conversation after the reply:
-  contenox chat --last 6 "hello"`,
-	Args: cobra.ArbitraryArgs,
-	RunE: runChat,
-}
-
 var initCmd = &cobra.Command{
 	Use:   "init [provider]",
 	Short: "Seed the default chain files and HITL policy presets; mark the project.",
 	Long: `Seed the default chain files and HITL policy presets, and mark the project.
 
-By default the chain files (chain-agent-contenox.json, chain-agent-run.json, …) and
-the hitl-policy-*.json presets are written to ~/.contenox/ and shared by every
-project; the project itself only gets a workspace marker (.contenox/workspace.id).
+By default the chain files and the hitl-policy-*.json presets are written to
+~/.contenox/ and shared by every project; the project itself only gets a
+workspace marker (.contenox/workspace.id).
 With --local they are written into the workspace .contenox/ instead, creating
 deliberate workspace-local overrides — a same-named workspace file wins over
 the global copy.
@@ -384,7 +323,7 @@ func init() {
 	f.String("think", "", "Set reasoning level for supported models: auto, off, minimal, low, medium, high, xhigh (default: config default-think, then high)")
 	f.BoolP("editor", "e", false, "Open $VISUAL or $EDITOR (VS Code terminal: code --wait; fallback nano) to compose the prompt; piped stdin is preloaded as reference")
 
-	rootCmd.AddCommand(initCmd, chatCmd, sessionCmd, runCmd, toolsCmd, doctorCmd, versionCmd)
+	rootCmd.AddCommand(initCmd, sessionCmd, toolsCmd, doctorCmd, versionCmd)
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(backendCmd)
 	rootCmd.AddCommand(agentCmd)
@@ -412,11 +351,6 @@ func init() {
 	initCmd.Flags().Bool("local", false, "Write the chain files and HITL policy presets into the workspace .contenox/ instead of ~/.contenox — same-named workspace copies override the global ones")
 	initCmd.Flags().Bool("project", false, "Create a project marker in the CURRENT directory (a fresh workspace id), instead of reusing an ancestor's .contenox")
 	initCmd.Flags().String("name", "", "Friendly project name for the marker (default: the directory name)")
-
-	chatCmd.Flags().Int("trim", 0, "Only send the last N messages from session history to the model (0 = send all)")
-	chatCmd.Flags().StringArray("attach", nil, "Attach an image to this message (repeatable). Routes to a vision-capable model.")
-	chatCmd.Flags().Int("last", 0, "Print last N user/assistant turns after the reply (0 = only print new reply)")
-	chatCmd.Flags().Bool("auto", false, "Non-interactive mode: disable HITL approval prompts. Default is HITL on; tools route through the active hitl-policy. Use --auto only in trusted/scripted contexts.")
 
 }
 
@@ -549,207 +483,6 @@ func resolveProjectInit(cwd, name string) (contenoxDir, projectName string) {
 		projectName = filepath.Base(filepath.Dir(contenoxDir))
 	}
 	return contenoxDir, projectName
-}
-
-func runChat(cmd *cobra.Command, args []string) error {
-	flags := cmd.Root().Flags()
-	useEditor, _ := flags.GetBool("editor")
-
-	if len(args) == 1 && args[0] == "help" && !flags.Changed("input") && !useEditor {
-		_ = cmd.Help()
-		return nil
-	}
-
-	if len(args) == 0 && !flags.Changed("input") && !useEditor {
-		if stat, err := os.Stdin.Stat(); err != nil || (stat.Mode()&os.ModeCharDevice) != 0 {
-			_ = cmd.Usage()
-			return nil
-		}
-	}
-
-	contenoxDir, err := ResolveContenoxDir(cmd)
-	if err != nil {
-		return fmt.Errorf("failed to resolve .contenox dir: %w", err)
-	}
-
-	dbPath, err := resolveDBPath(cmd)
-	if err != nil {
-		return err
-	}
-	dbCtx := libtracker.WithNewRequestID(context.Background())
-	db, err := OpenDBAt(dbCtx, dbPath)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	closeLogs, err := setupTelemetryLogging(dbCtx, runtimetypes.New(db.WithoutTransaction()), contenoxDir)
-	if err != nil {
-		warnTelemetryLoggingUnavailable(cmd.ErrOrStderr(), err)
-	}
-	defer closeLogs()
-
-	store := runtimetypes.New(db.WithoutTransaction())
-
-	changed := func(name string) bool { return flags.Changed(name) }
-
-	configuredDefaultModel := ""
-	if kv, _ := getConfigKV(dbCtx, store, "default-model"); kv != "" {
-		configuredDefaultModel = kv
-	}
-	configuredDefaultProvider := ""
-	if kv, _ := getConfigKV(dbCtx, store, "default-provider"); kv != "" {
-		configuredDefaultProvider = kv
-	}
-
-	// Resolve model: flag > SQLite KV > hardcoded default.
-	effectiveModel, _ := flags.GetString("model")
-	if !changed("model") || effectiveModel == defaultModel {
-		if configuredDefaultModel != "" {
-			effectiveModel = configuredDefaultModel
-		}
-	}
-
-	effectiveDefaultProvider := configuredDefaultProvider
-	if changed("provider") {
-		effectiveDefaultProvider, _ = flags.GetString("provider")
-	}
-
-	effectiveAltModel := ""
-	if kv, _ := getConfigKV(dbCtx, store, "default-alt-model"); kv != "" {
-		effectiveAltModel = kv
-	}
-	if changed("alt-model") {
-		effectiveAltModel, _ = flags.GetString("alt-model")
-	}
-
-	effectiveAltProvider := ""
-	if kv, _ := getConfigKV(dbCtx, store, "default-alt-provider"); kv != "" {
-		effectiveAltProvider = kv
-	}
-	if changed("alt-provider") {
-		effectiveAltProvider, _ = flags.GetString("alt-provider")
-	}
-
-	effectiveMaxTokens, err := resolveEffectiveMaxTokens(dbCtx, store, flags)
-	if err != nil {
-		return err
-	}
-
-	effectiveContext, _ := flags.GetInt("context")
-	effectiveNoDeleteModels, _ := flags.GetBool("no-delete-models")
-
-	effectiveChain, _ := flags.GetString("chain")
-	if effectiveChain == "" && !changed("chain") {
-		// Workspace-scoped: read at the same scope `contenox config set default-chain` writes.
-		if kv, _ := clikv.ReadConfig(dbCtx, store, ResolveWorkspaceID(contenoxDir), clikv.KeyDefaultChain); kv != "" {
-			effectiveChain = kv
-			if !filepath.IsAbs(effectiveChain) {
-				if resolved, rerr := lookupSystemFile(contenoxDir, effectiveChain); rerr == nil {
-					effectiveChain = resolved
-				} else {
-					effectiveChain = filepath.Join(contenoxDir, effectiveChain)
-				}
-			}
-		}
-	}
-	if effectiveChain == "" && !changed("chain") {
-		if resolved, rerr := lookupSystemFile(contenoxDir, chainAgentContenoxFilename); rerr == nil {
-			effectiveChain = resolved
-		}
-	}
-	if effectiveChain == "" {
-		fmt.Fprintln(os.Stderr, "No default chain found in .contenox/ (workspace) or ~/.contenox/.")
-		fmt.Fprintln(os.Stderr, "Run 'contenox init' to scaffold one, or pass --chain explicitly.")
-		return errChainRequired
-	}
-
-	effectiveEnableLocalExec, _ := flags.GetBool("shell")
-	effectiveLocalExecAllowedDir, _ := flags.GetString("local-exec-allowed-dir")
-
-	effectiveTracing, _ := flags.GetBool("trace")
-	effectiveSteps, _ := flags.GetBool("steps")
-	effectiveRaw, _ := flags.GetBool("raw")
-
-	var inputValue string
-	var inputPassed bool
-	if useEditor {
-		var seed []byte
-		if data, ok, err := readStdinIfAvailable(maxCLIStdinBytes); err != nil {
-			return err
-		} else if ok {
-			seed = []byte(data)
-		}
-		prompt, err := captureFromEditor(seed, effectiveModel)
-		if err != nil {
-			if errors.Is(err, errEmptyPrompt) {
-				fmt.Fprintln(cmd.ErrOrStderr(), "aborted due to empty prompt")
-				return errPromptAborted
-			}
-			return err
-		}
-		inputValue = prompt
-		inputPassed = true
-	} else if changed("input") {
-		rawInput, _ := flags.GetString("input")
-		inputValue, err = resolveInputFlagValue("--input", rawInput)
-		if err != nil {
-			return err
-		}
-		inputPassed = true
-	} else if len(args) > 0 {
-		inputValue = strings.Join(args, " ")
-	}
-
-	timeout, _ := flags.GetDuration("timeout")
-	timeoutCtx, timeoutCancel := context.WithTimeout(libtracker.WithNewRequestID(context.Background()), timeout)
-	defer timeoutCancel()
-
-	// signal.NotifyContext makes cleanup automatic; avoids leaking a goroutine blocked forever on <-sigCh.
-	ctx, stop := signal.NotifyContext(timeoutCtx, syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
-	effectiveThink, err := resolveEffectiveThink(dbCtx, store, flags)
-	if err != nil {
-		return err
-	}
-	autoMode, _ := cmd.Flags().GetBool("auto")
-	effectiveHITL := !autoMode
-	historyTrim, _ := cmd.Flags().GetInt("trim")
-	lastN, _ := cmd.Flags().GetInt("last")
-	attachPaths, _ := cmd.Flags().GetStringArray("attach")
-
-	opts := chatOpts{
-		EffectiveDB:                  dbPath,
-		EffectiveChain:               effectiveChain,
-		EffectiveDefaultModel:        effectiveModel,
-		EffectiveDefaultProvider:     effectiveDefaultProvider,
-		EffectiveConfiguredModel:     configuredDefaultModel,
-		EffectiveConfiguredProvider:  configuredDefaultProvider,
-		EffectiveAltDefaultModel:     effectiveAltModel,
-		EffectiveAltDefaultProvider:  effectiveAltProvider,
-		EffectiveMaxTokens:           effectiveMaxTokens,
-		EffectiveContext:             effectiveContext,
-		EffectiveNoDeleteModels:      effectiveNoDeleteModels,
-		EffectiveEnableLocalExec:     effectiveEnableLocalExec,
-		EffectiveLocalExecAllowedDir: effectiveLocalExecAllowedDir,
-		EffectiveTracing:             effectiveTracing,
-		EffectiveSteps:               effectiveSteps,
-		EffectiveHITL:                effectiveHITL,
-		EffectiveRaw:                 effectiveRaw,
-		EffectiveThink:               effectiveThink,
-		EffectiveOptInBeta:           betaEnabled(dbCtx, store),
-		HistoryTrim:                  historyTrim,
-		LastN:                        lastN,
-		InputValue:                   inputValue,
-		InputFlagPassed:              inputPassed,
-		AttachPaths:                  attachPaths,
-		ContenoxDir:                  contenoxDir,
-		WarnW:                        cmd.ErrOrStderr(),
-		// A terminal gets the answer as it is produced; a pipe keeps the single buffered payload its consumer parses.
-		EffectiveStreamOutput: stdoutIsTerminal(),
-	}
-	return execChat(ctx, db, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 }
 
 func resolveEffectiveThink(ctx context.Context, store runtimetypes.Store, flags *pflag.FlagSet) (string, error) {

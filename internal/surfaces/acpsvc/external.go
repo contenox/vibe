@@ -445,13 +445,6 @@ type externalBridge struct {
 	// no model-update kind, so applyModel always runs strictly after the seed.
 	modelState *libacp.SessionModelState
 
-	// termMu guards terminals, the live downstream-created terminals for this
-	// session keyed by bridge-minted id. Independent of mu so terminal lifecycle
-	// never contends with the update-relay stream. Each bridgeTerminal owns a
-	// scrollback watcher, torn down on terminal/release, terminal/kill, or
-	// connection/session teardown (closeAllTerminals). See external_terminal.go.
-	termMu    sync.Mutex
-	terminals map[string]*bridgeTerminal
 }
 
 // newExternalBridge builds a bridge for upstreamID relaying to t, watching t's
@@ -1160,13 +1153,6 @@ func (d *externalDriver) Close() error {
 	d.bridge = nil
 	d.downstreamID = ""
 	d.mu.Unlock()
-	// Tear down any live downstream-created terminals before dropping the
-	// connection, so no watcher goroutine leaks. The serve WebSocket path
-	// (which never calls Transport.Close) is covered independently: each
-	// terminal's owner goroutine watches connCtx itself.
-	if bridge != nil {
-		bridge.closeAllTerminals()
-	}
 	// Manager-owned: detach the viewer and clear its relay target, but leave
 	// the instance running. detachViewer is idempotent with the connCtx
 	// watcher's detach; detachFrom is pointer-identity guarded.
@@ -1356,15 +1342,7 @@ func (t *Transport) initExternalConn(ctx context.Context, conn *libacp.ClientSid
 		return "", err
 	}
 
-	// Advertise the terminal client capability only when this path can service
-	// terminal/* (a shell manager is present, and the bridge is the wired
-	// client here) — this routes the downstream's shell commands through the
-	// runtime's terminals (external_terminal.go). The Instances path withholds
-	// it, see openInstanceSession.
 	clientCaps := libacp.ClientCapabilities{}
-	if terminalCapable {
-		clientCaps.Terminal = true
-	}
 	init, err := conn.Initialize(ctx, libacp.InitializeRequest{
 		ProtocolVersion:    libacp.ProtocolVersion,
 		ClientCapabilities: clientCaps,
@@ -1475,7 +1453,7 @@ func (t *Transport) bringUpExternal(ctx context.Context, upstreamID libacp.Sessi
 	if err != nil {
 		return nil, libacp.InternalError(fmt.Sprintf("could not spawn agent %q: %v", agentName, err))
 	}
-	downstreamID, err := t.initExternalConn(ctx, handle.Conn, bridge, cfg, cwd, agentName, t.deps.ShellSessions != nil)
+	downstreamID, err := t.initExternalConn(ctx, handle.Conn, bridge, cfg, cwd, agentName, false)
 	if err != nil {
 		_ = handle.Close()
 		return nil, err

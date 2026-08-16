@@ -9,7 +9,7 @@ These chains show the handlers and transition patterns from the [specification](
 
 ## 1. The Default Chain (Tool Use)
 
-This is the chain used for **interactive chat** — both `contenox chat "hello"` and a bare `contenox "hello"` (a bare prompt is session-backed chat, injected as `chat`) resolve `chain-agent-contenox.json` when no `--chain` is given. It defines a loop between the model and the tools. Only `contenox run` uses `chain-agent-run.json` — see the [CLI reference](/docs/reference/contenox-cli). The example below is simplified for clarity; the `chain-agent-contenox.json` that ships with `contenox init` is a fuller ~10-task chain with a router, a coding loop, and a recovery loop.
+This is the tool-use loop pattern behind every interactive agent chain: a model call that either loops to run pending tool calls or ends the turn. The chain compiled from the `acp` agent declaration follows the same shape, just fuller — a router, a coding loop, and a recovery loop. See [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) for how a compiled chain is named and resolved. The example below is simplified for clarity.
 
 ```jsonc
 {
@@ -92,7 +92,7 @@ This chain replaces the local shell tools with a remote API tools (the US Nation
 
 ## 3. Retry and Fallback Model
 
-This chain calls an external API via `webtools`. `retry_policy` retries up to three times with exponential backoff and swaps to a cheaper model after two consecutive failures.
+This chain calls an external API via a registered remote tool (see [Remote Tools](/docs/integrations/tools/remote/)). `retry_policy` retries up to three times with exponential backoff and swaps to a cheaper model after two consecutive failures.
 
 ```json
 {
@@ -106,7 +106,7 @@ This chain calls an external API via `webtools`. `retry_policy` retries up to th
       "execute_config": {
         "model": "gpt-4.1",
         "provider": "openai",
-        "tools": ["webtools"],
+        "tools": ["nws"],
         "retry_policy": {
           "max_attempts": 3,
           "initial_backoff": "1s",

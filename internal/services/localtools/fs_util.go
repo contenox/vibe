@@ -2,11 +2,8 @@ package localtools
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"unicode/utf8"
 )
@@ -67,26 +64,9 @@ func sniffPrefix(content []byte) []byte {
 	return content
 }
 
-func sniffFilePrefix(absPath string) ([]byte, error) {
-	f, err := os.Open(absPath)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	buf := make([]byte, sniffBinaryBytes)
-	n, err := io.ReadFull(f, buf)
-	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
-		return nil, err
-	}
-	return buf[:n], nil
-}
 
-func sniffBinaryFile(absPath string) (bool, error) {
-	prefix, err := sniffFilePrefix(absPath)
-	if err != nil {
-		return false, err
-	}
-	return isBinarySample(prefix), nil
+func sniffBinarySample(sample []byte) bool {
+	return isBinarySample(sample)
 }
 
 func fileSizeAndExecFlag(info os.FileInfo) string {
@@ -114,9 +94,6 @@ func describePathForError(absPath string, info os.FileInfo) string {
 		flags = append(flags, "executable")
 	}
 	if info.Mode().IsRegular() {
-		if binary, err := sniffBinaryFile(absPath); err == nil && binary {
-			flags = append(flags, "binary")
-		}
 	}
 	if len(flags) > 0 {
 		desc += ", " + strings.Join(flags, " ")
@@ -152,50 +129,7 @@ func (h *LocalFSTools) writeFileDurable(ctx context.Context, absPath string, dat
 	if aw, ok := h.fileIO.(AtomicFileIO); ok {
 		return aw.WriteFileAtomic(ctx, absPath, data)
 	}
-	if !h.fileIOIsOS {
-		return h.fileIO.WriteFile(ctx, absPath, data)
-	}
-
-	dir := filepath.Dir(absPath)
-	// Same directory, therefore same filesystem, therefore the rename is
-	// atomic rather than a copy.
-	tmp, err := os.CreateTemp(dir, ".contenox-tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	cleanup := func() {
-		tmp.Close()
-		os.Remove(tmpName)
-	}
-
-	// Preserve the destination's mode: a fresh temp file is 0600 and would
-	// silently strip the executable bit.
-	mode := os.FileMode(0644)
-	if info, statErr := os.Stat(absPath); statErr == nil {
-		mode = info.Mode().Perm()
-	}
-	if err := tmp.Chmod(mode); err != nil {
-		cleanup()
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		cleanup()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		cleanup()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, absPath); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	return nil
+	return h.fileIO.WriteFile(ctx, absPath, data)
 }
 
 type listCollector struct {

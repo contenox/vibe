@@ -124,15 +124,7 @@ _denied_commands = "sudo,su,dd,mkfs,fdisk,parted,shred"
 _allowed_dir = "."
 _max_read_bytes = "262144"
 _max_output_bytes = "131072"
-_max_list_depth = "6"
-_max_grep_matches = "1000"
 _denied_path_substrings = "node_modules,.git/,dist/,/.next/,/out/,package-lock.json"
-
-[tools_policies.webtools]
-_max_response_bytes = "262144"
-_max_request_body_bytes = "262144"
-_request_timeout_seconds = "30"
-_max_attempts = "3"
 ```
 
 Add a table for any toolset you connect; see [Tools](/docs/integrations/tools/)
@@ -298,10 +290,8 @@ Canonical tools contenox hosts:
 
 | Toolset | Tools |
 |---|---|
-| `local_fs` | `read_file` `write_file` `edit_file` `list_dir` `grep` `find_files` `sed` `count_stats` `read_file_range` `stat_file` |
+| `local_fs` | `read_file` `write_file` `edit_file` `sed` `read_file_range` |
 | `local_shell` | `local_shell` |
-| `webtools` | `web_get` `web_head` `web_post` `web_put` `web_patch` `web_delete` |
-| git | `git_status` `git_diff` `git_log` `git_show` `git_branch_list` `git_blame` `git_add` `git_commit` `git_checkout_branch` `git_restore` |
 
 ### `[models]`
 

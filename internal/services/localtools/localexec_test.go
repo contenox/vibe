@@ -6,12 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/internal/libsandbox"
 	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -66,7 +64,7 @@ func TestUnit_LocalExecTools_BackendSignaledBudgetExceededCircuitBreaks(t *testi
 
 func TestUnit_LocalExecTools_Supports(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools().(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
 	names, err := h.Supports(ctx)
 	require.NoError(t, err)
 	require.Len(t, names, 1)
@@ -75,7 +73,7 @@ func TestUnit_LocalExecTools_Supports(t *testing.T) {
 
 func TestUnit_LocalExecTools_GetSchemasForSupportedTools(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools().(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
 	schemas, err := h.GetSchemasForSupportedTools(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, schemas)
@@ -85,7 +83,7 @@ func TestUnit_LocalExecTools_GetSchemasForSupportedTools(t *testing.T) {
 
 func TestUnit_LocalExecTools_GetToolsForToolsByName_OK(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools().(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
 	tools, err := h.GetToolsForToolsByName(ctx, "local_shell")
 	require.NoError(t, err)
 	require.Len(t, tools, 1)
@@ -96,7 +94,7 @@ func TestUnit_LocalExecTools_GetToolsForToolsByName_OK(t *testing.T) {
 
 func TestUnit_LocalExecTools_GetToolsForToolsByName_IncludesDetectedShell(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools(
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), 
 		localtools.WithLocalExecShell(localtools.NewPowerShellShell("pwsh.exe")),
 	).(*localtools.LocalExecTools)
 
@@ -120,7 +118,7 @@ func TestUnit_LocalExecTools_GetToolsForToolsByName_IncludesDetectedShell(t *tes
 
 func TestUnit_LocalExecTools_GetSchemasForSupportedTools_IncludesDetectedShell(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools(
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), 
 		localtools.WithLocalExecShell(localtools.NewCmdShell("cmd.exe")),
 	).(*localtools.LocalExecTools)
 
@@ -137,14 +135,14 @@ func TestUnit_LocalExecTools_GetSchemasForSupportedTools_IncludesDetectedShell(t
 
 func TestUnit_LocalExecTools_GetToolsForToolsByName_Unknown(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools().(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
 	tools, err := h.GetToolsForToolsByName(ctx, "other")
 	assert.Error(t, err)
 	assert.Nil(t, tools)
 }
 
 func TestUnit_LocalExecTools_GetToolsForToolsByName_ContextPolicy_Description(t *testing.T) {
-	h := localtools.NewLocalExecTools().(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
 	ctx := taskengine.WithToolsArgs(context.Background(), "local_shell", map[string]string{
 		"_allowed_commands": "git, ls",
 		"_denied_commands":  "rm",
@@ -169,7 +167,7 @@ func TestUnit_LocalExecTools_GetToolsForToolsByName_ContextPolicy_Description(t 
 }
 
 func TestUnit_LocalExecTools_Exec_ContextPolicy_Enforced(t *testing.T) {
-	h := localtools.NewLocalExecTools().(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
 	ctx := taskengine.WithToolsArgs(context.Background(), "local_shell", map[string]string{
 		"_allowed_commands": "ls",
 	})
@@ -183,7 +181,7 @@ func TestUnit_LocalExecTools_Exec_ContextPolicy_Enforced(t *testing.T) {
 }
 
 func TestUnit_LocalExecTools_Exec_ContextPolicy_Allows(t *testing.T) {
-	h := localtools.NewLocalExecTools().(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
 	ctx := taskengine.WithToolsArgs(context.Background(), "local_shell", map[string]string{
 		"_allowed_commands": "echo",
 	})
@@ -204,7 +202,7 @@ var testAllowedCommands = []string{"echo", "cat", "sleep", "/bin/sh", "exit"}
 
 func TestUnit_LocalExecTools_Exec_Success(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools(localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
 	start := time.Now().UTC()
 	toolsCall := &taskengine.ToolsCall{
 		Name: "local_shell",
@@ -226,7 +224,7 @@ func TestUnit_LocalExecTools_Exec_Success(t *testing.T) {
 
 func TestUnit_LocalExecTools_Exec_AcceptsJSONDecodedArgsArray(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools(localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
 
 	out, dt, err := h.Exec(ctx, time.Now().UTC(), map[string]any{
 		"command": "echo",
@@ -241,7 +239,7 @@ func TestUnit_LocalExecTools_Exec_AcceptsJSONDecodedArgsArray(t *testing.T) {
 }
 
 func TestUnit_LocalExecTools_Exec_RejectsUnknownArgs(t *testing.T) {
-	h := localtools.NewLocalExecTools(localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
 
 	_, _, err := h.Exec(context.Background(), time.Now().UTC(), map[string]any{
 		"command": "echo",
@@ -253,7 +251,7 @@ func TestUnit_LocalExecTools_Exec_RejectsUnknownArgs(t *testing.T) {
 }
 
 func TestUnit_LocalExecTools_Exec_RejectsNonStringArgsArrayItem(t *testing.T) {
-	h := localtools.NewLocalExecTools(localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
 
 	_, _, err := h.Exec(context.Background(), time.Now().UTC(), map[string]any{
 		"command": "echo",
@@ -265,7 +263,7 @@ func TestUnit_LocalExecTools_Exec_RejectsNonStringArgsArrayItem(t *testing.T) {
 
 func TestUnit_LocalExecTools_Exec_Success_InputAsStdin(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools(localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
 	start := time.Now().UTC()
 	toolsCall := &taskengine.ToolsCall{
 		Name: "local_shell",
@@ -284,7 +282,7 @@ func TestUnit_LocalExecTools_Exec_Success_InputAsStdin(t *testing.T) {
 func TestUnit_LocalExecTools_Exec_NoPolicy_Allowed(t *testing.T) {
 	// Authorization is the responsibility of upstream layers (e.g. HITLWrapper); LocalExecTools without policy must not fail-close.
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools().(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
 	start := time.Now().UTC()
 	toolsCall := &taskengine.ToolsCall{
 		Name: "local_shell",
@@ -307,7 +305,7 @@ func TestUnit_LocalExecTools_Exec_ShellMode_NoPolicy_Allowed(t *testing.T) {
 		t.Skip("shell:true dispatches to cmd.exe/PowerShell on Windows (see shell.go), not /bin/sh — the exact stdout framing this pins is POSIX-sh-specific")
 	}
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools().(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
 	start := time.Now().UTC()
 	toolsCall := &taskengine.ToolsCall{
 		Name: "local_shell",
@@ -327,7 +325,7 @@ func TestUnit_LocalExecTools_Exec_ShellMode_NoPolicy_Allowed(t *testing.T) {
 func TestUnit_LocalExecTools_Exec_ShellMode_WithPolicyRejected(t *testing.T) {
 	// shell:true must be REJECTED when an allowlist policy is active, to prevent command injection (e.g. "git status; rm -rf /" bypassing allowlist checks).
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools(localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
 	start := time.Now().UTC()
 	toolsCall := &taskengine.ToolsCall{
 		Name: "local_shell",
@@ -343,7 +341,7 @@ func TestUnit_LocalExecTools_Exec_ShellMode_WithPolicyRejected(t *testing.T) {
 
 func TestUnit_LocalExecTools_Exec_AllowlistReject(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools(localtools.WithLocalExecAllowedCommands([]string{"/usr/bin/env"})).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), localtools.WithLocalExecAllowedCommands([]string{"/usr/bin/env"})).(*localtools.LocalExecTools)
 	start := time.Now().UTC()
 	toolsCall := &taskengine.ToolsCall{
 		Name: "local_shell",
@@ -360,7 +358,7 @@ func TestUnit_LocalExecTools_Exec_AllowlistReject(t *testing.T) {
 func TestUnit_LocalExecTools_Exec_AllowlistDirReject(t *testing.T) {
 	dir := t.TempDir()
 	// allowedDir is dir; echo is typically /usr/bin/echo or /bin/echo, not under dir
-	h := localtools.NewLocalExecTools(localtools.WithLocalExecAllowedDir(dir)).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), localtools.WithLocalExecAllowedDir(dir)).(*localtools.LocalExecTools)
 	ctx := context.Background()
 	start := time.Now().UTC()
 	toolsCall := &taskengine.ToolsCall{
@@ -380,7 +378,7 @@ func TestUnit_LocalExecTools_Exec_AllowlistDirAllow(t *testing.T) {
 	scriptPath := filepath.Join(dir, "script.sh")
 	err := os.WriteFile(scriptPath, []byte("#!/bin/sh\necho ok\n"), 0755)
 	require.NoError(t, err)
-	h := localtools.NewLocalExecTools(localtools.WithLocalExecAllowedDir(dir)).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), localtools.WithLocalExecAllowedDir(dir)).(*localtools.LocalExecTools)
 	ctx := context.Background()
 	start := time.Now().UTC()
 	toolsCall := &taskengine.ToolsCall{
@@ -397,7 +395,7 @@ func TestUnit_LocalExecTools_Exec_AllowlistDirAllow(t *testing.T) {
 
 func TestUnit_LocalExecTools_Exec_Timeout(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools(localtools.WithLocalExecAllowedCommands(testAllowedCommands), localtools.WithLocalExecTimeout(50*time.Millisecond)).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), localtools.WithLocalExecAllowedCommands(testAllowedCommands), localtools.WithLocalExecTimeout(50*time.Millisecond)).(*localtools.LocalExecTools)
 	start := time.Now().UTC()
 	toolsCall := &taskengine.ToolsCall{
 		Name: "local_shell",
@@ -418,7 +416,7 @@ func TestUnit_LocalExecTools_Exec_Timeout(t *testing.T) {
 
 func TestUnit_LocalExecTools_Exec_NoTrimWhitespace(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools().(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
 	start := time.Now().UTC()
 	out, _, err := h.Exec(ctx, start, map[string]any{
 		"command": "echo",
@@ -434,7 +432,7 @@ func TestUnit_LocalExecTools_Exec_NoTrimWhitespace(t *testing.T) {
 
 func TestUnit_LocalExecTools_Exec_MissingCommand(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools(localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
 	toolsCall := &taskengine.ToolsCall{
 		Name: "local_shell",
 		Args: map[string]string{},
@@ -446,7 +444,7 @@ func TestUnit_LocalExecTools_Exec_MissingCommand(t *testing.T) {
 
 func TestUnit_LocalExecTools_Exec_NilTools(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools().(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), ).(*localtools.LocalExecTools)
 	_, _, err := h.Exec(ctx, time.Now().UTC(), nil, false, nil)
 	require.Error(t, err)
 }
@@ -460,7 +458,7 @@ func TestUnit_LocalExecTools_Exec_NonZeroExit(t *testing.T) {
 	err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nexit 3\n"), 0755)
 	require.NoError(t, err)
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools(localtools.WithLocalExecAllowedDir(dir)).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), localtools.WithLocalExecAllowedDir(dir)).(*localtools.LocalExecTools)
 	toolsCall := &taskengine.ToolsCall{
 		Name: "local_shell",
 		Args: map[string]string{"command": scriptPath},
@@ -473,32 +471,9 @@ func TestUnit_LocalExecTools_Exec_NonZeroExit(t *testing.T) {
 	assert.Equal(t, 3, res.ExitCode)
 }
 
-// TestUnit_LocalExecTools_ScrubEnv_StripsSecretKeepsToolchain pins that the default deny-secrets scrub (via WithLocalExecScrubEnv) strips credential-shaped variables from a spawned command while PATH/HOME survive.
-func TestUnit_LocalExecTools_ScrubEnv_StripsSecretKeepsToolchain(t *testing.T) {
-	t.Setenv("TESTSECRET_API_KEY", "leaked-value")
-	t.Setenv("HOME", "/home/scrub-test")
-
-	scrub := libsandbox.EnvScrub(libsandbox.ScrubDenySecrets, nil, nil)
-	h := localtools.NewLocalExecTools(localtools.WithLocalExecScrubEnv(scrub)).(*localtools.LocalExecTools)
-
-	ctx := context.Background()
-	toolsCall := &taskengine.ToolsCall{
-		Name: "local_shell",
-		Args: map[string]string{"command": "env"},
-	}
-	out, _, err := h.Exec(ctx, time.Now().UTC(), nil, false, toolsCall)
-	require.NoError(t, err)
-	res, ok := out.(*localtools.LocalExecResult)
-	require.True(t, ok)
-	require.True(t, res.Success, "env: %s", res.Error)
-	assert.NotContains(t, res.Stdout, "TESTSECRET_API_KEY", "the default scrub must strip credential-shaped names")
-	assert.True(t, strings.Contains(res.Stdout, "PATH="), "PATH must survive the default scrub or every spawned shell breaks")
-	assert.True(t, strings.Contains(res.Stdout, "HOME=/home/scrub-test"), "HOME must survive the default scrub (Allow=\"*\" under deny-secrets)")
-}
-
 func TestUnit_LocalExecTools_Exec_NonZeroExit_WithPolicy_Rejected(t *testing.T) {
 	ctx := context.Background()
-	h := localtools.NewLocalExecTools(localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner(), localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
 	toolsCall := &taskengine.ToolsCall{
 		Name: "local_shell",
 		Args: map[string]string{

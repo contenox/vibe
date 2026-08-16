@@ -110,7 +110,7 @@ func TestUnit_MissingPolicyToolsets(t *testing.T) {
 	})
 }
 
-// TestUnit_StalePolicyPresets_PreStateFileInstall asserts an install predating goja/workspace, with no provenance record, is detected as stale and left untouched.
+// TestUnit_StalePolicyPresets_PreStateFileInstall asserts an install predating the current toolsets, with no provenance record, is detected as stale and left untouched.
 func TestUnit_StalePolicyPresets_PreStateFileInstall(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -133,14 +133,14 @@ func TestUnit_StalePolicyPresets_PreStateFileInstall(t *testing.T) {
 	require.Equal(t, "hitl-policy-default.json", detected[0].Name)
 	require.Equal(t, filepath.Join(dir, "hitl-policy-default.json"), detected[0].Path)
 	require.Equal(t, "approve", detected[0].DefaultAction)
-	require.Subset(t, detected[0].Toolsets, []string{"goja", "local_shell", "webtools", "workspace"},
+	require.Subset(t, detected[0].Toolsets, []string{"local_shell", "webtools"},
 		"the toolsets that shipped today must all be named")
 	require.NotContains(t, detected[0].Toolsets, "local_fs")
 	require.NotContains(t, detected[0].Toolsets, "git")
 
 	notice := stalePolicyNotice("hitl-policy-default.json", []string{dir}, nil)
 	require.Contains(t, notice, detected[0].Path, "the notice names the file by full path — a shadowing copy must be findable")
-	require.Contains(t, notice, "workspace")
+	require.Contains(t, notice, "local_shell")
 	require.Contains(t, notice, "default_action")
 	require.Contains(t, notice, "stops for approval")
 	require.Contains(t, notice, "stay visible to the model",
@@ -300,7 +300,7 @@ func TestUnit_DoctorStalePolicyWarning(t *testing.T) {
 	require.Contains(t, text, "[warning]")
 	require.Contains(t, text, filepath.Join(dir, "hitl-policy-default.json"),
 		"the warning names the file by full path — a shadowing copy must be findable")
-	require.Contains(t, text, "workspace")
+	require.Contains(t, text, "local_shell")
 	require.Contains(t, text, "default_action")
 	require.Contains(t, text, "stay visible to the model",
 		"the warning must not read as if the rule list gates tool availability")
@@ -320,62 +320,6 @@ func TestUnit_DoctorStalePolicyWarning(t *testing.T) {
 	require.Contains(t, cleanOut.String(), "All checks passed.")
 }
 
-// TestUnit_StaleDetection_SkipsBetaGatedToolsets asserts a missing rule for a
-// toolset gated behind opt-in-beta (goja, shell_session) is not staleness when
-// the gate is off — the toolset does not exist for that user — and is again
-// when the gate is on.
-func TestUnit_StaleDetection_SkipsBetaGatedToolsets(t *testing.T) {
-	t.Parallel()
-	shipped := `{
-		"default_action": "approve",
-		"rules": [
-			{"tools": "local_fs", "tool": "read_file", "action": "allow"},
-			{"tools": "goja", "tool": "goja_eval", "action": "allow"},
-			{"tools": "shell_session", "tool": "shell_session_read", "action": "allow"}
-		]
-	}`
-	onDisk := `{"default_action":"approve","rules":[{"tools":"local_fs","tool":"read_file","action":"allow"}]}`
-
-	off := betaGatedToolsets(false)
-	require.Equal(t, map[string]bool{"goja": true, "shell_session": true}, off,
-		"the gated set names exactly the beta toolsets")
-	require.Empty(t, missingPolicyToolsets([]byte(shipped), []byte(onDisk), off),
-		"invisible toolsets must not be reported stale")
-
-	on := betaGatedToolsets(true)
-	require.Nil(t, on)
-	require.Equal(t, []string{"goja", "shell_session"},
-		missingPolicyToolsets([]byte(shipped), []byte(onDisk), on),
-		"with the gate on the same file is stale for both")
-
-	// The shipped presets rule on both gated toolsets, so a file ruling on
-	// everything else the shipped default rules on is stale only for a user
-	// who opted in.
-	want, ok := policyToolsets([]byte(shippedPreset(t, "hitl-policy-default.json")))
-	require.True(t, ok)
-	require.True(t, want["goja"] && want["shell_session"],
-		"the shipped default preset must rule on both gated toolsets")
-	var b strings.Builder
-	b.WriteString(`{"default_action":"approve","rules":[{"tools":"local_fs","tool":"read_file","action":"allow"}`)
-	for name := range want {
-		if name == "goja" || name == "shell_session" || name == catchAllToolset {
-			continue
-		}
-		b.WriteString(`,{"tools":"` + name + `","action":"deny"}`)
-	}
-	b.WriteString(`]}`)
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "hitl-policy-default.json"), []byte(b.String()), 0o644))
-	require.Empty(t, stalePolicyNotice("hitl-policy-default.json", []string{dir}, off),
-		"an envelope missing only gated toolsets is current for a stable user")
-	require.NotEmpty(t, stalePolicyNotice("hitl-policy-default.json", []string{dir}, on),
-		"the same envelope is stale once the operator opts in")
-}
-
-// TestUnit_PolicyDirs asserts policyDirs mirrors hitlPolicySource's search path,
-// dedupes when the primary dir is already $HOME/.contenox, and orders the
-// envelopes rendered from agent declarations last so a hand-written envelope of
-// the same name shadows a rendered one.
 func TestUnit_PolicyDirs(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

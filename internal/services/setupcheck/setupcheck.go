@@ -26,13 +26,9 @@ type Input struct {
 	DefaultProvider    string
 	DefaultAltModel    string
 	DefaultAltProvider string
-	// DefaultEmbedModel/DefaultEmbedProvider gate the optional workspace
-	// index; every issue they produce is a warning (see addEmbeddingIssues).
-	DefaultEmbedModel    string
-	DefaultEmbedProvider string
-	DefaultChain         string
-	HITLPolicyName       string
-	States               []runtimestate.BackendRuntimeState
+	DefaultChain       string
+	HITLPolicyName     string
+	States             []runtimestate.BackendRuntimeState
 	// RegisteredBackendCount, if non-nil, overrides len(RegisteredBackends) / len(States)
 	// for BackendCount. CLI doctor sets this from ListBackends when runtime state sync is unavailable.
 	RegisteredBackendCount *int
@@ -64,10 +60,6 @@ type BackendCheck struct {
 	ModelCount      int      `json:"modelCount"`
 	ChatModelCount  int      `json:"chatModelCount"`
 	ChatModels      []string `json:"chatModels,omitempty"`
-	// EmbedModels lists the backend's embedding-capable models, reported
-	// separately since chat and embedding models are usually disjoint sets.
-	EmbedModelCount int      `json:"embedModelCount,omitempty"`
-	EmbedModels     []string `json:"embedModels,omitempty"`
 	Error           string   `json:"error,omitempty"`
 	Hint            string   `json:"hint,omitempty"`
 }
@@ -77,8 +69,6 @@ type Result struct {
 	DefaultModel           string            `json:"defaultModel"`
 	DefaultProvider        string            `json:"defaultProvider"`
 	DefaultMaxOutputTokens int               `json:"defaultMaxOutputTokens,omitempty"`
-	DefaultEmbedModel      string            `json:"defaultEmbedModel,omitempty"`
-	DefaultEmbedProvider   string            `json:"defaultEmbedProvider,omitempty"`
 	DefaultChain           string            `json:"defaultChain"`
 	HITLPolicyName         string            `json:"hitlPolicyName"`
 	BackendCount           int               `json:"backendCount"`
@@ -99,13 +89,9 @@ const (
 	backendErrorOther         backendErrorKind = "other"
 )
 
-// Evaluate returns readiness from gathered input (no I/O). Embedding-model
-// issues are appended last and unconditionally, regardless of which early
-// return fired in evaluateCore.
+// Evaluate returns readiness from gathered input (no I/O).
 func Evaluate(in Input) Result {
-	r := evaluateCore(in)
-	addEmbeddingIssues(&r)
-	return r
+	return evaluateCore(in)
 }
 
 func evaluateCore(in Input) Result {
@@ -113,8 +99,6 @@ func evaluateCore(in Input) Result {
 		DefaultModel:           strings.TrimSpace(in.DefaultModel),
 		DefaultProvider:        strings.TrimSpace(in.DefaultProvider),
 		DefaultMaxOutputTokens: ResolveMaxOutputTokens(in.States, in.DefaultProvider, in.DefaultModel),
-		DefaultEmbedModel:      strings.TrimSpace(in.DefaultEmbedModel),
-		DefaultEmbedProvider:   strings.TrimSpace(in.DefaultEmbedProvider),
 		DefaultChain:           strings.TrimSpace(in.DefaultChain),
 		HITLPolicyName:         strings.TrimSpace(in.HITLPolicyName),
 		BackendCount:           len(in.RegisteredBackends),
@@ -436,79 +420,6 @@ func addDefaultProviderIssues(r *Result) {
 	})
 }
 
-// addEmbeddingIssues reports readiness of the optional retrieval path (the
-// workspace index behind `contenox index` / `contenox search`). Every issue
-// is severity "warning" and none blocks Ready(): an agent that never
-// searches must stay ready with no embedding model at all.
-func addEmbeddingIssues(r *Result) {
-	if r.DefaultEmbedModel == "" {
-		addIssue(r, Issue{
-			Code:     "embed_model_unset",
-			Severity: "warning",
-			Category: CategoryDefaults,
-			Message: "No embedding model is set, so workspace indexing falls back to the chat model — which embeds only on some providers. " +
-				"Retrieval (contenox index / search) is optional; nothing else depends on this.",
-			FixPath:    "/settings",
-			CLICommand: "contenox config set default-embed-model <name>",
-		})
-		return
-	}
-
-	// The embedding provider defaults to the chat provider (resolveEmbeddingModel).
-	embedProvider := r.DefaultEmbedProvider
-	if embedProvider == "" {
-		embedProvider = r.DefaultProvider
-	}
-	canonical := modelrepo.CanonicalBackendType(embedProvider)
-	if canonical == "" {
-		return
-	}
-	reachable := filterBackendChecks(r.BackendChecks, func(check BackendCheck) bool {
-		return check.Reachable && providerTypeMatches(canonical, check.Type)
-	})
-	// Nothing observed for this provider yet: the provider-level issues already cover it.
-	if len(reachable) == 0 {
-		return
-	}
-
-	available := collectEmbedModelNames(reachable)
-	if len(available) == 0 {
-		addIssue(r, Issue{
-			Code:     "embed_model_not_available",
-			Severity: "warning",
-			Category: CategoryHealth,
-			Message: fmt.Sprintf("Embedding model %q is set, but provider %q reports no embedding-capable models on backend(s): %s. Workspace indexing will fail until one is available.",
-				r.DefaultEmbedModel, embedProvider, joinBackendNames(reachable)),
-			FixPath:    providerFixPathForChecks(canonical, reachable),
-			CLICommand: embedModelCommand(canonical, r.DefaultEmbedModel),
-		})
-		return
-	}
-	if modelNamePresent(available, r.DefaultEmbedModel) {
-		return
-	}
-	addIssue(r, Issue{
-		Code:     "embed_model_not_available",
-		Severity: "warning",
-		Category: CategoryHealth,
-		Message: fmt.Sprintf("Embedding model %q is not currently available for provider %q. Available embedding models: %s.",
-			r.DefaultEmbedModel, embedProvider, strings.Join(available, ", ")),
-		FixPath:    "/settings",
-		CLICommand: fmt.Sprintf("contenox config set default-embed-model %q", available[0]),
-	})
-}
-
-// embedModelCommand suggests how to obtain an embedding model for a provider —
-// pulling one locally on Ollama, listing what the account exposes elsewhere.
-func embedModelCommand(provider, wanted string) string {
-	switch provider {
-	case "ollama":
-		return fmt.Sprintf("ollama pull %s   # or another embedding model, then: contenox model list", wanted)
-	default:
-		return "contenox model list   # confirm which embedding models the provider exposes"
-	}
-}
-
 func addIssue(r *Result, issue Issue) {
 	r.Issues = append(r.Issues, issue)
 }
@@ -560,8 +471,6 @@ func buildBackendChecks(registered []runtimetypes.Backend, states []runtimestate
 		check.ModelCount = len(state.PulledModels)
 		check.ChatModelCount = countChatModelsOnState(state)
 		check.ChatModels = chatModelNamesOnState(state)
-		check.EmbedModels = embedModelNamesOnState(state)
-		check.EmbedModelCount = len(check.EmbedModels)
 
 		if strings.TrimSpace(state.Error) == "" {
 			check.Status = "ready"
@@ -622,47 +531,6 @@ func chatModelNamesOnState(state runtimestate.BackendRuntimeState) []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-// embedModelNamesOnState lists embedding-capable models, deduplicated and sorted.
-func embedModelNamesOnState(state runtimestate.BackendRuntimeState) []string {
-	seen := map[string]struct{}{}
-	var names []string
-	for _, model := range state.PulledModels {
-		if !model.CanEmbed {
-			continue
-		}
-		name := strings.TrimSpace(model.Model)
-		if name == "" {
-			name = strings.TrimSpace(model.Name)
-		}
-		if name == "" {
-			continue
-		}
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		seen[name] = struct{}{}
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-func collectEmbedModelNames(checks []BackendCheck) []string {
-	seen := map[string]struct{}{}
-	var models []string
-	for _, check := range checks {
-		for _, model := range check.EmbedModels {
-			if _, ok := seen[model]; ok {
-				continue
-			}
-			seen[model] = struct{}{}
-			models = append(models, model)
-		}
-	}
-	sort.Strings(models)
-	return models
 }
 
 func filterBackendChecks(checks []BackendCheck, keep func(BackendCheck) bool) []BackendCheck {

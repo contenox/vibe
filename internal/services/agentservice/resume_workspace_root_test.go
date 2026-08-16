@@ -41,7 +41,7 @@ func newFSE2EInstance(t *testing.T, dbPath string, parkWindow time.Duration, cwd
 	require.True(t, ok)
 
 	// db=nil degrades the read-before-write guard to a no-op; irrelevant here since write_file targets a file that does not exist yet
-	inner := localtools.NewLocalFSToolsWith("", nil, nil, localtools.LocalFSToolsName, cwdResolver)
+	inner := localtools.NewLocalFSToolsWith("", nil, hostFileIO{}, localtools.LocalFSToolsName, cwdResolver)
 	wrapper := localtools.NewHITLWrapper(inner, awayAsk, approveAllPolicy{ApprovalRecorder: recorder, Service: hitl}, libtracker.NoopTracker{})
 	wrapper.SetParkWindow(parkWindow)
 
@@ -132,4 +132,12 @@ func TestSystem_S6Gate_ResumeAcrossProcesses_WritesUnderSessionWorkspaceNotResum
 
 	_, err = b.store.GetChainCheckpoint(ctx, "call-fs1")
 	require.ErrorIs(t, err, libdb.ErrNotFound, "a successful terminal deletes the checkpoint")
+}
+
+type hostFileIO struct{}
+
+func (hostFileIO) ReadFile(_ context.Context, path string) ([]byte, error) { return os.ReadFile(path) }
+
+func (hostFileIO) WriteFile(_ context.Context, path string, data []byte) error {
+	return os.WriteFile(path, data, 0o644)
 }

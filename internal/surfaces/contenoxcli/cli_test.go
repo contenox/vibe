@@ -59,33 +59,6 @@ func TestUnit_promptInputIsNotReserved(t *testing.T) {
 	}
 }
 
-func TestUnit_seedHeadlessACPChainIfMissing(t *testing.T) {
-	dir := t.TempDir()
-	dst := filepath.Join(dir, SystemDirName, chainAgentACPXFilename)
-
-	if err := seedHeadlessACPChainIfMissing(dir); err != nil {
-		t.Fatalf("seed when absent: %v", err)
-	}
-	if _, err := os.Stat(dst); err != nil {
-		t.Fatalf("expected %s written: %v", dst, err)
-	}
-
-	if err := os.WriteFile(dst, []byte("USER EDIT"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := seedHeadlessACPChainIfMissing(dir); err != nil {
-		t.Fatalf("seed when present: %v", err)
-	}
-	got, err := os.ReadFile(dst)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != "USER EDIT" {
-		t.Fatal("seedHeadlessACPChainIfMissing overwrote a user-edited chain file")
-	}
-}
-
-// TestUnit_seedFIMChainIfMissing mirrors TestUnit_seedHeadlessACPChainIfMissing:
 // seeds chain-fim-default.json when absent, never overwrites a user edit.
 func TestUnit_seedFIMChainIfMissing(t *testing.T) {
 	dir := t.TempDir()
@@ -262,21 +235,12 @@ func TestUnit_resolveContenoxDir(t *testing.T) {
 	}
 }
 
-// TestUnit_DispatchSubcommand_BarePromptIsChat asserts bare invocations route to session-backed chat, not the stateless run pipeline.
-func TestUnit_DispatchSubcommand_BarePromptIsChat(t *testing.T) {
-	if got := dispatchSubcommand([]string{"say hello"}, false); got != "chat" {
-		t.Fatalf("bare prompt dispatched to %q, want chat", got)
+// TestUnit_DispatchSubcommand_BarePromptIsNotDispatched asserts a bare prompt no longer becomes a chat turn: it falls through to cobra, which reports an unknown command.
+func TestUnit_DispatchSubcommand_BarePromptIsNotDispatched(t *testing.T) {
+	if got := dispatchSubcommand([]string{"say hello"}, false); got != "" {
+		t.Fatalf("bare prompt dispatched to %q, want no dispatch", got)
 	}
-	if got := dispatchSubcommand([]string{"--db", "x.db", "say hello"}, false); got != "chat" {
-		t.Fatalf("bare prompt with flags dispatched to %q, want chat", got)
-	}
-	if got := dispatchSubcommand([]string{"--experimental-acp"}, false); got != "acp" {
-		t.Fatalf("--experimental-acp dispatched to %q, want acp", got)
-	}
-	if got := dispatchSubcommand([]string{"run", "input"}, false); got != "" {
-		t.Fatalf("explicit run subcommand re-dispatched to %q, want none", got)
-	}
-	if got := dispatchSubcommand([]string{"--help"}, true); got != "" {
-		t.Fatalf("help-only dispatched to %q, want none", got)
+	if got := dispatchSubcommand([]string{"--db", "x.db", "say hello"}, false); got != "" {
+		t.Fatalf("bare prompt with flags dispatched to %q, want no dispatch", got)
 	}
 }

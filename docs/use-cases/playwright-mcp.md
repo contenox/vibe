@@ -21,29 +21,22 @@ contenox mcp add playwright --transport stdio \
   --command npx --args "-y,@playwright/mcp@latest"
 ```
 
-## Expose tools to `contenox run`
+## Expose tools to an agent
 
-The default **run** chain from `contenox init` exposes registered tools automatically via `"tools": ["*"]`, so Playwright is available as soon as you add the server.
+A chain or agent whose `tools` allowlist includes `"*"` (or `"playwright"` by name) picks up the registered server automatically.
 
-If you want tighter control, replace `"*"` with an explicit allowlist in `.contenox/chain-agent-run.json`, or use a custom chain whose `tools` include only the tools you want.
+If you want tighter control, scope a chain's `tools` to only the tools you want.
 
 > **Tip:**
 > Tool names exposed to the model are prefixed with the server name, e.g. `playwright.<tool_name>`.
 
-For tighter control before sensitive actions, use explicit `tools_policies` in your chain. HITL approval is on by default; pass `--auto` only for trusted, unattended runs.
+For tighter control before sensitive actions, use explicit `tools_policies` in your chain's HITL policy. Approval is on by default; only relax it for trusted, unattended runs.
 
-## Run it
+## What you can ask it to do
 
-```bash
-# Simple navigation + summary
-contenox run "Use the Playwright MCP tools to go to https://github.com/microsoft/playwright-mcp and summarize the latest release."
-
-# Research flow
-contenox run "Use the Playwright MCP tools to open https://x.ai, find the latest Grok announcement, and list the key points."
-
-# Search and extract
-contenox run "Use the Playwright MCP tools to search Google for 'contenox github', open the first result, and report the current star count."
-```
+- "Go to https://github.com/microsoft/playwright-mcp and summarize the latest release."
+- "Open https://x.ai, find the latest Grok announcement, and list the key points."
+- "Search Google for 'contenox github', open the first result, and report the current star count."
 
 ## Advanced `mcp add` options
 
@@ -63,4 +56,4 @@ See the package README on [npm](https://www.npmjs.com/package/@playwright/mcp) f
 1. **Registration** — `contenox mcp add` stores the server in SQLite; a worker keeps a session so tools stay responsive across steps.
 2. **Tools** — The model receives Playwright MCP tools (namespaced with the server name). Prefer accessibility snapshots and DOM-driven actions; screenshot tools are available when you need them.
 3. **Local execution** — The browser runs on your machine; no cloud browser farm is required.
-4. **Safety** — Treat this like any automation with network and filesystem access: use trusted sites, review chains, and keep HITL enabled unless you deliberately need unattended `--auto` runs.
+4. **Safety** — Treat this like any automation with network and filesystem access: use trusted sites, review chains, and keep HITL enabled unless you've deliberately authored a policy for unattended runs.

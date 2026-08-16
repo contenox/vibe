@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/agentdecl"
 )
 
 // SystemDirName is the subdirectory of a contenox directory holding the
@@ -45,9 +46,10 @@ func LoadChainRegistryFrom(filename, envVar string) (*ChainRegistry, error) {
 		if err != nil {
 			return nil, fmt.Errorf("acpsvc: cannot determine home directory and %s is not set: %w", envVar, err)
 		}
-		// An operator copy at the top level wins over the shipped one under
-		// system/, matching how every other chain file resolves.
 		path = filepath.Join(home, ".contenox", filename)
+		if _, statErr := os.Stat(path); statErr != nil {
+			path = filepath.Join(home, ".contenox", agentdecl.GeneratedDirName, filename)
+		}
 		if _, statErr := os.Stat(path); statErr != nil {
 			path = filepath.Join(home, ".contenox", SystemDirName, filename)
 		}

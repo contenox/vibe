@@ -5,11 +5,8 @@ import (
 	"testing"
 
 	"github.com/contenox/contenox/internal/services/fleetservice"
-	"github.com/contenox/contenox/internal/services/gojatool"
-	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
-	"github.com/contenox/contenox/internal/services/searchtool"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
@@ -20,17 +17,13 @@ import (
 // carry the same toolsets `contenox chat`/`run` gets via engine.go's
 // localToolset, not just local_fs/webtools/local_shell.
 func TestUnit_ACPToolset_CarriesTheSharedToolsets(t *testing.T) {
-	gt, err := gojatool.New(gojatool.Config{})
-	require.NoError(t, err)
-	t.Cleanup(gt.Shutdown)
-
 	noTransport := func(context.Context) *acpsvc.Transport { return nil }
 	noFleet := func() fleetservice.Service { return nil }
-	tools := acpToolset(nil, libtracker.NoopTracker{}, gt, "test-workspace",
-		noTransport, nil, missionservice.New(nil), nil, nil, true, noFleet)
+	tools := acpToolset(nil, libtracker.NoopTracker{}, "test-workspace",
+		noTransport, missionservice.New(nil), nil, nil, true, noFleet)
 
 	// Every provider chat/run already had must still be present.
-	for _, name := range []string{"webtools", "local_fs", "local_shell", missiontools.ToolsProviderName} {
+	for _, name := range []string{"local_fs", "local_shell", missiontools.ToolsProviderName} {
 		require.Containsf(t, tools, name, "ACP toolset must keep registering %q", name)
 	}
 
@@ -40,9 +33,6 @@ func TestUnit_ACPToolset_CarriesTheSharedToolsets(t *testing.T) {
 		provider string
 		tool     string
 	}{
-		{searchtool.ToolsProviderName, "workspace_search"},
-		{localtools.GitToolsName, "git_status"},
-		{gojatool.ToolsProviderName, "goja_eval"},
 	}
 	for _, tc := range cases {
 		repo, ok := tools[tc.provider]
@@ -52,13 +42,9 @@ func TestUnit_ACPToolset_CarriesTheSharedToolsets(t *testing.T) {
 		require.Containsf(t, supported, tc.tool, "%s must support %s", tc.provider, tc.tool)
 	}
 
-	// Without opt-in-beta the goja provider is absent, exactly as localToolset
-	// gates it; everything stable stays.
-	stable := acpToolset(nil, libtracker.NoopTracker{}, gt, "test-workspace",
-		noTransport, nil, missionservice.New(nil), nil, nil, false, noFleet)
-	require.NotContains(t, stable, gojatool.ToolsProviderName, "goja is a beta surface, absent without opt-in-beta")
-	for _, name := range []string{"webtools", "local_fs", "local_shell",
-		searchtool.ToolsProviderName, localtools.GitToolsName, missiontools.ToolsProviderName} {
+	stable := acpToolset(nil, libtracker.NoopTracker{}, "test-workspace",
+		noTransport, missionservice.New(nil), nil, nil, false, noFleet)
+	for _, name := range []string{"local_fs", "local_shell", missiontools.ToolsProviderName} {
 		require.Containsf(t, stable, name, "stable toolset %q must not be beta-gated", name)
 	}
 }

@@ -201,7 +201,7 @@ It does not guarantee:
 
 ## Fired runs are ordinary runs
 
-Each firing executes its chain through the same path `contenox run` uses, under a request id prefixed `evt-` (printed on the dispatcher's firing line and in [`events firings`](#inspecting-firings-events-firings)). `contenox state list` shows each firing's execution and `contenox state show <reqID>` the per-task steps — the same inspection you have for any run.
+Each firing executes its chain the same way any other chain run does, under a request id prefixed `evt-` (printed on the dispatcher's firing line and in [`events firings`](#inspecting-firings-events-firings)). `contenox state list` shows each firing's execution and `contenox state show <reqID>` the per-task steps — the same inspection you have for any run.
 
 ## Next
 

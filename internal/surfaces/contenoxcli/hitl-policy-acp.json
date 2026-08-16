@@ -538,17 +538,6 @@
       "action": "approve"
     },
     {
-      "//": "workspace_search only reads the semantic index the operator already built, so it is allowed; revisit before any write is added.",
-      "tools": "workspace",
-      "action": "allow"
-    },
-    {
-      "//": "Allowed because the sandbox has no ambient I/O by construction — no filesystem, network or module loader — so there is nothing here for approval to protect; any reach to a tool is evaluated by this same policy. Compute is bounded by a deadline, call-stack cap and output cap; only memory is a soft, rate-bounded limit until the deadline fires.",
-      "tools": "goja",
-      "tool": "goja_eval",
-      "action": "allow"
-    },
-    {
       "//": "Tier 1: always denied, matched only as an exact bare basename.",
       "tools": "local_shell",
       "tool": "local_shell",

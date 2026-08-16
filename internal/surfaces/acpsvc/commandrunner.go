@@ -15,10 +15,6 @@ var acpTerminalOutputByteLimit int64 = 1 * 1024 * 1024
 type acpCommandRunner struct {
 	transport TransportResolver
 	shell     localtools.PlatformShell
-	// scrub, when set, replaces the inherited environment on the local OS-spawn
-	// fallback below (no client terminal capability) — the client-terminal path
-	// spawns in the editor's own process, which contenox does not control.
-	scrub func([]string) []string
 }
 
 func NewACPCommandRunner(transport TransportResolver) localtools.CommandRunner {
@@ -29,22 +25,13 @@ func NewACPCommandRunnerWithShell(transport TransportResolver, shell localtools.
 	return &acpCommandRunner{transport: transport, shell: shell.WithDefaults()}
 }
 
-// NewACPCommandRunnerWithScrub is NewACPCommandRunnerWithShell plus an
-// environment scrub (see libsandbox.EnvScrub) applied to the local OS-spawn
-// fallback. Nil scrub keeps that fallback's full inherit.
-func NewACPCommandRunnerWithScrub(transport TransportResolver, shell localtools.PlatformShell, scrub func([]string) []string) localtools.CommandRunner {
-	return &acpCommandRunner{transport: transport, shell: shell.WithDefaults(), scrub: scrub}
-}
-
 func (a *acpCommandRunner) Run(ctx context.Context, spec localtools.CommandSpec, stdout, stderr io.Writer) (int, error) {
 	var t *Transport
 	if a.transport != nil {
 		t = a.transport(ctx)
 	}
-	// No client attached to this session, or one with no terminal of its own:
-	// spawn locally under the scrubbed environment.
 	if t == nil || !t.getClientCaps().Terminal {
-		return localtools.NewOSCommandRunnerWithShellAndScrub(a.shell, a.scrub).Run(ctx, spec, stdout, stderr)
+		return 0, localtools.ErrNoTerminal
 	}
 
 	command, cmdArgs, titleCmd := a.terminalCommand(spec)

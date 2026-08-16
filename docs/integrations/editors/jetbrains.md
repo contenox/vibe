@@ -38,13 +38,13 @@ Restart the IDE. Open the agent panel — Contenox now appears in the agent pick
 
 ## What you get
 
-**Tool cards with real context.** When the chain runs a shell command, the card shows `local_shell.local_shell: sed -i 's/old/new/g' README.md` — the actual command, not just the tool name. Same for `local_fs.read_file`, `local_fs.write_file`, `grep`, `sed`, and other built-in tools. This is the card you approve from, so it shows what will actually run.
+**Tool cards with real context.** When the chain runs a shell command, the card shows `local_shell.local_shell: sed -i 's/old/new/g' README.md` — the actual command, not just the tool name. Same for `local_fs.read_file`, `local_fs.write_file`, `local_fs.sed`, and any other `local_shell` command (`grep`, `rg`, `find`, ...). This is the card you approve from, so it shows what will actually run.
 
-**Native filesystem.** `local_fs.read_file` / `local_fs.write_file` route through the IDE's own filesystem capability — sandboxed, with a read-before-write contract.
+**Native filesystem.** `local_fs.read_file` / `local_fs.write_file` / `local_fs.edit_file` route through the IDE's own filesystem capability — sandboxed, with a read-before-write contract.
 
 **Shell commands.** `local_shell` runs the command and returns its output in the tool card. GoLand does not advertise the ACP terminal capability, so the command is executed and reported rather than embedded as an interactive terminal session (this differs from [Zed](/docs/integrations/editors/zed/), which does embed a live terminal).
 
-**HITL through the editor.** If your chain uses `local_fs`/`local_shell`/`webtools`, Contenox's [HITL policy](/docs/guide/hitl/) applies — and the approval dialog is routed to the IDE's permission UI instead of a terminal prompt. The default policy gates `local_fs.write_file`, `local_fs.edit_file`, `local_fs.sed`, `local_shell.*`, and mutating `webtools` calls.
+**HITL through the editor.** If your chain uses `local_fs`/`local_shell`, Contenox's [HITL policy](/docs/guide/hitl/) applies — and the approval dialog is routed to the IDE's permission UI instead of a terminal prompt. The default policy gates `local_fs.write_file`, `local_fs.edit_file`, `local_fs.sed`, and `local_shell.*` calls.
 
 **Session history that replays.** Close the IDE mid-conversation and reopen the project — your prompts, the agent's responses, and every tool call (with its output) come back. State lives in `~/.contenox/local.db`.
 
@@ -54,12 +54,11 @@ Restart the IDE. Open the agent panel — Contenox now appears in the agent pick
 
 ## Choosing the chain
 
-ACP sessions use a dedicated chain file separate from the CLI's default chain:
+ACP sessions load a chain compiled from the `acp` agent declaration (router + coding/general/review loops, under `.contenox/agents/`). Contenox resolves it in order, first match wins: an operator copy at `~/.contenox/<name>.json`, then the compiled `~/.contenox/.generated/<name>.json`, then the shipped `~/.contenox/system/<name>.json`.
 
-- Loaded from `~/.contenox/chain-agent-acp.json`, falling back to the shipped copy in `~/.contenox/system/`. Copy it up a level to edit it.
-- Override path with the `CONTENOX_ACP_CHAIN_PATH` environment variable (set it in the shell that launches the IDE).
+Override the path entirely with the `CONTENOX_ACP_CHAIN_PATH` environment variable (set it in the shell that launches the IDE).
 
-The default chain uses `"tools": ["*"]`, which exposes everything the engine has registered — `local_fs`, `local_shell`, `webtools`, plus any MCP servers you've added via `contenox mcp add`.
+The ACP chain's `"tools": ["*"]` exposes everything the engine has registered — `local_fs`, `local_shell`, plus any MCP servers you've added via `contenox mcp add`.
 
 ---
 
@@ -72,7 +71,7 @@ contenox config set default-model qwen3:8b
 contenox config set default-provider ollama
 ```
 
-Models are global; chains resolve workspace-first. Switching the model for ACP also switches it for `contenox chat`.
+Models are global config, shared across every surface that reads `default-model` — switching it here switches it everywhere.
 
 ---
 

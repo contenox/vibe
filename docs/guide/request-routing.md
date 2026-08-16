@@ -13,7 +13,7 @@ This is the layer above [the agentic loop](/docs/guide/agentic-loop/): that page
 
 ## The shape
 
-The shipped interactive chains — `chain-agent-acp.json`, `chain-agent-beam.json`, `chain-agent-contenox.json` — all open the same way:
+A routing agent declaration — the shipped `acp` example among them — compiles to a chain that opens the same way:
 
 ```json
 {
@@ -57,12 +57,11 @@ The review loop is the clearest illustration. It withholds every mutating tool:
 
 ```json
 "hide_tools": [
-  "local_fs.write_file", "local_fs.edit_file", "local_fs.sed",
-  "git.git_add", "git.git_commit", "git.git_checkout_branch", "git.git_restore"
+  "local_fs.write_file", "local_fs.edit_file", "local_fs.sed"
 ]
 ```
 
-and drops the network entirely with `"tools": ["*", "!webtools"]`. "This loop does not modify anything" is therefore a property of the configuration, not a promise in a prompt — and the same withholding is repeated on the paired `execute_tool_calls` task, because a tool withheld only where the model is asked would still run where calls are executed.
+"This loop does not modify anything" is therefore a property of the configuration, not a promise in a prompt — and the same withholding is repeated on the paired `execute_tool_calls` task, because a tool withheld only where the model is asked would still run where calls are executed.
 
 ## This is not a coding feature
 

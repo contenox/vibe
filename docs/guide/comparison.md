@@ -23,9 +23,8 @@ Concretely, the overlap:
 | Provider switching | `contenox backend add` for Ollama, vLLM, OpenAI, Anthropic, Gemini, Vertex AI, Bedrock; routing is config, not code |
 | Editor sessions | `contenox acp` over stdio — [Zed](/docs/integrations/editors/zed/), [JetBrains](/docs/integrations/editors/jetbrains/), [AionUi](/docs/integrations/editors/aionui/), [OpenClaw](/docs/integrations/editors/openclaw/) |
 | Local session state | SQLite at `~/.contenox/local.db`; no account — the [relay](/docs/guide/pairing/) is opt-in and never contacted unpaired |
-| Terminal chat | `contenox chat`, or a bare `contenox "..."` — session-backed, history carried across invocations |
 
-An ACP editor session is a real coding session, not a demo shell: it routes coding turns into their own loop with its own budget, `local_shell` is available under policy, and the filesystem tools are editor-grade — `read_file`, `read_file_range`, `write_file`, `edit_file`, `sed`, `grep`, `list_dir`, `stat_file`, `delete_file`, with a read-before-write gate that refuses to mutate a file the model has not read. The `/mission` slash command works there too.
+An ACP editor session is a real coding session, not a demo shell: it routes coding turns into their own loop with its own budget, `local_shell` is available under policy, and the filesystem tools are editor-grade — `read_file`, `read_file_range`, `write_file`, `edit_file`, `sed`, with a read-before-write gate that refuses to mutate a file the model has not read. Directory listing, search, and globbing go through `local_shell` (`ls`, `find`, `grep`/`rg`) under the same policy. The `/mission` slash command works there too.
 
 And the honest half of that: for **pure coding ergonomics** — repository mapping, diff application, edit formats, the accumulated craft of getting a model to land a patch on the first try — the dedicated coding agents are more refined. That is what they are for, and they have spent their whole existence on it. Table stakes are table stakes; they are not the argument.
 
@@ -49,8 +48,8 @@ The envelope wraps the whole tool surface, so it is evaluated before every tool 
 What an operator feels: you can hand someone a chain and keep the policy, or tighten the policy without touching the workflow. They move independently.
 
 ```bash
-contenox run --chain ./chain-agent-diffreview.json "review this diff"        # new workflow, same envelope
-contenox mission fire agent-planner "..." --policy hitl-policy-strict.json   # new envelope, same workflow
+contenox mission fire chain-agent-diffreview "review this diff" --wait               # new workflow, same envelope
+contenox mission fire agent-planner "..." --policy hitl-policy-strict.json --wait     # new envelope, same workflow
 ```
 
 A mission's envelope is a required argument, not a default it inherits — the dispatch refuses without one, and validates the file before the first unit starts.

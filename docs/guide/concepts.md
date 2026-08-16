@@ -30,16 +30,14 @@ You can also write one by hand, and that is the reason the format is documented 
 Chains aren't limited to AI loops. A single chain can mix LLM steps, direct tool/tools calls, and manual transitions — in any order:
 
 ```bash
-# run subcommand — use any chain for this invocation:
-contenox run --chain ./my-chain.json "input"
-# (falls back to chain-agent-run.json if --chain is omitted)
+# fire any registered chain as a mission:
+contenox mission fire my-chain "input" --wait
 
-# chat — set the default session chain:
+# or set it as a session's default chain:
 contenox config set default-chain ./my-chain.json
-# (falls back to chain-agent-contenox.json if not set)
 ```
 
-Fallback chain files are resolved by name: the workspace `.contenox/` copy wins when present, then `~/.contenox/`, then the shipped copies in `~/.contenox/system/`. Copying one up out of `system/` is how you take ownership of it. The shipped files follow the `chain-<role>-<variant>.json` convention — see [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) for every role and the full resolution story.
+Fallback chain files are resolved by name: the workspace `.contenox/` copy wins when present, then `~/.contenox/`, then the shipped copies in `~/.contenox/system/`. The shipped files follow the `chain-<role>-<variant>.json` convention — see [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) for every role and the full resolution story.
 
 ```json
 {
@@ -76,9 +74,8 @@ The `handler` determines what the task does. See [Handlers](/docs/specification/
 
 A **tool** is a capability the model can call — a local shell command, the local filesystem, or a remote HTTP service.
 
-- **`local_shell`** — run shell commands (`contenox run` and `contenox chat` require `--shell`; editor clients route shell execution through their approval surface where supported)
-- **`local_fs`** — read/write local files
-- **`workspace`** — ask the workspace's semantic index questions via `workspace_search`; see [Workspace index & search](/docs/guide/search/)
+- **`local_shell`** — run shell commands, forwarded to the ACP client's `terminal/*` capability and governed by HITL policy
+- **`local_fs`** — read, write, and edit local files (`read_file`, `write_file`, `edit_file`, `sed`, `read_file_range`), forwarded to the ACP client's `fs/*` capability
 - **Remote tools** — any service exposing an OpenAPI v3 spec; by default discovered at `<url>/openapi.json`, overridable with `--spec` at registration time
 - **MCP servers** — any Model Context Protocol server (added via `contenox mcp add`)
 
@@ -97,7 +94,7 @@ Tools are listed by name in `execute_config.tools`. Use `["*"]` to expose all re
 > What happens when a call is actually made (allow, approve, or deny) is a separate layer: the [HITL policy](/docs/guide/hitl/).
 > See [Tools reference](/docs/integrations/tools/) for access control patterns.
 
-Chains are started by you — a prompt, `contenox run`, a fired mission — or, with the opt-in, by the runtime's own internal events: [Events & triggers (beta)](/docs/guide/events/) fires a chain when a matching event lands in the durable log.
+Chains are started by you — a session prompt, a fired mission — or, with the opt-in, by the runtime's own internal events: [Events & triggers (beta)](/docs/guide/events/) fires a chain when a matching event lands in the durable log.
 
 ## Transitions
 

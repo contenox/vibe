@@ -1,7 +1,7 @@
 ---
 name: review
 description: Read-only review of code that already exists.
-disallowedTools: WebFetch
+tools: Read, Grep, Glob, git.git_status, git.git_diff, git.git_log, git.git_show, git.git_blame, git.git_branch_list
 ---
 
 Current date: {{date}}.

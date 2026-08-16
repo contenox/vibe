@@ -6,7 +6,7 @@ description: Read and write your HubSpot CRM through HubSpot's own MCP server �
 
 Read and write your HubSpot CRM with contenox using HubSpot's own MCP server — OAuth 2.1 + PKCE, your tokens stored locally, your data routed direct between CLI and HubSpot.
 
-This recipe is the counterpart to [Leads → HubSpot](/docs/use-cases/leads-to-hubspot/). That one shows the OpenAPI route (narrow hand-curated tool surface, bearer token). This one shows the MCP route (HubSpot's full curated tool set, OAuth with pre-issued client credentials). Same outcome, different integration pattern — pick whichever fits your workflow.
+This is the MCP route: HubSpot's full curated tool set, OAuth with pre-issued client credentials. For a narrower, hand-curated tool surface instead, register HubSpot's REST API yourself as a [remote tool](/docs/integrations/tools/remote/) — see [Any API, a tool you authored](/docs/use-cases/any-api-as-a-tool/) for the pattern.
 
 The wider point: the **OAuth-with-pre-issued-credentials** path also works for Salesforce, Microsoft Graph, and any other vendor MCP that requires a manually-registered OAuth app (no RFC 7591 dynamic client registration). HubSpot is just the example.
 
@@ -83,37 +83,7 @@ hubspot: authenticated successfully.
 
 ## 4. Use it
 
-Anything contenox normally does with tools, now talking to HubSpot:
-
-```bash
-contenox chat "use hubspot to read the companies we have there"
-```
-
-Sample output from a live run against a CRM populated by the [other recipe](/docs/use-cases/leads-to-hubspot/):
-
-```text
-Here are the companies currently in your HubSpot CRM (showing the first 5 out of 6):
-
-1. Umbrella Labs (ID: 100000000005)
-   - Description: A fintech SaaS platform that aims to democratize access to professional financial advice…
-   - Associated Contacts: 2
-
-2. Initech (ID: 100000000004)
-   - Description: An AI-powered SaaS fundraising marketplace…
-   - Associated Contacts: 1
-
-3. Globex (Globex Treasury) (ID: 100000000003)
-   - Description: An AI-powered finance automation platform…
-   - Associated Contacts: 2
-
-4. Northwind Traders (ID: 100000000002)
-   - Description: Provides an agent-first billing and payments infrastructure…
-   - Associated Contacts: 2
-
-5. Acme Robotics (ID: 100000000001)
-   - Description: A cybersecurity SaaS platform…
-   - Associated Contacts: 1
-```
+Once attached, HubSpot's tools are available like any other MCP server's — to an agent session with this server in scope, or to a `contenox serve` deployment with it registered. Ask about your CRM and the model reaches for `search_crm_objects`, `get_crm_objects`, and friends as needed, subject to your active HITL policy.
 
 ---
 
@@ -146,4 +116,4 @@ The supported objects: contacts, companies, deals, tickets, line items, products
 - **Sensitive Data setting blocks activities.** If your HubSpot account has Sensitive Data turned on, the MCP server blocks access to activity objects (calls, emails, meetings, notes, tasks) — even though they're listed as supported. This is HubSpot-specific behavior; standard CRM API calls are unaffected.
 - **Token refresh on stale sessions.** If the refresh token expires (long inactivity, or you revoked access in HubSpot), `contenox mcp auth hubspot` re-runs the browser flow cleanly.
 - **The MCP server uses HubSpot's CRM search API under the hood**, which doesn't include vector search. For semantic similarity over CRM records, you'd still need a separate embedding pipeline.
-- **OpenAPI route still has its place.** For workflows where you want a narrow, hand-curated tool surface (e.g. "the agent can only create companies and contacts, nothing else"), the [OpenAPI recipe](/docs/use-cases/leads-to-hubspot/) is the better fit — `manage_crm_objects` in the MCP is broad enough that scoping it down requires HITL policy rules, not spec subsetting.
+- **A hand-curated tool surface still has its place.** For workflows where you want "the agent can only create companies and contacts, nothing else," a [registered remote tool](/docs/use-cases/any-api-as-a-tool/) against a narrow spec is the better fit — `manage_crm_objects` in the MCP is broad enough that scoping it down requires HITL policy rules, not spec subsetting.

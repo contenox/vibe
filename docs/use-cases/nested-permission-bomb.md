@@ -41,16 +41,16 @@ Reusing a human's own credentials for an automated workflow is a common shortcut
        {"tools": "local_fs", "tool": "*", "action": "deny", "when": [{"key": "path", "op": "glob", "value": "**/{.bash_history,.zsh_history,.netrc,.npmrc}"}]},
 
        {"tools": "local_shell", "tool": "local_shell", "action": "deny"},
-       {"tools": "webtools", "tool": "web_post", "action": "deny"},
 
        {"tools": "local_fs", "tool": "write_file", "action": "approve"},
        {"tools": "local_fs", "tool": "sed", "action": "approve"},
 
-       {"tools": "local_fs", "tool": "read_file", "action": "allow"},
-       {"tools": "local_fs", "tool": "list_dir", "action": "allow"}
+       {"tools": "local_fs", "tool": "read_file", "action": "allow"}
      ]
    }
    ```
+
+   Denying `local_shell` outright also removes the only path to a registered API tool's network call if that tool were shell-driven — but tools registered via `contenox tools add` (step 1) call out directly, not through the shell, so they're unaffected by this rule and stay governed by their own entry in this policy.
 
 4. Save it and activate it:
 
@@ -62,7 +62,7 @@ Reusing a human's own credentials for an automated workflow is a common shortcut
 
 - Logs show the workflow's own identity (`caller_id`, `invoked_by`) on every call, not a human's.
 - Reads of `.ssh`, `.aws`, shell history, and similar credential paths are denied outright.
-- `local_shell` and `web_post` are denied entirely under this policy; `write_file` and `sed` pause for approval; `read_file` and `list_dir` pass silently.
+- `local_shell` is denied entirely under this policy; `write_file` and `sed` pause for approval; `read_file` passes silently.
 - Revoking the workflow's access means rotating its own scoped token — no human's credentials are touched.
 
 ## Where to next

@@ -183,7 +183,7 @@ func EmitTree(root *AgentTree, cfg Config) (*taskengine.TaskChainDefinition, err
 	// already unique among their siblings, so prefixing here would only make the
 	// task ids depend on which vocabulary the file happened to be written in.
 	// The declaration's own name wins, and the directory is the fallback. A
-	// shipped agent is looked up BY NAME — chain-acp, chain-contenox — so the
+	// shipped agent is looked up BY NAME — chain-acp — so the
 	// emitted id has to be the name it is already known by, or converting an
 	// agent silently renames it and every reference to it stops resolving.
 	id := root.Agent.Name
