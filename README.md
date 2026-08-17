@@ -107,7 +107,7 @@ Pre-built binaries are on the [releases page](https://github.com/contenox/conten
 
 ## First run
 
-<!-- TAG=v0.40.6 -->
+<!-- TAG=v0.41.0 -->
 
 ```bash
 contenox init                           # scaffold .contenox/ — agents, envelopes, config
