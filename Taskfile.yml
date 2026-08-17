@@ -73,6 +73,106 @@ tasks:
     cmds:
       - GOMAXPROCS=4 go test -short -timeout 15m -run '^TestUnit_' ./...
 
+  # Every backend suite runs through this wrapper, because a suite that skipped
+  # for want of Docker is indistinguishable from one that passed: `go test`
+  # prints a skip only under -v, so the plain command ended in a green `ok`.
+  # Two things fix that here. The suites run under -v, so an in-suite skip
+  # ("Postgres store NOT exercised: ...") is on screen. And a missing container
+  # engine is reported before the run in the shape acp-suites uses — SKIPPED,
+  # not passed — rather than as a pass.
+  #
+  # REQUIRE lists the suite's own require-env variables (.github/workflows/ci.yml
+  # sets them). With one of them set the suite runs even when the probe finds no
+  # engine, so a broken engine on a CI runner fails the job instead of skipping
+  # it. Unset, which is the normal local state, nothing here needs Docker.
+  #
+  # Every suite runs with -count=1. A cached `ok` from an earlier run with Docker
+  # up is the same false green in a different disguise: nothing would touch a
+  # container, and the smoke exists to touch one.
+  backend-suite:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        set -e
+        required=""
+        for name in {{.REQUIRE}}; do
+          eval "value=\${$name:-}"
+          if [ -n "$value" ]; then required=1; fi
+        done
+        if [ -z "$required" ] && ! docker info >/dev/null 2>&1 && ! podman info >/dev/null 2>&1; then
+          printf '\n==> SKIPPED, not passed: %s\n' '{{.NAME}}'
+          printf '    %s\n' '{{.WHAT}}'
+          printf '    No container engine answered (tried: docker info, podman info). Start one to run it,\n'
+          printf '    or set any of [%s] to 1 to turn this skip into a failure.\n\n' '{{.REQUIRE}}'
+          exit 0
+        fi
+        {{.RUN}}
+
+  test-store-postgres:
+    desc: The store suite against a throwaway Postgres container (needs Docker; says SKIPPED without it)
+    cmds:
+      - task: backend-suite
+        vars:
+          NAME: test-store-postgres
+          WHAT: 'The store suite did not run against Postgres; its Postgres DDL and every $N query are unproven.'
+          REQUIRE: CONTENOX_TEST_REQUIRE_POSTGRES
+          RUN: CONTENOX_TEST_STORE_BACKEND=postgres go test -v -count=1 -timeout 15m ./internal/store/...
+
+  test-bus-nats:
+    desc: The libbus conformance suite, whose NATS backend runs in a throwaway container (needs Docker; says SKIPPED without it)
+    cmds:
+      # The whole conformance suite, not a NATS-only -run filter: the suite's
+      # contract is that every backend passes the same matrix, and `go test
+      # -run` splits on '/', so no single pattern selects the NATS leaf of both
+      # the three-level TestConformance_* names and the two-level
+      # TestConformanceDivergence_* ones. The InMem and SQLite halves are the
+      # cheap ones anyway.
+      - task: backend-suite
+        vars:
+          NAME: test-bus-nats
+          WHAT: 'The NATS half of the libbus conformance matrix did not run.'
+          REQUIRE: LIBBUS_REQUIRE_NATS
+          RUN: go test -v -count=1 -timeout 10m -run '^TestConformance' ./libbus/...
+
+  test-kv-valkey:
+    desc: libkvstore against a throwaway Valkey container (needs Docker; says SKIPPED without it)
+    cmds:
+      - task: backend-suite
+        vars:
+          NAME: test-kv-valkey
+          WHAT: 'The Valkey KVExecutor did not run against a server.'
+          REQUIRE: LIBKVSTORE_REQUIRE_VALKEY
+          RUN: go test -v -count=1 -timeout 10m -run '^TestUnit_Valkey' ./libkvstore/...
+
+  # internal/substrate is the opt-in wiring itself: which backend each of
+  # CONTENOX_POSTGRES_URL / CONTENOX_NATS_URL / CONTENOX_VALKEY_URL selects, and
+  # that a set-but-unreachable setting is refused by name instead of silently
+  # degrading to the SQLite file. Its container-backed cases skip under -short,
+  # so the -short unit gate alone never proves any of it.
+  test-substrate:
+    desc: The opt-in substrate wiring against real Postgres, NATS and Valkey containers (needs Docker; says SKIPPED without it)
+    cmds:
+      - task: backend-suite
+        vars:
+          NAME: test-substrate
+          WHAT: 'The substrate wiring did not run against any real backend, only against the SQLite default.'
+          REQUIRE: CONTENOX_TEST_REQUIRE_POSTGRES LIBBUS_REQUIRE_NATS LIBKVSTORE_REQUIRE_VALKEY
+          RUN: go test -v -count=1 -timeout 10m ./internal/substrate/...
+
+  # The opt-in backends a CONTENOX_POSTGRES_URL / CONTENOX_NATS_URL /
+  # CONTENOX_VALKEY_URL install lands on, plus the wiring that selects them.
+  # This capability decayed once because nothing ran it; CI runs these same
+  # tasks, with each suite's require-env set so an absent Docker fails instead
+  # of skipping.
+  test-backends:
+    desc: 'Smoke the opt-in backends: Postgres, NATS, Valkey, and the wiring that selects them (needs Docker; each suite says SKIPPED without it)'
+    cmds:
+      - task: test-store-postgres
+      - task: test-bus-nats
+      - task: test-kv-valkey
+      - task: test-substrate
+
   test-system:
     desc: System tests (TestSystem_)
     cmds:

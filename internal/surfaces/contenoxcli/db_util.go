@@ -3,26 +3,24 @@ package contenoxcli
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 
-	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/substrate"
 	libdb "github.com/contenox/contenox/libdbexec"
-	"github.com/contenox/contenox/libkvstore"
 )
 
-// OpenDBAt opens (and creates if needed) the SQLite database at the given path,
-// applying the application and KV store schemas.
 func OpenDBAt(ctx context.Context, dbPath string) (libdb.DBManager, error) {
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
-		return nil, fmt.Errorf("cannot create database directory: %w", err)
+	return substrate.OpenDB(ctx, dbPath)
+}
+
+func openOptionalDB(ctx context.Context, dbPath string) (libdb.DBManager, error) {
+	db, err := OpenDBAt(ctx, dbPath)
+	if err == nil {
+		return db, nil
 	}
-	schema := runtimetypes.SchemaSQLite + "\n" + libkvstore.SQLiteSchema
-	db, err := libdb.NewSQLiteDBManager(ctx, dbPath, schema)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database %q: %w", dbPath, err)
+	if substrate.Configured() {
+		return nil, err
 	}
-	return db, nil
+	return nil, nil
 }
 
 func withTransaction(ctx context.Context, db libdb.DBManager, fn func(tx libdb.Exec) error) error {

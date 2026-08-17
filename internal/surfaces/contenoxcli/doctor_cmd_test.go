@@ -2,6 +2,7 @@ package contenoxcli
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/setupcheck"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/substrate"
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/stretchr/testify/require"
 )
@@ -157,7 +159,9 @@ func TestUnit_ReclaimAbandonedMissions(t *testing.T) {
 	orphan.LastHeartbeat = &frozen
 	require.NoError(t, missions.Update(ctx, orphan))
 
-	require.Equal(t, 1, reclaimAbandonedMissions(ctx, db, ""))
+	reclaimed, err := reclaimAbandonedMissions(ctx, db, "")
+	require.NoError(t, err)
+	require.Equal(t, 1, reclaimed)
 
 	got, err := missions.Get(ctx, orphan.ID)
 	require.NoError(t, err)
@@ -172,5 +176,54 @@ func TestUnit_ReclaimAbandonedMissions(t *testing.T) {
 	printReclaimedMissions(&out, 0)
 	require.Empty(t, out.String(), "a doctor run that reclaimed nothing says nothing")
 
-	require.Equal(t, 0, reclaimAbandonedMissions(ctx, db, ""), "and the second run finds nothing left to collect")
+	again, err := reclaimAbandonedMissions(ctx, db, "")
+	require.NoError(t, err)
+	require.Equal(t, 0, again, "and the second run finds nothing left to collect")
+
+	out.Reset()
+	printMissionSweepFailure(&out, nil)
+	require.Empty(t, out.String())
+	printMissionSweepFailure(&out, errors.New("bus refused"))
+	require.Contains(t, out.String(), "sweep did not run (bus refused)")
+	require.Contains(t, out.String(), "may still read as open")
+}
+
+func TestUnit_StateStorage_SaysNothingWhenEveryBackendIsTheLocalFile(t *testing.T) {
+	var out strings.Builder
+	printStateStorage(&out, []substrate.Status{
+		{Substrate: substrate.StoreSubstrate, Backend: "SQLite", Target: "/home/you/.contenox/local.db"},
+		{Substrate: substrate.BusSubstrate, Backend: "SQLite", Target: "/home/you/.contenox/local.db"},
+		{Substrate: substrate.KVSubstrate, Backend: "SQLite", Target: "/home/you/.contenox/local.db"},
+	})
+	require.Empty(t, out.String(), "an install that opted into nothing must see the report it saw before")
+	require.NoError(t, firstUnreachableSubstrate([]substrate.Status{
+		{Substrate: substrate.StoreSubstrate, Backend: "SQLite", Target: "/home/you/.contenox/local.db"},
+	}))
+}
+
+func TestUnit_StateStorage_NamesEachBackendAndWhetherARemoteOneAnswers(t *testing.T) {
+	statuses := []substrate.Status{
+		{Substrate: substrate.StoreSubstrate, Backend: "Postgres", Setting: substrate.PostgresURLEnv, Target: "postgres://contenox:xxxxx@db:5432/contenox"},
+		{Substrate: substrate.BusSubstrate, Backend: "NATS", Setting: substrate.NATSURLEnv, Target: "nats://bus:4222", Err: errors.New("no servers available for connection")},
+		{Substrate: substrate.KVSubstrate, Backend: "SQLite", Target: "/home/you/.contenox/local.db"},
+	}
+
+	var out strings.Builder
+	printStateStorage(&out, statuses)
+	require.Equal(t, `
+State storage:
+  • store: Postgres (postgres://contenox:xxxxx@db:5432/contenox, from CONTENOX_POSTGRES_URL)
+    Status: reachable
+  • message bus: NATS (nats://bus:4222, from CONTENOX_NATS_URL)
+    Status: unreachable
+    Error: no servers available for connection
+    Hint: Start that server or unset CONTENOX_NATS_URL; while it is set contenox never falls back to the local database.
+  • key-value cache: SQLite (/home/you/.contenox/local.db)
+    Status: local file
+`, out.String())
+
+	err := firstUnreachableSubstrate(statuses)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), substrate.NATSURLEnv)
+	require.Contains(t, err.Error(), "no servers available for connection")
 }

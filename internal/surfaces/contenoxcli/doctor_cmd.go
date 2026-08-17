@@ -17,7 +17,7 @@ import (
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/setupcheck"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/contenox/libbus"
+	"github.com/contenox/contenox/internal/substrate"
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
@@ -77,6 +77,18 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	}
 	o.EffectiveDB = dbPath
 	o.EffectiveSkipBackendCycle, _ = cmd.Flags().GetBool("skip-cycle")
+	jsonOut, _ := cmd.Flags().GetBool("json")
+
+	stateStorage, err := substrate.Report(ctx, db.WithoutTransaction(), dbPath)
+	if err != nil {
+		return err
+	}
+	if unreachable := firstUnreachableSubstrate(stateStorage); unreachable != nil {
+		if !jsonOut {
+			printStateStorage(cmd.OutOrStdout(), stateStorage)
+		}
+		return unreachable
+	}
 
 	// Built directly rather than via ComputeReadiness so the synced runtime state
 	// is readable without a second backend cycle.
@@ -93,7 +105,6 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// stderr on the --json path so stdout stays a single parseable payload.
 	bundleW := cmd.OutOrStdout()
 
-	jsonOut, _ := cmd.Flags().GetBool("json")
 	if jsonOut {
 		// No sweep on the JSON path: the payload has no field to report it in.
 		enc := json.NewEncoder(cmd.OutOrStdout())
@@ -103,10 +114,12 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 		return writeDoctorBundleIfAsked(cmd, cmd.ErrOrStderr(), res, contenoxDir, dbPath)
 	}
-	reclaimedMissions := reclaimAbandonedMissions(ctx, db, ResolveWorkspaceID(contenoxDir))
+	reclaimedMissions, reclaimErr := reclaimAbandonedMissions(ctx, db, ResolveWorkspaceID(contenoxDir))
 
 	printDoctorText(cmd.OutOrStdout(), res)
+	printStateStorage(cmd.OutOrStdout(), stateStorage)
 	printReclaimedMissions(cmd.OutOrStdout(), reclaimedMissions)
+	printMissionSweepFailure(cmd.OutOrStdout(), reclaimErr)
 	printWorkspaceShadowNote(cmd.OutOrStdout(), contenoxDir, triggerShadowNames(o.EffectiveOptInBeta, contenoxDir))
 	printVisionSummary(cmd.OutOrStdout(), vision)
 	if o.EffectiveOptInBeta {
@@ -136,15 +149,57 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func reclaimAbandonedMissions(ctx context.Context, db libdb.DBManager, workspaceID string) int {
-	bus := libbus.NewSQLite(db.WithoutTransaction())
+func reclaimAbandonedMissions(ctx context.Context, db libdb.DBManager, workspaceID string) (int, error) {
+	bus, err := substrate.OpenBus(ctx, db.WithoutTransaction())
+	if err != nil {
+		return 0, err
+	}
 	defer bus.Close()
 	pub := missionEventPublisher(ctx, db, bus, workspaceID, libtracker.NoopTracker{}, nil)
 	reclaimed, err := missionservice.New(db, missionservice.WithEventPublisher(pub)).SweepAbandoned(ctx)
 	if err != nil {
-		return 0
+		return 0, err
 	}
-	return reclaimed
+	return reclaimed, nil
+}
+
+func firstUnreachableSubstrate(statuses []substrate.Status) error {
+	for _, s := range statuses {
+		if s.Remote() && s.Err != nil {
+			return fmt.Errorf("%s: cannot reach the %s server it names: %w", s.Setting, s.Backend, s.Err)
+		}
+	}
+	return nil
+}
+
+func printStateStorage(w io.Writer, statuses []substrate.Status) {
+	if !substrate.AnyRemote(statuses) {
+		return
+	}
+	io.WriteString(w, "\n")
+	io.WriteString(w, "State storage:\n")
+	for _, s := range statuses {
+		if !s.Remote() {
+			fmt.Fprintf(w, "  • %s: %s (%s)\n", s.Substrate, s.Backend, s.Target)
+			io.WriteString(w, "    Status: local file\n")
+			continue
+		}
+		fmt.Fprintf(w, "  • %s: %s (%s, from %s)\n", s.Substrate, s.Backend, s.Target, s.Setting)
+		if s.Err == nil {
+			io.WriteString(w, "    Status: reachable\n")
+			continue
+		}
+		io.WriteString(w, "    Status: unreachable\n")
+		fmt.Fprintf(w, "    Error: %s\n", s.Err)
+		fmt.Fprintf(w, "    Hint: Start that server or unset %s; while it is set contenox never falls back to the local database.\n", s.Setting)
+	}
+}
+
+func printMissionSweepFailure(w io.Writer, err error) {
+	if err == nil {
+		return
+	}
+	fmt.Fprintf(w, "Missions: the abandoned-mission sweep did not run (%v) — a mission whose host process is gone may still read as open.\n", err)
 }
 
 func printReclaimedMissions(w io.Writer, reclaimed int) {

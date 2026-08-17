@@ -99,7 +99,7 @@ func TestSystem_RequestReplyTimeout(t *testing.T) {
 
 	_, err = ps.Request(ctx, subject, []byte("should timeout"))
 	require.Error(t, err)
-	require.Equal(t, libbus.ErrRequestTimeout, err)
+	require.ErrorIs(t, err, libbus.ErrRequestTimeout)
 }
 
 func TestSystem_ServeWithHandlerError(t *testing.T) {

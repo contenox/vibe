@@ -148,7 +148,7 @@ func (p *InMem) Request(ctx context.Context, subject string, data []byte) ([]byt
 	p.mu.RUnlock()
 
 	if handler == nil {
-		return nil, ErrRequestTimeout
+		return nil, ErrNoResponders
 	}
 
 	reply, err := handler(ctx, data)

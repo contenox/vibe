@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/contenox/contenox/internal/models/runtimestate"
-	"github.com/contenox/contenox/libkvstore"
+	"github.com/contenox/contenox/internal/substrate"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 )
@@ -43,8 +43,13 @@ all of them at once.`,
 		}
 		defer db.Close()
 
-		// NewSQLiteManager wraps db without taking ownership; do not Close it.
-		n, err := runtimestate.ClearModelCache(ctx, libkvstore.NewSQLiteManager(db))
+		kv, releaseKV, err := substrate.OpenKV(ctx, db)
+		if err != nil {
+			return err
+		}
+		defer releaseKV()
+
+		n, err := runtimestate.ClearModelCache(ctx, kv)
 		if err != nil {
 			return fmt.Errorf("failed to clear model cache: %w", err)
 		}

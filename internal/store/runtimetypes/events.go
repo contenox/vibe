@@ -154,7 +154,7 @@ func (s *eventStore) EnsureEventPartitionExists(ctx context.Context, ts time.Tim
 		return fmt.Errorf("%w: invalid partition table %q", ErrInvalidEventParameter, table)
 	}
 	exec := s.db.WithoutTransaction()
-	if _, err := exec.ExecContext(ctx, fmt.Sprintf(`
+	if err := execCreateIfNotExists(ctx, exec, fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
 			nid          INTEGER PRIMARY KEY,
 			workspace_id TEXT NOT NULL DEFAULT '',
@@ -172,13 +172,14 @@ func (s *eventStore) EnsureEventPartitionExists(ctx context.Context, ts time.Tim
 		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_ws_nid ON %s(workspace_id, nid)`, table, table),
 		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_ws_type ON %s(workspace_id, type)`, table, table),
 	} {
-		if _, err := exec.ExecContext(ctx, stmt); err != nil {
+		if err := execCreateIfNotExists(ctx, exec, stmt); err != nil {
 			return fmt.Errorf("event_log: index partition %s: %w", table, err)
 		}
 	}
 	if _, err := exec.ExecContext(ctx, `
-		INSERT OR IGNORE INTO event_partitions (period, table_name, created_at)
+		INSERT INTO event_partitions (period, table_name, created_at)
 		VALUES ($1, $2, $3)
+		ON CONFLICT (period) DO NOTHING
 	`, period, table, s.now().UTC()); err != nil {
 		return fmt.Errorf("event_log: register partition %s: %w", table, err)
 	}
@@ -543,6 +544,17 @@ func (s *eventStore) PruneEventPartitionsBefore(ctx context.Context, t time.Time
 		dropped = append(dropped, p.Period)
 	}
 	return dropped, nil
+}
+
+func execCreateIfNotExists(ctx context.Context, exec libdb.Exec, stmt string) error {
+	_, err := exec.ExecContext(ctx, stmt)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, libdb.ErrUniqueViolation) || strings.Contains(err.Error(), "already exists") {
+		return nil
+	}
+	return err
 }
 
 func requireEventWorkspace(workspaceID string) error {

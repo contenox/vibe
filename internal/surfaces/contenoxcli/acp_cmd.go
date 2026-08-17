@@ -26,12 +26,11 @@ import (
 	"github.com/contenox/contenox/internal/services/presence"
 	"github.com/contenox/contenox/internal/services/updatecheck"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/substrate"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
 	"github.com/contenox/contenox/internal/surfaces/fleetboot"
 	"github.com/contenox/contenox/libacp"
-	"github.com/contenox/contenox/libbus"
 	libdb "github.com/contenox/contenox/libdbexec"
-	"github.com/contenox/contenox/libkvstore"
 	"github.com/contenox/contenox/liblog"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
@@ -290,8 +289,18 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	fimChains := loadOptionalFIMChain(ctx, tracker, profile)
 
 	// The engine doesn't own the bus, so this defer closes it.
-	bus := libbus.NewSQLite(db.WithoutTransaction())
+	bus, err := substrate.OpenBus(ctx, db.WithoutTransaction())
+	if err != nil {
+		reportErr(err)
+		return err
+	}
 	defer bus.Close()
+	kvMgr, releaseKV, err := substrate.OpenKV(ctx, db)
+	if err != nil {
+		reportErr(err)
+		return err
+	}
+	defer releaseKV()
 	trigHook := eventlog.NewTriggerHolder()
 	missionPub := missionEventPublisher(ctx, db, bus, workspaceID, tracker, trigHook)
 	missions := missionservice.New(db, missionservice.WithEventPublisher(missionPub))
@@ -359,6 +368,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			Tracker:            tracker,
 			WorkspaceID:        workspaceID,
 			Bus:                bus, // reuse the one bus, not a second
+			KVStore:            kvMgr,
 		}
 		if enableHITL {
 			cfg.EnableHITL = true
@@ -406,7 +416,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 
 	updateBanner := acpUpdateBanner(dbCtx, db, contenoxDir)
 
-	presenceStore := presence.NewStore(libkvstore.NewSQLiteManager(db))
+	presenceStore := presence.NewStore(kvMgr)
 
 	// A dispatched unit must not host its own fleet: it would double-route its
 	// report and recursively spawn fleets.

@@ -7,7 +7,7 @@ import (
 	"github.com/contenox/contenox/internal/services/project"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/services/workspacegrants"
-	libbus "github.com/contenox/contenox/libbus"
+	"github.com/contenox/contenox/internal/substrate"
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
@@ -167,7 +167,12 @@ func runWorkspaceList(cmd *cobra.Command, args []string) error {
 // Nothing in-process subscribes: a session's cwd is fixed at session/new, so a
 // live reload could only widen what a future session may pick. Best-effort.
 func ringReloadDoorbell(ctx context.Context, cmd *cobra.Command, db libdb.DBManager, roots []string) {
-	bus := libbus.NewSQLite(db.WithoutTransaction())
+	bus, err := substrate.OpenBus(ctx, db.WithoutTransaction())
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(),
+			"note: workspace-root change saved, but the message bus could not be opened: %v\n", err)
+		return
+	}
 	defer bus.Close()
 	if err := workspacegrants.PublishChanged(ctx, bus, roots); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(),

@@ -3,7 +3,6 @@ package runtimetypes_test
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -17,10 +16,7 @@ const testEventWS = "ws-test"
 
 func setupEventDB(t *testing.T) libdb.DBManager {
 	t.Helper()
-	ctx := context.Background()
-	db, err := libdb.NewSQLiteDBManager(ctx, filepath.Join(t.TempDir(), "events.db"), runtimetypes.SchemaSQLite)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
+	_, db := runtimetypes.SetupDBManager(t)
 	return db
 }
 

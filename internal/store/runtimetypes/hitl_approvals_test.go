@@ -16,12 +16,7 @@ import (
 
 func setupHITLApprovalsStore(t *testing.T) (context.Context, runtimetypes.Store) {
 	t.Helper()
-	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "hitl_approvals.db")
-	db, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	return ctx, runtimetypes.New(db.WithoutTransaction())
+	return runtimetypes.SetupStore(t)
 }
 
 func newPendingApproval() *runtimetypes.HITLApproval {

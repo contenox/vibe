@@ -40,7 +40,9 @@ func TestUnit_MissionSurface_ShowsAReclaimedMissionAsAbandonedWithItsReason(t *t
 	orphan.LastHeartbeat = &frozen
 	require.NoError(t, missions.Update(ctx, orphan))
 
-	require.Equal(t, 1, reclaimAbandonedMissions(ctx, db, ""))
+	reclaimed, err := reclaimAbandonedMissions(ctx, db, "")
+	require.NoError(t, err)
+	require.Equal(t, 1, reclaimed)
 	require.NoError(t, db.Close())
 
 	require.NoError(t, missionListCmd.RunE(cmd, nil))

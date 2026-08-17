@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/libkvstore"
+	"github.com/contenox/contenox/internal/substrate"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 )
@@ -40,7 +40,11 @@ Prints "(no captured state)" when nothing has been recorded.`,
 		defer db.Close()
 
 		ctx := libtracker.WithNewRequestID(context.Background())
-		kv := libkvstore.NewSQLiteManager(db)
+		kv, releaseKV, err := substrate.OpenKV(ctx, db)
+		if err != nil {
+			return err
+		}
+		defer releaseKV()
 		inspector := taskengine.NewKVInspector(taskengine.NewSimpleInspector(), kv, libtracker.NoopTracker{})
 
 		ids, err := inspector.GetStatefulRequests(ctx)
@@ -77,7 +81,11 @@ IDs.`,
 		defer db.Close()
 
 		ctx := libtracker.WithNewRequestID(context.Background())
-		kv := libkvstore.NewSQLiteManager(db)
+		kv, releaseKV, err := substrate.OpenKV(ctx, db)
+		if err != nil {
+			return err
+		}
+		defer releaseKV()
 		inspector := taskengine.NewKVInspector(taskengine.NewSimpleInspector(), kv, libtracker.NoopTracker{})
 
 		units, err := inspector.GetExecutionStateByRequestID(ctx, reqID)

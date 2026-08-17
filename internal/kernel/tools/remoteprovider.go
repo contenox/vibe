@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -17,6 +18,11 @@ import (
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/getkin/kin-openapi/openapi3"
+)
+
+const (
+	mcpWorkerWait = 2 * time.Second
+	mcpWorkerPoll = 25 * time.Millisecond
 )
 
 // PersistentRepo implements taskengine.ToolsRepo using a single OpenAPI-based protocol.
@@ -120,6 +126,26 @@ func (p *PersistentRepo) Exec(
 	return out, dt, execErr
 }
 
+func (p *PersistentRepo) requestWorker(ctx context.Context, subject string, payload []byte) ([]byte, error) {
+	deadline := time.Now().Add(mcpWorkerWait)
+	for {
+		reply, err := p.messenger.Request(ctx, subject, payload)
+		if err == nil || !errors.Is(err, libbus.ErrNoResponders) {
+			return reply, err
+		}
+		if !time.Now().Before(deadline) {
+			return nil, err
+		}
+		timer := time.NewTimer(mcpWorkerPoll)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
 func (p *PersistentRepo) execMCPTools(
 	ctx context.Context,
 	srv *runtimetypes.MCPServer,
@@ -167,9 +193,9 @@ func (p *PersistentRepo) execMCPTools(
 		return nil, taskengine.DataTypeAny, fmt.Errorf("mcp tools %q: encode request: %w", srv.Name, err)
 	}
 
-	replyData, err := p.messenger.Request(ctx, mcpworker.SubjectExecute(srv.Name), reqPayload)
+	replyData, err := p.requestWorker(ctx, mcpworker.SubjectExecute(srv.Name), reqPayload)
 	if err != nil {
-		return nil, taskengine.DataTypeAny, fmt.Errorf("mcp tools %q: nats request: %w", srv.Name, err)
+		return nil, taskengine.DataTypeAny, fmt.Errorf("mcp tools %q: bus request: %w", srv.Name, err)
 	}
 
 	result, err := mcpworker.DecodeToolReply(replyData)
@@ -324,7 +350,7 @@ func (p *PersistentRepo) GetToolsForToolsByName(ctx context.Context, name string
 			}
 		}
 		reqPayload, _ := json.Marshal(mcpworker.MCPToolRequest{SessionID: sessionID})
-		replyData, err := p.messenger.Request(ctx, mcpworker.SubjectListTools(mcpSrv.Name), reqPayload)
+		replyData, err := p.requestWorker(ctx, mcpworker.SubjectListTools(mcpSrv.Name), reqPayload)
 		if err != nil {
 			return nil, taskengine.ToolsToolsUnavailable(name, fmt.Errorf("mcp list-tools request: %w", err))
 		}

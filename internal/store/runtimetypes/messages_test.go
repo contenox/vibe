@@ -3,7 +3,6 @@ package runtimetypes_test
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,11 +13,7 @@ import (
 
 func setupMessageDB(t *testing.T) (context.Context, libdb.DBManager) {
 	t.Helper()
-	ctx := context.TODO()
-	db, err := libdb.NewSQLiteDBManager(ctx, filepath.Join(t.TempDir(), "messages.db"), runtimetypes.SchemaSQLite)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, db.Close()) })
-	return ctx, db
+	return runtimetypes.SetupDBManager(t)
 }
 
 func TestUnit_Messages_CreateAndListIndices(t *testing.T) {

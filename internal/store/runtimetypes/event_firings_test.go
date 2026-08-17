@@ -53,7 +53,7 @@ func TestUnit_EventFirings_StaleRunningClaimIsReclaimable(t *testing.T) {
 	require.Len(t, firings, 1, "the takeover reuses the row; a retry is never a second firing record")
 	require.Equal(t, runtimetypes.EventFiringStatusRunning, firings[0].Status)
 	require.Equal(t, "evt-retry", firings[0].RequestID, "the row now names the run that actually holds it")
-	require.Equal(t, claimedAt.Truncate(time.Second), firings[0].CreatedAt.Truncate(time.Second),
+	require.Equal(t, claimedAt.Truncate(time.Second), firings[0].CreatedAt.UTC().Truncate(time.Second),
 		"created_at still dates the first attempt, so a retry reads as a retry")
 
 	claimed, err = at(runtimetypes.StaleEventFiringClaim+2*time.Second).BeginEventFiring(ctx, "on-report", 1, "evt-third")

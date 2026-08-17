@@ -45,6 +45,12 @@ func TestUnit_RedactSecrets(t *testing.T) {
 		require.Contains(t, got, "https://admin:[REDACTED]@vllm.internal/v1")
 	})
 
+	t.Run("a lone userinfo is a credential too", func(t *testing.T) {
+		got, n := redactSecrets("Failed to connect to NATS at nats://s3cr3ttok3n@bus.internal:4222")
+		require.Equal(t, 1, n)
+		require.Contains(t, got, "nats://[REDACTED]@bus.internal:4222")
+	})
+
 	t.Run("clean text is untouched and counts zero", func(t *testing.T) {
 		in := "level=INFO msg=\"backend synced\" models=3 duration=1.2s"
 		got, n := redactSecrets(in)
