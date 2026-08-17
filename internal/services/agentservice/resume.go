@@ -38,17 +38,40 @@ type checkpointSaver struct {
 }
 
 type checkpointEnvelope struct {
-	WorkspaceRoot string          `json:"workspace_root,omitempty"`
-	GateResult    json.RawMessage `json:"gate_result,omitempty"`
-	Checkpoint    json.RawMessage `json:"checkpoint"`
+	WorkspaceRoot    string          `json:"workspace_root,omitempty"`
+	TriggerRequestID string          `json:"trigger_request_id,omitempty"`
+	GateResult       json.RawMessage `json:"gate_result,omitempty"`
+	Checkpoint       json.RawMessage `json:"checkpoint"`
 }
 
-func unwrapCheckpointEnvelope(raw []byte) (checkpoint []byte, workspaceRoot string, gateResult []byte) {
+func unwrapCheckpointEnvelope(raw []byte) checkpointEnvelope {
 	var env checkpointEnvelope
 	if err := json.Unmarshal(raw, &env); err == nil && len(env.Checkpoint) > 0 {
-		return env.Checkpoint, env.WorkspaceRoot, env.GateResult
+		return env
 	}
-	return raw, "", nil
+	return checkpointEnvelope{Checkpoint: raw}
+}
+
+type triggerRequestIDContextKey struct{}
+
+func WithTriggerRequestID(ctx context.Context, requestID string) context.Context {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, triggerRequestIDContextKey{}, requestID)
+}
+
+func TriggerRequestIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(triggerRequestIDContextKey{}).(string)
+	return strings.TrimSpace(id)
+}
+
+func TriggerRequestIDOf(cp *runtimetypes.ChainCheckpoint) string {
+	if cp == nil {
+		return ""
+	}
+	return strings.TrimSpace(unwrapCheckpointEnvelope(cp.Payload).TriggerRequestID)
 }
 
 func (s *checkpointSaver) SaveCheckpoint(ctx context.Context, cp *taskengine.Checkpoint) error {
@@ -59,8 +82,9 @@ func (s *checkpointSaver) SaveCheckpoint(ctx context.Context, cp *taskengine.Che
 		return fmt.Errorf("agentservice: serialize checkpoint for approval %s: %w", cp.ApprovalID, err)
 	}
 	payload, err := json.Marshal(checkpointEnvelope{
-		WorkspaceRoot: vfs.SessionCwdFromContext(ctx),
-		Checkpoint:    inner,
+		WorkspaceRoot:    vfs.SessionCwdFromContext(ctx),
+		TriggerRequestID: TriggerRequestIDFromContext(ctx),
+		Checkpoint:       inner,
 	})
 	if err != nil {
 		return fmt.Errorf("agentservice: envelope checkpoint for approval %s: %w", cp.ApprovalID, err)
@@ -153,7 +177,8 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 	if err != nil {
 		return nil, fmt.Errorf("agentservice: load claimed checkpoint %s: %w", approvalID, err)
 	}
-	innerPayload, workspaceRoot, gateRaw := unwrapCheckpointEnvelope(cpRow.Payload)
+	env := unwrapCheckpointEnvelope(cpRow.Payload)
+	innerPayload, workspaceRoot, gateRaw := env.Checkpoint, env.WorkspaceRoot, env.GateResult
 	cp, err := taskengine.UnmarshalCheckpoint(innerPayload)
 	if err != nil {
 		// Version drift or corruption: annotate and keep, stranded but visible.
@@ -166,6 +191,7 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 	} else {
 		ctx = libtracker.WithNewRequestID(ctx)
 	}
+	ctx = WithTriggerRequestID(ctx, env.TriggerRequestID)
 	ctx = taskengine.WithTemplateVars(ctx, cp.TemplateVars)
 	if cp.ContextLength > 0 {
 		ctx = taskengine.WithRequestedContextLength(ctx, cp.ContextLength)
@@ -183,6 +209,7 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 	if row.MissionID != nil && *row.MissionID != "" {
 		ctx = missiontools.WithMissionID(ctx, *row.MissionID)
 	}
+	ctx = hitlservice.WithAgentName(ctx, row.AgentName)
 	if isAttention {
 		ans := taskengine.AttentionAnswer{}
 		if text := strings.TrimSpace(hitlservice.AnswerOf(row)); text != "" {
@@ -214,9 +241,10 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 				return mErr
 			}
 			payload, mErr := json.Marshal(checkpointEnvelope{
-				WorkspaceRoot: workspaceRoot,
-				GateResult:    resRaw,
-				Checkpoint:    json.RawMessage(innerPayload),
+				WorkspaceRoot:    workspaceRoot,
+				TriggerRequestID: env.TriggerRequestID,
+				GateResult:       resRaw,
+				Checkpoint:       json.RawMessage(innerPayload),
 			})
 			if mErr != nil {
 				return mErr

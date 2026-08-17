@@ -801,3 +801,67 @@ func TestUnit_UnauthorizedIsFatal(t *testing.T) {
 		t.Fatalf("dials = %d after an unauthorized refusal, want 1", got)
 	}
 }
+
+func TestUnit_OnConnectRunsOnEveryConnectionAndCanSendThroughIt(t *testing.T) {
+	t.Parallel()
+	r := relaytest.New()
+	defer r.Close()
+	d := &relayDialer{relay: r}
+
+	var conn *relaylink.Connector
+	var connects atomic.Int32
+	var sendErr atomic.Value
+	cfg := baseConfig()
+	cfg.Dial = d.dial
+	cfg.OnConnect = func(context.Context) {
+		n := connects.Add(1)
+		f, err := librelay.Frame{Type: librelay.TypeACPMessage, Instance: "inst-a", Session: fmt.Sprintf("reconnect-%d", n)}.
+			WithPayload(json.RawMessage(`{}`))
+		if err == nil {
+			err = conn.Send(f)
+		}
+		if err != nil {
+			sendErr.Store(err)
+		}
+	}
+	c, err := relaylink.New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	conn = c
+	defer c.Close()
+	if err := c.Start(t.Context()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	waitFor(t, "the first connection's hook", func() bool { return connects.Load() == 1 })
+	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
+	defer cancel()
+	if !sawSession(t, ctx, d.link(0), "reconnect-1") {
+		t.Fatal("what OnConnect sent on the first connection never reached the relay")
+	}
+
+	d.link(0).Drop()
+	waitFor(t, "the redial's hook", func() bool { return connects.Load() >= 2 })
+	waitFor(t, "a second link", func() bool { return d.link(1) != nil })
+	if !sawSession(t, ctx, d.link(1), "reconnect-2") {
+		t.Fatal("what OnConnect sent after the redial never reached the relay")
+	}
+	if err, _ := sendErr.Load().(error); err != nil {
+		t.Fatalf("OnConnect could not send on its own connection: %v", err)
+	}
+}
+
+func sawSession(t *testing.T, ctx context.Context, l *relaytest.Link, session string) bool {
+	t.Helper()
+	for range 20 {
+		f, err := l.Recv(ctx)
+		if err != nil {
+			return false
+		}
+		if f.Session == session {
+			return true
+		}
+	}
+	return false
+}

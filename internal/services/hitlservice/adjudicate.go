@@ -81,10 +81,14 @@ func (s *service) offer(ctx context.Context, ask Adjudication) {
 	go adj.Adjudicate(context.WithoutCancel(ctx), ask)
 }
 
-func (s *service) forgetOffer(askID string) {
+func (s *service) askClosed(ctx context.Context, askID string, reason AskResolution) {
 	s.mu.Lock()
 	delete(s.offered, askID)
+	w := s.askWatcher
 	s.mu.Unlock()
+	if w != nil {
+		w.AskResolved(ctx, askID, reason)
+	}
 }
 
 func adjudicationFromApprovalRequest(askID string, req ApprovalRequest) Adjudication {
@@ -172,7 +176,7 @@ func (s *service) RespondAsAgentBounded(ctx context.Context, askID, agentName st
 		}
 		return ErrApprovalAlreadyResolved
 	}
-	s.forgetOffer(askID)
+	s.askClosed(ctx, askID, AskAnswered)
 
 	s.mu.Lock()
 	ch, ok := s.pending[askID]

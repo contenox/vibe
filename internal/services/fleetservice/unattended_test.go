@@ -63,6 +63,12 @@ func (f *fakeHITL) RequestApproval(_ context.Context, req hitlservice.ApprovalRe
 
 func (f *fakeHITL) Respond(context.Context, string, bool) error { return nil }
 
+func (f *fakeHITL) RespondWithGuidance(context.Context, string, bool, string, string) error {
+	return nil
+}
+
+func (f *fakeHITL) AnswerFrom(context.Context, string, string, string) error { return nil }
+
 // The attention-ask half of the Service is inert; this double covers the
 // permission path only.
 func (f *fakeHITL) RequestAttention(context.Context, hitlservice.AttentionRequest, taskengine.TaskEventSink) (string, error) {

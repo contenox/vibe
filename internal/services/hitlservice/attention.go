@@ -139,6 +139,7 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 	}
 
 	req.AskID = askID
+	s.askRecorded(ctx, row)
 	s.offer(ctx, adjudicationFromAttentionRequest(askID, req))
 
 	if releaseOnRecord {
@@ -184,6 +185,10 @@ const attentionPollInterval = time.Second
 
 func (s *service) Answer(ctx context.Context, askID, text string) error {
 	return s.answerAttention(ctx, askID, text, "", nil)
+}
+
+func (s *service) AnswerFrom(ctx context.Context, askID, text, by string) error {
+	return s.answerAttention(ctx, askID, text, strings.TrimSpace(by), nil)
 }
 
 func (s *service) answerAttention(ctx context.Context, askID, text, by string, bound *int) error {
@@ -245,7 +250,7 @@ func (s *service) answerAttention(ctx context.Context, askID, text, by string, b
 		return ErrApprovalAlreadyResolved
 	}
 
-	s.forgetOffer(askID)
+	s.askClosed(ctx, askID, AskAnswered)
 
 	s.mu.Lock()
 	ch, ok := s.pending[askID]

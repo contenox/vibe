@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/agentdecl"
+	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/eventtrigger"
 	"github.com/contenox/contenox/internal/services/hitlservice"
@@ -58,23 +60,24 @@ func (r *resultRecorder) noneYet(t *testing.T) {
 }
 
 type stubChainRunner struct {
-	mu    sync.Mutex
-	err   error
-	gate  chan struct{}
-	calls int
-	last  relayChainRequest
+	mu      sync.Mutex
+	err     error
+	outcome relayChainOutcome
+	gate    chan struct{}
+	calls   int
+	last    relayChainRequest
 }
 
-func (s *stubChainRunner) RunChain(_ context.Context, req relayChainRequest) error {
+func (s *stubChainRunner) RunChain(_ context.Context, req relayChainRequest) (relayChainOutcome, error) {
 	s.mu.Lock()
 	s.calls++
 	s.last = req
-	gate, err := s.gate, s.err
+	gate, err, outcome := s.gate, s.err, s.outcome
 	s.mu.Unlock()
 	if gate != nil {
 		<-gate
 	}
-	return err
+	return outcome, err
 }
 
 func (s *stubChainRunner) callCount() int {
@@ -128,10 +131,16 @@ func TestUnit_RelayChainTrigger_RefusesWhatCannotStart(t *testing.T) {
 			payload:     librelay.ChainTrigger{RequestID: "req-2", Chain: "chain-x.json", SessionMode: "new", Input: json.RawMessage(`{}`)},
 			wantMention: "beta-gated",
 		},
-		"a trigger naming no chain": {
+		"a trigger naming neither a chain nor an agent": {
 			triggers:    relayChainTriggers{runner: &stubChainRunner{}},
 			payload:     librelay.ChainTrigger{RequestID: "req-3", SessionMode: "new", Input: json.RawMessage(`{}`)},
-			wantMention: "chain is required",
+			wantMention: "chain or agent_name is required",
+		},
+		"an agent name carrying a control character": {
+			triggers: relayChainTriggers{runner: &stubChainRunner{}},
+			payload: librelay.ChainTrigger{RequestID: "req-4", AgentName: "refund\ndesk", SessionMode: "new",
+				Input: json.RawMessage(`{}`)},
+			wantMention: "malformed agent_name",
 		},
 		"an unknown session mode": {
 			triggers:    relayChainTriggers{runner: &stubChainRunner{}},
@@ -188,6 +197,42 @@ func TestUnit_RelayChainTrigger_CarriesTheSessionToTheRunner(t *testing.T) {
 	defer runner.mu.Unlock()
 	require.Equal(t, librelay.ChainSessionReused, runner.last.SessionMode)
 	require.Equal(t, "refund-desk", runner.last.SessionName, "the wire name is trimmed before it becomes a row value")
+}
+
+func TestUnit_RelayChainTrigger_CarriesTheAgentNameToTheRunner(t *testing.T) {
+	t.Parallel()
+	runner := &stubChainRunner{}
+	h, rec := testTriggerHandler(relayChainTriggers{runner: runner})
+	h.handle(t.Context(), chainTriggerFrame(t, librelay.ChainTrigger{
+		RequestID:   "req-1",
+		AgentName:   "  refund-desk  ",
+		SessionMode: librelay.ChainSessionNew,
+		Input:       json.RawMessage(`{}`),
+	}))
+	requireResult(t, rec.next(t), "req-1", librelay.ChainTriggerStatusOK)
+
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	require.Equal(t, "refund-desk", runner.last.AgentName, "the wire name is trimmed before it is resolved")
+	require.Empty(t, runner.last.Chain, "a trigger that names an agent names no chain file")
+}
+
+func TestUnit_RelayChainTrigger_ARunWaitingOnAHumanNeverReportsOk(t *testing.T) {
+	t.Parallel()
+	runner := &stubChainRunner{outcome: relayChainOutcome{Suspended: true, ApprovalID: "ask-7"}}
+	h, rec := testTriggerHandler(relayChainTriggers{runner: runner})
+	f := chainTriggerFrame(t, librelay.ChainTrigger{
+		RequestID: "req-1", Chain: "chain-x.json", SessionMode: "new", Input: json.RawMessage(`{}`),
+	})
+	f.ID = "42"
+	h.handle(t.Context(), f)
+
+	result := rec.next(t)
+	res := requireResult(t, result, "req-1", librelay.ChainTriggerStatusAwaitingHuman)
+	require.Contains(t, res.Error, "ask-7", "the relay learns which approval the run is waiting on")
+	require.Equal(t, "42", result.ReplyTo)
+	h.wait()
+	rec.noneYet(t)
 }
 
 // TestUnit_RelayChainTrigger_UnanswerableFramesSendNoResult asserts a frame with no well-formed request_id gets no result, except a request-shaped frame still owes its one librelay error reply.
@@ -287,12 +332,14 @@ func TestUnit_RelayChainTrigger_ClassifiesRunOutcomes(t *testing.T) {
 }
 
 type fakeChainAgent struct {
-	mu      sync.Mutex
-	err     error
-	newErr  error
-	calls   int
-	lastCtx context.Context
-	lastReq agentservice.PromptRequest
+	mu         sync.Mutex
+	err        error
+	newErr     error
+	stop       agentservice.StopReason
+	approvalID string
+	calls      int
+	lastCtx    context.Context
+	lastReq    agentservice.PromptRequest
 
 	listDelay   time.Duration
 	sessions    []*agentservice.SessionInfo
@@ -317,6 +364,9 @@ func (f *fakeChainAgent) Prompt(ctx context.Context, req agentservice.PromptRequ
 	}
 	if f.err != nil {
 		return nil, f.err
+	}
+	if f.stop != "" {
+		return &agentservice.PromptResponse{StopReason: f.stop, SuspendedApprovalID: f.approvalID}, nil
 	}
 	return &agentservice.PromptResponse{StopReason: agentservice.StopEndTurn}, nil
 }
@@ -442,10 +492,11 @@ func TestUnit_RelayTriggerRunner_DefaultPolicyWhenPayloadNamesNone(t *testing.T)
 
 	agent := &fakeChainAgent{}
 	runner := &relayTriggerRunner{agent: agent, contenoxDir: dir}
-	require.NoError(t, runner.RunChain(t.Context(), relayChainRequest{
+	_, err := runner.RunChain(t.Context(), relayChainRequest{
 		Chain: "chain-on-event.json",
 		Input: json.RawMessage(`{"hop":0}`),
-	}))
+	})
+	require.NoError(t, err)
 	ctx, _, _ := agent.last()
 	require.Empty(t, hitlservice.PolicyNameFromContext(ctx))
 	require.Equal(t, 1, runtimetypes.EventHopFromContext(ctx), "a hopless envelope still runs at hop 1")
@@ -470,7 +521,7 @@ func TestUnit_RelayTriggerRunner_RefusesBeforeTheChainStarts(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			agent := &fakeChainAgent{}
 			runner := &relayTriggerRunner{agent: agent, contenoxDir: dir}
-			err := runner.RunChain(t.Context(), req)
+			_, err := runner.RunChain(t.Context(), req)
 			require.ErrorIs(t, err, errChainTriggerRefused)
 			_, _, calls := agent.last()
 			require.Zero(t, calls, "a refused trigger must never start its chain")
@@ -480,10 +531,11 @@ func TestUnit_RelayTriggerRunner_RefusesBeforeTheChainStarts(t *testing.T) {
 	// The ceiling itself still fires: the guard refuses past the budget, not at it.
 	agent := &fakeChainAgent{}
 	runner := &relayTriggerRunner{agent: agent, contenoxDir: dir}
-	require.NoError(t, runner.RunChain(t.Context(), relayChainRequest{
+	_, err := runner.RunChain(t.Context(), relayChainRequest{
 		Chain: "chain-good.json",
 		Input: json.RawMessage(`{"hop":` + jsonInt(eventtrigger.DefaultMaxHop) + `}`),
-	}))
+	})
+	require.NoError(t, err)
 	ctx, _, calls := agent.last()
 	require.Equal(t, 1, calls)
 	require.Equal(t, eventtrigger.DefaultMaxHop+1, runtimetypes.EventHopFromContext(ctx))
@@ -494,17 +546,149 @@ func jsonInt(n int) string {
 	return string(b)
 }
 
+const triggerAgentDeclaration = `---
+name: refund-desk
+description: Decides whether a refund goes out
+tools: Read
+---
+
+You decide refunds.
+`
+
+func triggerAgentRunner(t *testing.T, dir string, agent agentservice.Agent) *relayTriggerRunner {
+	t.Helper()
+	db, err := libdb.NewSQLiteDBManager(context.Background(), filepath.Join(t.TempDir(), "trigger-agents.db"), runtimetypes.SchemaSQLite)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	return &relayTriggerRunner{
+		agent:       agent,
+		contenoxDir: dir,
+		agents:      agentregistryservice.New(db),
+		store:       runtimetypes.New(db.WithoutTransaction()),
+	}
+}
+
+func TestUnit_RelayTriggerRunner_ResolvesAnAuthoredAgentName(t *testing.T) {
+	dir := triggerTestWorkspace(t)
+	agentsDir := filepath.Join(dir, agentdecl.NativeSourceDir)
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "refund-desk.md"), []byte(triggerAgentDeclaration), 0o644))
+
+	agent := &fakeChainAgent{}
+	runner := triggerAgentRunner(t, dir, agent)
+
+	outcome, err := runner.RunChain(t.Context(), relayChainRequest{
+		AgentName:   "refund-desk",
+		SessionMode: librelay.ChainSessionReused,
+		Input:       json.RawMessage(`{"hop":0}`),
+	})
+	require.NoError(t, err)
+	require.False(t, outcome.Suspended)
+
+	_, req, calls := agent.last()
+	require.Equal(t, 1, calls)
+	require.Equal(t, filepath.Join(dir, agentdecl.GeneratedDirName, "chain-agent-refund-desk.json"), req.ChainRef,
+		"the declaration's emitted chain is what runs; no second lookup invents a path")
+	require.Equal(t, "refund-desk", req.Chain.ID)
+
+	created, _, promptSeen, _, _ := agent.sessionOps()
+	require.Equal(t, []string{triggerSessionPrefix + "refund-desk"}, created,
+		"a reused session with no wire name is named after the agent the trigger named")
+	require.Len(t, promptSeen, 1)
+
+	registered, err := runner.agents.GetByName(t.Context(), "refund-desk")
+	require.NoError(t, err)
+	require.True(t, registered.Enabled)
+	require.Equal(t, runtimetypes.AgentKindChain, registered.Kind)
+
+	_, err = runner.RunChain(t.Context(), relayChainRequest{
+		AgentName:   "refund-desk",
+		Chain:       "chain-nowhere.json",
+		SessionMode: librelay.ChainSessionNew,
+		Input:       json.RawMessage(`{"hop":0}`),
+	})
+	require.NoError(t, err)
+	_, req, calls = agent.last()
+	require.Equal(t, 2, calls)
+	require.Equal(t, filepath.Join(dir, agentdecl.GeneratedDirName, "chain-agent-refund-desk.json"), req.ChainRef,
+		"the named agent decides the chain; a chain field arriving beside it is not consulted")
+}
+
+func TestUnit_RelayTriggerRunner_RefusesAnAgentNameThatResolvesToNothing(t *testing.T) {
+	for name, withRegistry := range map[string]bool{
+		"a name no declaration provides": true,
+		"a process running no registry":  false,
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := triggerTestWorkspace(t)
+			agent := &fakeChainAgent{}
+			runner := &relayTriggerRunner{agent: agent, contenoxDir: dir}
+			if withRegistry {
+				runner = triggerAgentRunner(t, dir, agent)
+			}
+
+			_, err := runner.RunChain(t.Context(), relayChainRequest{
+				AgentName: "refund-desk",
+				Input:     json.RawMessage(`{"hop":0}`),
+			})
+			require.ErrorIs(t, err, errChainTriggerRefused)
+			require.Contains(t, err.Error(), "refund-desk", "the refusal names what was not found")
+			_, _, calls := agent.last()
+			require.Zero(t, calls, "a trigger naming nothing must never start a chain")
+		})
+	}
+}
+
+func TestUnit_RelayTriggerRunner_RefusesADisabledAgent(t *testing.T) {
+	dir := triggerTestWorkspace(t)
+	agentsDir := filepath.Join(dir, agentdecl.NativeSourceDir)
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "refund-desk.md"), []byte(triggerAgentDeclaration), 0o644))
+
+	agent := &fakeChainAgent{}
+	runner := triggerAgentRunner(t, dir, agent)
+	discoverChainAgents(t.Context(), runner.agents, dir, nil, DiscoverDeps{Store: runner.store})
+	row, err := runner.agents.GetByName(t.Context(), "refund-desk")
+	require.NoError(t, err)
+	row.Enabled = false
+	require.NoError(t, runner.agents.Update(t.Context(), row))
+
+	_, err = runner.RunChain(t.Context(), relayChainRequest{
+		AgentName: "refund-desk",
+		Input:     json.RawMessage(`{"hop":0}`),
+	})
+	require.ErrorIs(t, err, errChainTriggerRefused)
+	require.ErrorIs(t, err, agentregistryservice.ErrAgentDisabled)
+	require.Contains(t, err.Error(), "refund-desk")
+	_, _, calls := agent.last()
+	require.Zero(t, calls)
+}
+
+func TestUnit_RelayTriggerRunner_ReportsARunWaitingOnAHuman(t *testing.T) {
+	dir := triggerTestWorkspace(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "chain-on-event.json"), []byte(`{"id":"c","tasks":[]}`), 0o600))
+
+	agent := &fakeChainAgent{stop: agentservice.StopSuspended, approvalID: "ask-7"}
+	runner := &relayTriggerRunner{agent: agent, contenoxDir: dir}
+	outcome, err := runner.RunChain(t.Context(), relayChainRequest{
+		Chain: "chain-on-event.json", Input: json.RawMessage(`{"hop":0}`),
+	})
+	require.NoError(t, err, "a run waiting on a human is not a failure")
+	require.True(t, outcome.Suspended)
+	require.Equal(t, "ask-7", outcome.ApprovalID)
+}
+
 func TestUnit_BuildRelayChainTriggers(t *testing.T) {
 	t.Parallel()
-	noEngine := buildRelayChainTriggers(nil, t.TempDir(), DefaultWorkspaceID, nil, chatOpts{EffectiveOptInBeta: true})
+	noEngine := buildRelayChainTriggers(nil, t.TempDir(), DefaultWorkspaceID, nil, chatOpts{EffectiveOptInBeta: true}, nil)
 	require.Nil(t, noEngine.runner)
 	require.Contains(t, noEngine.unavailable, "no engine")
 
-	betaOff := buildRelayChainTriggers(nil, t.TempDir(), DefaultWorkspaceID, &Engine{}, chatOpts{})
+	betaOff := buildRelayChainTriggers(nil, t.TempDir(), DefaultWorkspaceID, &Engine{}, chatOpts{}, nil)
 	require.NotNil(t, betaOff.runner, "the beta gate no longer withholds the runner")
 	require.Empty(t, betaOff.unavailable)
 
-	on := buildRelayChainTriggers(nil, t.TempDir(), DefaultWorkspaceID, &Engine{}, chatOpts{EffectiveOptInBeta: true})
+	on := buildRelayChainTriggers(nil, t.TempDir(), DefaultWorkspaceID, &Engine{}, chatOpts{EffectiveOptInBeta: true}, nil)
 	require.NotNil(t, on.runner)
 	require.Empty(t, on.unavailable)
 }
@@ -568,7 +752,8 @@ func TestUnit_RelayTriggerRunner_SessionModes(t *testing.T) {
 			agent := &fakeChainAgent{}
 			runner := &relayTriggerRunner{agent: agent, contenoxDir: dir}
 			for _, f := range tc.firings {
-				require.NoError(t, runner.RunChain(t.Context(), f))
+				_, err := runner.RunChain(t.Context(), f)
+				require.NoError(t, err)
 			}
 
 			created, resumed, promptSeen, promptNames, lists := agent.sessionOps()
@@ -602,7 +787,7 @@ func TestUnit_RelayTriggerRunner_RefusesWhenTheSessionCannotBeCreated(t *testing
 
 	agent := &fakeChainAgent{newErr: errors.New("session name already exists")}
 	runner := &relayTriggerRunner{agent: agent, contenoxDir: dir}
-	err := runner.RunChain(t.Context(), relayChainRequest{
+	_, err := runner.RunChain(t.Context(), relayChainRequest{
 		Chain: "chain-on-event.json", SessionMode: librelay.ChainSessionNew, Input: json.RawMessage(`{"hop":0}`),
 	})
 	require.ErrorIs(t, err, errChainTriggerRefused)
@@ -623,10 +808,11 @@ func TestUnit_RelayTriggerRunner_ConcurrentFiringsShareOneReusedSession(t *testi
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			require.NoError(t, runner.RunChain(t.Context(), relayChainRequest{
+			_, err := runner.RunChain(t.Context(), relayChainRequest{
 				Chain: "chain-on-event.json", SessionMode: librelay.ChainSessionReused,
 				SessionName: "refund-desk", Input: json.RawMessage(`{"hop":0}`),
-			}))
+			})
+			require.NoError(t, err)
 		}()
 	}
 	wg.Wait()
@@ -637,9 +823,7 @@ func TestUnit_RelayTriggerRunner_ConcurrentFiringsShareOneReusedSession(t *testi
 	for _, id := range promptSeen {
 		require.Equal(t, promptSeen[0], id, "every concurrent firing lands in the one reused session")
 	}
-	runner.mu.Lock()
-	require.Empty(t, runner.inSession, "the per-name gate is released once no firing holds it")
-	runner.mu.Unlock()
+	require.True(t, runner.names.idle(), "the per-name gate is released once no firing holds it")
 }
 
 func TestUnit_RelayTriggerRunner_WritesSessionsAcpsvcCanList(t *testing.T) {
@@ -652,7 +836,7 @@ func TestUnit_RelayTriggerRunner_WritesSessionsAcpsvcCanList(t *testing.T) {
 	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), DefaultWorkspaceID)
 	require.NoError(t, store.CreateNamedMessageIndex(ctx, "idx-local", "local-user", "default"))
 
-	triggers := buildRelayChainTriggers(db, dir, DefaultWorkspaceID, &Engine{}, chatOpts{})
+	triggers := buildRelayChainTriggers(db, dir, DefaultWorkspaceID, &Engine{}, chatOpts{}, nil)
 	runner, ok := triggers.runner.(*relayTriggerRunner)
 	require.True(t, ok)
 

@@ -299,6 +299,9 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	acpHITL := hitlservice.NewWithDefaultPolicy(acpPolicySource(contenoxDir), runtimetypes.LocalTenantID, runtimetypes.New(db.WithoutTransaction()), tracker, profile.hitlPolicy)
 	// /policy and `contenox config set hitl-policy-name` both write this workspace's row; the evaluator must read the same one.
 	hitlservice.SetWorkspaceID(acpHITL, workspaceID)
+	askBridge := newRelayAskBridge(acpHITL, tracker)
+	hitlservice.SetAskWatcher(acpHITL, askBridge)
+	resumeBridge := newRelayResumeBridge(tracker)
 
 	// Assigned once the fleet is built below; the toolset resolves it per call.
 	var inProcessFleet fleetservice.Service
@@ -371,8 +374,9 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			return fmt.Errorf("build engine: %w", err)
 		}
 		defer engine.Stop()
-		// A verdict landing with no waiter parked resumes the suspended run here.
-		hitlservice.SetResumeHook(acpHITL, agentservice.ResumeHook(agentservice.Deps{
+		// A verdict landing with no waiter parked resumes the suspended run here,
+		// and a triggered run's outcome goes back to the relay from there.
+		hitlservice.SetResumeHook(acpHITL, resumeBridge.hook(agentservice.Deps{
 			Engine:      engine,
 			DB:          db,
 			WorkspaceID: workspaceID,
@@ -490,7 +494,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	})
 
 	stopRelay := serveRemoteAttachments(ctx, contenoxDir, transportFactory,
-		buildRelayChainTriggers(db, contenoxDir, workspaceID, engine, triggerOpts), tracker, os.Stderr)
+		buildRelayChainTriggers(db, contenoxDir, workspaceID, engine, triggerOpts, resumeBridge), askBridge, tracker, os.Stderr)
 	defer stopRelay()
 
 	acpCwd, _ := os.Getwd()

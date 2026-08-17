@@ -88,7 +88,7 @@ func TestUnit_RemoteAttachmentsStartNothingWhenThereIsNothingToStart(t *testing.
 			var warn, activity recordingWriter
 			before := runtime.NumGoroutine()
 
-			stop := serveRemoteAttachments(t.Context(), tc.dir, relayTestFactory, relayChainTriggers{},
+			stop := serveRemoteAttachments(t.Context(), tc.dir, relayTestFactory, relayChainTriggers{}, nil,
 				libtracker.NewTextActivityTracker(&activity), &warn)
 			if stop == nil {
 				t.Fatal("stop is nil; it must be safe to defer unconditionally")
@@ -111,7 +111,7 @@ func TestUnit_RelayTunnelTeardownJoinsEverythingItStarted(t *testing.T) {
 	writeUnreachablePairing(t, dir)
 
 	before := runtime.NumGoroutine()
-	stop, err := startRelayTunnel(t.Context(), dir, relayTestFactory, relayChainTriggers{}, nil)
+	stop, err := startRelayTunnel(t.Context(), dir, relayTestFactory, relayChainTriggers{}, nil, nil)
 	if err != nil {
 		t.Fatalf("startRelayTunnel: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestUnit_RelayTunnelTeardownJoinsEverythingItStarted(t *testing.T) {
 	requireGoroutinesSettleTo(t, before)
 
 	for range 4 {
-		stop, err := startRelayTunnel(t.Context(), dir, relayTestFactory, relayChainTriggers{}, nil)
+		stop, err := startRelayTunnel(t.Context(), dir, relayTestFactory, relayChainTriggers{}, nil, nil)
 		if err != nil {
 			t.Fatalf("startRelayTunnel: %v", err)
 		}
@@ -138,7 +138,7 @@ func TestUnit_RemoteAttachmentsReportAnUnreadablePairing(t *testing.T) {
 	writePairing(t, dir)
 
 	var warn bytes.Buffer
-	stop := serveRemoteAttachments(t.Context(), dir, relayTestFactory, relayChainTriggers{}, nil, &warn)
+	stop := serveRemoteAttachments(t.Context(), dir, relayTestFactory, relayChainTriggers{}, nil, nil, &warn)
 	if stop == nil {
 		t.Fatal("stop is nil; it must be safe to defer unconditionally")
 	}
@@ -159,7 +159,7 @@ func TestUnit_RelayTunnelIsInertWithoutAPairing(t *testing.T) {
 		"no contenox directory": "",
 		"nothing stored":        t.TempDir(),
 	} {
-		stop, err := startRelayTunnel(t.Context(), dir, relayTestFactory, relayChainTriggers{}, nil)
+		stop, err := startRelayTunnel(t.Context(), dir, relayTestFactory, relayChainTriggers{}, nil, nil)
 		if err != nil {
 			t.Fatalf("%s: startRelayTunnel: %v", name, err)
 		}
@@ -176,7 +176,7 @@ func TestUnit_RelayTunnelReportsAnUnreadablePairing(t *testing.T) {
 	dir := t.TempDir()
 	writePairing(t, dir)
 
-	stop, err := startRelayTunnel(t.Context(), dir, relayTestFactory, relayChainTriggers{}, nil)
+	stop, err := startRelayTunnel(t.Context(), dir, relayTestFactory, relayChainTriggers{}, nil, nil)
 	if err == nil {
 		t.Fatal("startRelayTunnel accepted an unreadable pairing")
 	}
@@ -318,5 +318,43 @@ func TestUnit_RoutedTransport_FallsBackToTheLocalConnection(t *testing.T) {
 func TestUnit_RoutedTransport_IsNilSafe(t *testing.T) {
 	if got := routedTransport(nil, nil)(t.Context()); got != nil {
 		t.Fatalf("resolve = %v, want nil", got)
+	}
+}
+
+func TestUnit_RelayTunnelAttachesTheAskBridgeBeforeItDials(t *testing.T) {
+	dir := t.TempDir()
+	writeUnreachablePairing(t, dir)
+
+	asks := newRelayAskBridge(&fakeAskInbox{}, libtracker.NoopTracker{})
+	stop, err := startRelayTunnel(t.Context(), dir, relayTestFactory, relayChainTriggers{}, asks, nil)
+	if err != nil {
+		t.Fatalf("startRelayTunnel: %v", err)
+	}
+	instance, send := asks.link()
+	if instance != "inst-relay-test" || send == nil {
+		t.Fatalf("bridge link = %q/%v; a link held only after the first connection loses that connection's re-publish", instance, send != nil)
+	}
+	stop()
+	if _, send := asks.link(); send != nil {
+		t.Fatal("teardown left the bridge publishing into a closed connector")
+	}
+}
+
+func TestUnit_RelayTunnelAttachesTheResumeBridge(t *testing.T) {
+	dir := t.TempDir()
+	writeUnreachablePairing(t, dir)
+
+	resumes := newRelayResumeBridge(libtracker.NoopTracker{})
+	stop, err := startRelayTunnel(t.Context(), dir, relayTestFactory, relayChainTriggers{resumes: resumes}, nil, nil)
+	if err != nil {
+		t.Fatalf("startRelayTunnel: %v", err)
+	}
+	instance, send := resumes.link()
+	if instance != "inst-relay-test" || send == nil {
+		t.Fatalf("resume link = %q/%v; a run resumed on a verdict could not report its outcome", instance, send != nil)
+	}
+	stop()
+	if _, send := resumes.link(); send != nil {
+		t.Fatal("teardown left an outcome to be sent into a closed connector")
 	}
 }

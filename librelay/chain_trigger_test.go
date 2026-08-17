@@ -107,6 +107,82 @@ func TestUnit_ChainTriggerFramesRoundTrip(t *testing.T) {
 	}
 }
 
+func TestUnit_ChainTriggerNamesAnAgent(t *testing.T) {
+	t.Parallel()
+
+	trigger, err := librelay.Frame{Type: librelay.TypeChainTrigger, Instance: "inst-1"}.
+		WithPayload(librelay.ChainTrigger{
+			RequestID:   "req-4",
+			AgentName:   "refund-desk",
+			SessionMode: librelay.ChainSessionReused,
+			SessionName: "refunds",
+			Input:       json.RawMessage(`{"hop":0}`),
+		})
+	if err != nil {
+		t.Fatalf("WithPayload: %v", err)
+	}
+	want := `{"request_id":"req-4","chain":"","agent_name":"refund-desk","session_mode":"reused","session_name":"refunds","input":{"hop":0}}`
+	if string(trigger.Payload) != want {
+		t.Fatalf("payload = %s, want %s", trigger.Payload, want)
+	}
+
+	var buf bytes.Buffer
+	if err := librelay.NewWriter(&buf).WriteFrame(trigger); err != nil {
+		t.Fatalf("WriteFrame: %v", err)
+	}
+	got, err := librelay.NewReader(&buf).ReadFrame()
+	if err != nil {
+		t.Fatalf("ReadFrame: %v", err)
+	}
+	var decoded librelay.ChainTrigger
+	if err := got.DecodePayload(&decoded); err != nil {
+		t.Fatalf("DecodePayload: %v", err)
+	}
+	if decoded.AgentName != "refund-desk" || decoded.SessionName != "refunds" || decoded.Chain != "" {
+		t.Fatalf("payload = %+v", decoded)
+	}
+
+	var older librelay.ChainTrigger
+	if err := json.Unmarshal([]byte(`{"request_id":"req-5","chain":"chain-x.json","session_mode":"new","input":{"hop":0}}`), &older); err != nil {
+		t.Fatalf("decode a trigger written before agent naming: %v", err)
+	}
+	if older.AgentName != "" || older.Chain != "chain-x.json" {
+		t.Fatalf("payload = %+v", older)
+	}
+}
+
+func TestUnit_AwaitingHumanIsOutsideTheStatusesAnOlderPeerKnows(t *testing.T) {
+	t.Parallel()
+
+	for _, settled := range []string{librelay.ChainTriggerStatusOK, librelay.ChainTriggerStatusError, librelay.ChainTriggerStatusRefused} {
+		if librelay.ChainTriggerStatusAwaitingHuman == settled {
+			t.Fatalf("awaiting-human status collides with %q", settled)
+		}
+	}
+
+	result, err := librelay.Frame{Type: librelay.TypeChainTriggerResult, Instance: "inst-1"}.
+		WithPayload(librelay.ChainTriggerResult{RequestID: "req-1", Status: librelay.ChainTriggerStatusAwaitingHuman})
+	if err != nil {
+		t.Fatalf("WithPayload: %v", err)
+	}
+	want := `{"request_id":"req-1","status":"awaiting_human"}`
+	if string(result.Payload) != want {
+		t.Fatalf("payload = %s, want %s", result.Payload, want)
+	}
+
+	var res librelay.ChainTriggerResult
+	if err := result.DecodePayload(&res); err != nil {
+		t.Fatalf("DecodePayload: %v", err)
+	}
+	switch res.Status {
+	case librelay.ChainTriggerStatusOK, librelay.ChainTriggerStatusError, librelay.ChainTriggerStatusRefused:
+		t.Fatalf("an older peer would read %q as one of its own statuses", res.Status)
+	}
+	if res.Status != librelay.ChainTriggerStatusAwaitingHuman {
+		t.Fatalf("status = %q", res.Status)
+	}
+}
+
 // TestUnit_ChainTriggerWireShape pins the payload JSON verbatim: the relay is a separate module built against this same contract.
 func TestUnit_ChainTriggerWireShape(t *testing.T) {
 	t.Parallel()

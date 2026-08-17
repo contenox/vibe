@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -44,8 +45,7 @@ const TypeACPDetach = "acp.detach"
 // Chain-trigger types are cargo, not control traffic.
 const (
 	// TypeChainTrigger asks the machine behind [Frame.Instance] to run a named task chain, payload [ChainTrigger]; relay→machine only.
-	TypeChainTrigger = "chain_trigger"
-	// TypeChainTriggerResult reports a chain trigger's outcome, payload [ChainTriggerResult]; machine→relay only, exactly one per [ChainTrigger.RequestID].
+	TypeChainTrigger       = "chain_trigger"
 	TypeChainTriggerResult = "chain_trigger_result"
 )
 
@@ -64,7 +64,8 @@ const (
 	// ChainTriggerStatusError: the chain started and failed.
 	ChainTriggerStatusError = "error"
 	// ChainTriggerStatusRefused: the machine declined before any chain ran.
-	ChainTriggerStatusRefused = "refused"
+	ChainTriggerStatusRefused       = "refused"
+	ChainTriggerStatusAwaitingHuman = "awaiting_human"
 )
 
 // ChainTrigger is the [TypeChainTrigger] payload: run this chain with this input.
@@ -72,7 +73,8 @@ type ChainTrigger struct {
 	// RequestID correlates the [ChainTriggerResult] with this trigger.
 	RequestID string `json:"request_id"`
 	// Chain names the chain file on the machine's own configuration path.
-	Chain string `json:"chain"`
+	Chain     string `json:"chain"`
+	AgentName string `json:"agent_name,omitempty"`
 	// SessionMode is [ChainSessionNew] or [ChainSessionReused].
 	SessionMode string `json:"session_mode"`
 	SessionName string `json:"session_name,omitempty"`
@@ -90,6 +92,51 @@ type ChainTriggerResult struct {
 	Status string `json:"status"`
 	// Error says why, for [ChainTriggerStatusError] and [ChainTriggerStatusRefused]; empty on ok.
 	Error string `json:"error,omitempty"`
+}
+
+const (
+	TypeAskPublished = "ask.published"
+	TypeAskResolved  = "ask.resolved"
+	TypeAskVerdict   = "ask.verdict"
+)
+
+const (
+	AskResolvedAnswered   = "answered"
+	AskResolvedExpired    = "expired"
+	AskResolvedSuperseded = "superseded"
+)
+
+const (
+	AskDecisionAllow  = "allow"
+	AskDecisionDeny   = "deny"
+	AskDecisionAnswer = "answer"
+)
+
+type AskPublished struct {
+	AskID       string    `json:"ask_id"`
+	SessionID   string    `json:"session_id,omitempty"`
+	MissionID   string    `json:"mission_id,omitempty"`
+	AgentName   string    `json:"agent_name,omitempty"`
+	ToolsName   string    `json:"tools_name,omitempty"`
+	ToolName    string    `json:"tool_name,omitempty"`
+	PolicyName  string    `json:"policy_name,omitempty"`
+	MatchedRule *int      `json:"matched_rule,omitempty"`
+	ArgsSummary string    `json:"args_summary,omitempty"`
+	ExpiresAt   time.Time `json:"expires_at,omitzero"`
+}
+
+type AskResolved struct {
+	AskID  string `json:"ask_id"`
+	Reason string `json:"reason"`
+}
+
+type AskVerdict struct {
+	AskID     string    `json:"ask_id"`
+	Decision  string    `json:"decision"`
+	Answer    string    `json:"answer,omitempty"`
+	Guidance  string    `json:"guidance,omitempty"`
+	DecidedBy string    `json:"decided_by,omitempty"`
+	DecidedAt time.Time `json:"decided_at,omitzero"`
 }
 
 // Resumption types are not control traffic; see [Resume].
