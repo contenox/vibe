@@ -20,6 +20,7 @@ import (
 	"github.com/contenox/contenox/internal/services/setupcheck"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 )
 
@@ -222,18 +223,11 @@ var providerConfigs = map[string]providerConfig{
 	},
 }
 
-func hasBackendOfType(providerType string) bool {
-	dbPath, err := globalDBPath()
-	if err != nil {
+func hasBackendOfType(ctx context.Context, db libdb.DBManager, providerType string) bool {
+	if db == nil {
 		return false
 	}
-	db, err := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath)
-	if err != nil {
-		return false
-	}
-	defer db.Close()
-	svc := backendservice.New(db)
-	backends, err := svc.List(libtracker.WithNewRequestID(context.Background()), nil, 100)
+	backends, err := backendservice.New(db).List(ctx, nil, 100)
 	if err != nil {
 		return false
 	}
@@ -397,18 +391,28 @@ func RunLocalInit(out io.Writer, force, update bool, contenoxDir, projectName st
 
 // RunInit scaffolds contenoxDir with default chain files for provider ("" defaults to the configured provider or "ollama") and, if projectName is non-empty, renames the project marker.
 func RunInit(out, errOut io.Writer, force, update bool, provider string, contenoxDir string, projectName string) error {
+	ctx := libtracker.WithNewRequestID(context.Background())
+	var db libdb.DBManager
+	if dbPath, gpErr := globalDBPath(); gpErr == nil {
+		opened, openErr := openOptionalDB(ctx, dbPath)
+		if openErr != nil {
+			return openErr
+		}
+		if opened != nil {
+			db = opened
+			defer db.Close()
+		}
+	}
+
 	provider = modelrepo.CanonicalBackendType(provider)
 	if provider == "" {
-		if dbPath, gpErr := globalDBPath(); gpErr == nil {
-			if db, openErr := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
-				store := runtimetypes.New(db.WithoutTransaction())
-				if cur, err := getConfigKV(libtracker.WithNewRequestID(context.Background()), store, "default-provider"); err == nil && cur != "" {
-					cur = modelrepo.CanonicalBackendType(cur)
-					if _, known := providerConfigs[cur]; known {
-						provider = cur
-					}
+		if db != nil {
+			store := runtimetypes.New(db.WithoutTransaction())
+			if cur, err := getConfigKV(ctx, store, "default-provider"); err == nil && cur != "" {
+				cur = modelrepo.CanonicalBackendType(cur)
+				if _, known := providerConfigs[cur]; known {
+					provider = cur
 				}
-				db.Close()
 			}
 		}
 		if provider == "" {
@@ -504,30 +508,26 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 	fmt.Fprintln(out, "Done.")
 	fmt.Fprintln(out, "")
 
-	if dbPath, gpErr := globalDBPath(); gpErr == nil {
-		if db, openErr := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
-			store := runtimetypes.New(db.WithoutTransaction())
-			ctx := libtracker.WithNewRequestID(context.Background())
-			curModel, err := getConfigKV(ctx, store, "default-model")
-			if err != nil {
-				return err
+	if db != nil {
+		store := runtimetypes.New(db.WithoutTransaction())
+		curModel, err := getConfigKV(ctx, store, "default-model")
+		if err != nil {
+			return err
+		}
+		curProvider, err := getConfigKV(ctx, store, "default-provider")
+		if err != nil {
+			return err
+		}
+		if curModel != "" || curProvider != "" {
+			fmt.Fprintln(out, "Current config (from ~/.contenox/local.db):")
+			if curProvider != "" {
+				fmt.Fprintf(out, "  default-provider = %s\n", curProvider)
 			}
-			curProvider, err := getConfigKV(ctx, store, "default-provider")
-			if err != nil {
-				return err
+			if curModel != "" {
+				fmt.Fprintf(out, "  default-model    = %s\n", curModel)
 			}
-			db.Close()
-			if curModel != "" || curProvider != "" {
-				fmt.Fprintln(out, "Current config (from ~/.contenox/local.db):")
-				if curProvider != "" {
-					fmt.Fprintf(out, "  default-provider = %s\n", curProvider)
-				}
-				if curModel != "" {
-					fmt.Fprintf(out, "  default-model    = %s\n", curModel)
-				}
-				fmt.Fprintln(out, "  To change: contenox config set default-model <model>")
-				fmt.Fprintln(out, "")
-			}
+			fmt.Fprintln(out, "  To change: contenox config set default-model <model>")
+			fmt.Fprintln(out, "")
 		}
 	}
 
@@ -535,17 +535,12 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 	var kvHasKey bool
 	if pc.envKey != "" {
 		envVal = os.Getenv(pc.envKey)
-		if envVal == "" {
-			if dbPath, gpErr := globalDBPath(); gpErr == nil {
-				if db, openErr := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
-					store := runtimetypes.New(db.WithoutTransaction())
-					var cfg runtimestate.ProviderConfig
-					kvKey := runtimestate.ProviderKeyPrefix + strings.ToLower(provider)
-					if err := store.GetKV(libtracker.WithNewRequestID(context.Background()), kvKey, &cfg); err == nil && cfg.APIKey != "" {
-						kvHasKey = true
-					}
-					db.Close()
-				}
+		if envVal == "" && db != nil {
+			store := runtimetypes.New(db.WithoutTransaction())
+			var cfg runtimestate.ProviderConfig
+			kvKey := runtimestate.ProviderKeyPrefix + strings.ToLower(provider)
+			if err := store.GetKV(ctx, kvKey, &cfg); err == nil && cfg.APIKey != "" {
+				kvHasKey = true
 			}
 		}
 		switch {
@@ -610,7 +605,7 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 		fmt.Fprintln(out, "")
 		chatStep = 4
 	default:
-		backendRegistered := hasBackendOfType(provider)
+		backendRegistered := hasBackendOfType(ctx, db, provider)
 		registerStep := 1
 		if !backendReady && pc.envKey != "" {
 			fmt.Fprintf(out, "  1. Set your %s API key:\n", pc.name)

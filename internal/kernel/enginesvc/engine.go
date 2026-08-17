@@ -22,9 +22,9 @@ import (
 	"github.com/contenox/contenox/internal/services/stateservice"
 	"github.com/contenox/contenox/internal/services/toolguidance"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/substrate"
 	libbus "github.com/contenox/contenox/libbus"
 	"github.com/contenox/contenox/libdbexec"
-	"github.com/contenox/contenox/libkvstore"
 	"github.com/contenox/contenox/libtracker"
 )
 
@@ -37,8 +37,12 @@ func Build(ctx context.Context, db libdbexec.DBManager, cfg Config) (*Engine, er
 	bus := cfg.Bus
 	ownsBus := false
 	if bus == nil {
-		bus = libbus.NewSQLite(db.WithoutTransaction())
-		ownsBus = true
+		opened, err := substrate.OpenBus(engineCtx, db.WithoutTransaction())
+		if err != nil {
+			engineCancel()
+			return nil, err
+		}
+		bus, ownsBus = opened, true
 	}
 
 	closeBus := func() {
@@ -47,17 +51,24 @@ func Build(ctx context.Context, db libdbexec.DBManager, cfg Config) (*Engine, er
 		}
 	}
 
+	releaseKV := func() {}
+
 	success := false
 	defer func() {
 		if !success {
 			engineCancel()
 			closeBus()
+			releaseKV()
 		}
 	}()
 
 	kvMgr := cfg.KVStore
 	if kvMgr == nil {
-		kvMgr = libkvstore.NewSQLiteManager(db)
+		opened, release, err := substrate.OpenKV(engineCtx, db)
+		if err != nil {
+			return nil, err
+		}
+		kvMgr, releaseKV = opened, release
 	}
 
 	state := cfg.State
@@ -78,6 +89,7 @@ func Build(ctx context.Context, db libdbexec.DBManager, cfg Config) (*Engine, er
 	engine := &Engine{Stop: func() {
 		engineCancel()
 		closeBus()
+		releaseKV()
 	}, Bus: bus, State: state}
 
 	tenantID := cfg.TenantID

@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -281,6 +282,9 @@ type Store interface {
 //go:embed schema_sqlite.sql
 var SchemaSQLite string
 
+//go:embed schema_postgres.sql
+var SchemaPostgres string
+
 type store struct {
 	libdb.Exec
 }
@@ -294,7 +298,7 @@ func New(exec libdb.Exec) Store {
 
 const MaxRowsCount = 100000
 
-var sqliteCountableTables = map[string]bool{
+var countableTables = map[string]bool{
 	"job_queue_v2": true, "kv": true, "remote_tools": true,
 	"ollama_models": true, "llm_affinity_group": true, "llm_backends": true,
 	"mcp_servers": true, "llm_model_registry": true, "agents": true,
@@ -306,15 +310,14 @@ func (s *store) estimateCount(ctx context.Context, table string) (int64, error) 
 	err := s.Exec.QueryRowContext(ctx, `
 		SELECT estimate_row_count($1)
 	`, table).Scan(&count)
-	if err == nil {
+	if err == nil && count >= 0 {
 		return count, nil
 	}
-	// SQLite has no estimate_row_count; fall back to COUNT(*) for whitelisted tables only.
-	if !strings.Contains(err.Error(), "no such function") {
+	if err != nil && !strings.Contains(err.Error(), "no such function") {
 		return 0, err
 	}
-	if !sqliteCountableTables[table] {
-		return 0, err
+	if !countableTables[table] {
+		return count, err
 	}
 	err = s.Exec.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count)
 	return count, err
@@ -327,19 +330,64 @@ func (s *store) EnforceMaxRowCount(ctx context.Context, count int64) error {
 	return nil
 }
 
-// SetupStore initializes a test SQLite store — the same engine the product
-// runs on (see contenoxcli's OpenDBAt).
-func SetupStore(t *testing.T) (context.Context, Store) {
+type TestBackend string
+
+const (
+	TestBackendSQLite   TestBackend = "sqlite"
+	TestBackendPostgres TestBackend = "postgres"
+)
+
+const TestBackendEnv = "CONTENOX_TEST_STORE_BACKEND"
+
+func TestBackendDefault() TestBackend {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(TestBackendEnv))) {
+	case "", string(TestBackendSQLite):
+		return TestBackendSQLite
+	case string(TestBackendPostgres):
+		return TestBackendPostgres
+	default:
+		panic(fmt.Sprintf("%s must be %q or %q, got %q", TestBackendEnv, TestBackendSQLite, TestBackendPostgres, os.Getenv(TestBackendEnv)))
+	}
+}
+
+func resolveTestBackend(backend []TestBackend) TestBackend {
+	if len(backend) > 0 && backend[0] != "" {
+		return backend[0]
+	}
+	return TestBackendDefault()
+}
+
+func SetupStore(t *testing.T, backend ...TestBackend) (context.Context, Store) {
+	t.Helper()
+	ctx, dbManager := SetupDBManager(t, backend...)
+	return ctx, New(dbManager.WithoutTransaction())
+}
+
+func SetupStoreExec(t *testing.T, backend ...TestBackend) (context.Context, Store, libdb.Exec) {
+	t.Helper()
+	ctx, dbManager := SetupDBManager(t, backend...)
+	exec := dbManager.WithoutTransaction()
+	return ctx, New(exec), exec
+}
+
+func SetupDBManager(t *testing.T, backend ...TestBackend) (context.Context, libdb.DBManager) {
 	t.Helper()
 
 	ctx := context.TODO()
-	dbManager, err := libdb.NewSQLiteDBManager(ctx, filepath.Join(t.TempDir(), "test.db"), SchemaSQLite)
-	require.NoError(t, err)
+	switch b := resolveTestBackend(backend); b {
+	case TestBackendSQLite:
+		dbManager, err := libdb.NewSQLiteDBManager(ctx, filepath.Join(t.TempDir(), "test.db"), SchemaSQLite)
+		require.NoError(t, err)
 
-	t.Cleanup(func() {
-		require.NoError(t, dbManager.Close())
-	})
+		t.Cleanup(func() {
+			require.NoError(t, dbManager.Close())
+		})
 
-	s := New(dbManager.WithoutTransaction())
-	return ctx, s
+		return ctx, dbManager
+	case TestBackendPostgres:
+		return ctx, setupTestPostgres(t, ctx)
+	default:
+		t.Fatalf("unknown store test backend %q", b)
+		return ctx, nil
+	}
 }

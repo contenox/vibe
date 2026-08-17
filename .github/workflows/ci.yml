@@ -1,6 +1,8 @@
 # CI: hygiene gates (gofmt, vet, govulncheck), contenox compile smoke, Windows
-# cross-compile smoke, CLI help smoke, and cheap TestUnit_* Go tests.
-# No TestSystem_* / Docker / LLM integration tests — those run in release-gate.yml.
+# cross-compile smoke, CLI help smoke, and cheap TestUnit_* Go tests, plus a
+# container-backed smoke of the opt-in storage backends and of the wiring that
+# selects them.
+# No TestSystem_* / LLM integration tests — those run in release-gate.yml.
 #
 # Third-party actions are pinned to a commit SHA with a trailing version comment.
 # A floating tag (@v4) lets a compromised tag run arbitrary code in this job.
@@ -67,3 +69,66 @@ jobs:
 
       - name: Cheap Go tests (TestUnit_* + -short only)
         run: task test-unit
+
+  # Postgres, NATS and Valkey are opt-in: an install that sets none of
+  # CONTENOX_POSTGRES_URL / CONTENOX_NATS_URL / CONTENOX_VALKEY_URL stays on
+  # SQLite, and nothing here touches that default path — the `test` job above
+  # still covers it. This job exists because the non-default path decayed
+  # unnoticed while every suite that could have caught it was skipping for want
+  # of Docker.
+  #
+  # Deliberately a smoke, not a matrix: one runner, one suite per backend plus
+  # the wiring that selects them, each already written and each the narrowest
+  # thing that proves its backend. Re-running the whole Go suite a second time
+  # on Postgres would cost far more and prove little more.
+  #
+  # The three REQUIRE_* variables turn each suite's "Docker is unavailable, skip"
+  # into a failure. Without them a broken Docker on the runner reports green,
+  # which is the exact failure mode this job is here to end. They are set only
+  # here: locally the same tasks still skip, so nobody needs Docker to work on
+  # anything else. Each is read by the suite it guards —
+  # CONTENOX_TEST_REQUIRE_POSTGRES by the store harness,
+  # LIBBUS_REQUIRE_NATS by the conformance suite, LIBKVSTORE_REQUIRE_VALKEY by
+  # libkvstore's Valkey tests, and all three by internal/substrate, whose cases
+  # also refuse to be skipped by -short once their variable is set.
+  backend-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CONTENOX_TEST_REQUIRE_POSTGRES: "1"
+      LIBBUS_REQUIRE_NATS: "1"
+      LIBKVSTORE_REQUIRE_VALKEY: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.25"
+          check-latest: true
+
+      - name: Install task
+        run: go install github.com/go-task/task/v3/cmd/task@latest
+
+      # Proves the Postgres DDL and every '$N' query in the store run on real
+      # Postgres, against the same suite SQLite is held to.
+      - name: Store suite on Postgres
+        run: task test-store-postgres
+
+      # Proves the NATS Messenger satisfies the same conformance matrix as the
+      # SQLite bus it replaces, divergences included.
+      - name: libbus conformance on NATS
+        run: task test-bus-nats
+
+      # Proves the Valkey KVExecutor answers the operations the SQLite kv table
+      # answers today.
+      - name: libkvstore on Valkey
+        run: task test-kv-valkey
+
+      # Proves the wiring that reaches those backends at all: which one each of
+      # CONTENOX_POSTGRES_URL / CONTENOX_NATS_URL / CONTENOX_VALKEY_URL selects,
+      # that a selected backend is really used instead of the SQLite file beside
+      # it, and that a set-but-unreachable setting is refused by name. It runs
+      # here rather than in the `test` job because its cases need containers, so
+      # the -short unit gate skips them.
+      - name: Substrate wiring on Postgres, NATS and Valkey
+        run: task test-substrate

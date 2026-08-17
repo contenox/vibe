@@ -290,9 +290,9 @@ func TestUnit_MCPServers_EstimateCount(t *testing.T) {
 		require.NoError(t, s.CreateMCPServer(ctx, newSSE(fmt.Sprintf("count-%d", i))))
 	}
 
-	// EstimateMCPServerCount can return -1 on Postgres before ANALYZE runs; just verify no error.
-	_, err := s.EstimateMCPServerCount(ctx)
+	count, err := s.EstimateMCPServerCount(ctx)
 	require.NoError(t, err)
+	require.EqualValues(t, 3, count, "a whitelisted table falls back to an exact count when the backend has no usable estimate")
 }
 
 func TestUnit_MCPServers_HeadersAndInjectParams_GetByID(t *testing.T) {

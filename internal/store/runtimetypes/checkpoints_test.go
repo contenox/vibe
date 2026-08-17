@@ -3,7 +3,6 @@ package runtimetypes_test
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,12 +13,7 @@ import (
 
 func setupCheckpointStore(t *testing.T) (context.Context, runtimetypes.Store) {
 	t.Helper()
-	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "checkpoints.db")
-	db, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	return ctx, runtimetypes.New(db.WithoutTransaction())
+	return runtimetypes.SetupStore(t)
 }
 
 func newCheckpointRow(id string) *runtimetypes.ChainCheckpoint {

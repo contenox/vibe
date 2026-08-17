@@ -164,10 +164,7 @@ func (p *ps) Request(ctx context.Context, subject string, data []byte) ([]byte, 
 		case errors.Is(err, nats.ErrConnectionClosed):
 			return nil, ErrConnectionClosed
 		case errors.Is(err, nats.ErrNoResponders):
-			if _, hasDeadline := ctx.Deadline(); hasDeadline {
-				return nil, ErrRequestTimeout
-			}
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", ErrNoResponders, err)
 		default:
 			return nil, err
 		}

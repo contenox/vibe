@@ -2,6 +2,7 @@ package runtimetypes
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,20 @@ import (
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 )
+
+type jobRow interface {
+	Scan(dest ...any) error
+}
+
+func scanJob(row jobRow) (*Job, error) {
+	var job Job
+	var payload []byte
+	if err := row.Scan(&job.ID, &job.TaskType, &payload, &job.ScheduledFor, &job.ValidUntil, &job.RetryCount, &job.CreatedAt); err != nil {
+		return nil, err
+	}
+	job.Payload = json.RawMessage(payload)
+	return &job, nil
+}
 
 func (s *store) AppendJob(ctx context.Context, job Job) error {
 	if job.ID == "" {
@@ -87,11 +102,11 @@ func (s *store) PopAllJobs(ctx context.Context) ([]*Job, error) {
 
 	var jobs []*Job
 	for rows.Next() {
-		var job Job
-		if err := rows.Scan(&job.ID, &job.TaskType, &job.Payload, &job.ScheduledFor, &job.ValidUntil, &job.RetryCount, &job.CreatedAt); err != nil {
+		job, err := scanJob(rows)
+		if err != nil {
 			return nil, err
 		}
-		jobs = append(jobs, &job)
+		jobs = append(jobs, job)
 	}
 	return jobs, nil
 }
@@ -110,11 +125,11 @@ func (s *store) PopJobsForType(ctx context.Context, taskType string) ([]*Job, er
 
 	var jobs []*Job
 	for rows.Next() {
-		var job Job
-		if err := rows.Scan(&job.ID, &job.TaskType, &job.Payload, &job.ScheduledFor, &job.ValidUntil, &job.RetryCount, &job.CreatedAt); err != nil {
+		job, err := scanJob(rows)
+		if err != nil {
 			return nil, err
 		}
-		jobs = append(jobs, &job)
+		jobs = append(jobs, job)
 	}
 	return jobs, nil
 }
@@ -129,12 +144,7 @@ func (s *store) PopJobForType(ctx context.Context, taskType string) (*Job, error
 	`
 	row := s.Exec.QueryRowContext(ctx, query, taskType)
 
-	var job Job
-	if err := row.Scan(&job.ID, &job.TaskType, &job.Payload, &job.ScheduledFor, &job.ValidUntil, &job.RetryCount, &job.CreatedAt); err != nil {
-		return nil, err
-	}
-
-	return &job, nil
+	return scanJob(row)
 }
 
 func (s *store) PopNJobsForType(ctx context.Context, taskType string, n int) ([]*Job, error) {
@@ -156,11 +166,11 @@ func (s *store) PopNJobsForType(ctx context.Context, taskType string, n int) ([]
 
 	var jobs []*Job
 	for rows.Next() {
-		var job Job
-		if err := rows.Scan(&job.ID, &job.TaskType, &job.Payload, &job.ScheduledFor, &job.ValidUntil, &job.RetryCount, &job.CreatedAt); err != nil {
+		job, err := scanJob(rows)
+		if err != nil {
 			return nil, err
 		}
-		jobs = append(jobs, &job)
+		jobs = append(jobs, job)
 	}
 	return jobs, nil
 }
@@ -180,11 +190,11 @@ func (s *store) GetJobsForType(ctx context.Context, taskType string) ([]*Job, er
 
 	var jobs []*Job
 	for rows.Next() {
-		var job Job
-		if err := rows.Scan(&job.ID, &job.TaskType, &job.Payload, &job.ScheduledFor, &job.ValidUntil, &job.RetryCount, &job.CreatedAt); err != nil {
+		job, err := scanJob(rows)
+		if err != nil {
 			return nil, err
 		}
-		jobs = append(jobs, &job)
+		jobs = append(jobs, job)
 	}
 	return jobs, nil
 }
@@ -209,11 +219,11 @@ func (s *store) ListJobs(ctx context.Context, createdAtCursor *time.Time, limit 
 
 	var jobs []*Job
 	for rows.Next() {
-		var job Job
-		if err := rows.Scan(&job.ID, &job.TaskType, &job.Payload, &job.ScheduledFor, &job.ValidUntil, &job.RetryCount, &job.CreatedAt); err != nil {
+		job, err := scanJob(rows)
+		if err != nil {
 			return nil, err
 		}
-		jobs = append(jobs, &job)
+		jobs = append(jobs, job)
 	}
 	return jobs, nil
 }

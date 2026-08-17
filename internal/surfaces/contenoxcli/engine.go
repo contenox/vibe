@@ -15,7 +15,7 @@ import (
 	"github.com/contenox/contenox/internal/services/setupcheck"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libbus "github.com/contenox/contenox/libbus"
+	"github.com/contenox/contenox/internal/substrate"
 	"github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 )
@@ -46,7 +46,11 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	defer end()
 
 	// The mission tools below must publish on the same bus the engine runs on.
-	bus := libbus.NewSQLite(db.WithoutTransaction())
+	bus, err := substrate.OpenBus(ctx, db.WithoutTransaction())
+	if err != nil {
+		reportErr(err)
+		return nil, err
+	}
 
 	engineBuilt := false
 	defer func() {

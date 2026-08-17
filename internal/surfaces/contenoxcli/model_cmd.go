@@ -13,7 +13,7 @@ import (
 	"github.com/contenox/contenox/internal/models/modelservice"
 	"github.com/contenox/contenox/internal/models/runtimestate"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libbus "github.com/contenox/contenox/libbus"
+	"github.com/contenox/contenox/internal/substrate"
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
@@ -71,7 +71,10 @@ Examples:
 // printLiveModels runs one backend reconciliation cycle and prints what each
 // backend is actually serving right now.
 func printLiveModels(ctx context.Context, db libdb.DBManager, out, errW io.Writer) error {
-	bus := libbus.NewSQLite(db.WithoutTransaction())
+	bus, err := substrate.OpenBus(ctx, db.WithoutTransaction())
+	if err != nil {
+		return err
+	}
 	defer bus.Close()
 
 	store := runtimetypes.New(db.WithoutTransaction())

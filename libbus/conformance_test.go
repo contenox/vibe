@@ -592,6 +592,8 @@ func TestConformanceDivergence_LateHandler(t *testing.T) {
 			}
 			require.ErrorIs(t, err, libbus.ErrRequestTimeout,
 				"%s is documented to fail fast when no handler is registered yet", be.name)
+			require.ErrorIs(t, err, libbus.ErrNoResponders,
+				"%s must report a missing handler as ErrNoResponders, which is what lets a caller retry the request without risking a second execution", be.name)
 		})
 	}
 }

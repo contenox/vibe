@@ -20,7 +20,7 @@ import (
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/reportrouter"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/contenox/libbus"
+	"github.com/contenox/contenox/internal/substrate"
 	"github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
@@ -254,7 +254,10 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		tracker = libtracker.NewTextActivityTracker(os.Stderr)
 	}
 
-	bus := libbus.NewSQLite(db.WithoutTransaction())
+	bus, err := substrate.OpenBus(ctx, db.WithoutTransaction())
+	if err != nil {
+		return err
+	}
 	defer bus.Close()
 	workspaceID := ResolveWorkspaceID(contenoxDir)
 	trigHook := eventlog.NewTriggerHolder()
@@ -606,7 +609,10 @@ func runMissionStop(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	bus := libbus.NewSQLite(db.WithoutTransaction())
+	bus, err := substrate.OpenBus(ctx, db.WithoutTransaction())
+	if err != nil {
+		return err
+	}
 	defer bus.Close()
 	missions := missionservice.New(db, missionservice.WithEventPublisher(missionEventPublisher(ctx, db, bus, ResolveWorkspaceID(contenoxDir), libtracker.NoopTracker{}, nil)))
 	store := runtimetypes.New(db.WithoutTransaction())
@@ -646,22 +652,29 @@ func openMissionService(cmd *cobra.Command) (io.Closer, missionservice.Service, 
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open database: %w", err)
 	}
-	missions, closer := publisherWiredMissions(dbCtx, cmd, db)
+	missions, closer, err := publisherWiredMissions(dbCtx, cmd, db)
+	if err != nil {
+		_ = db.Close()
+		return nil, nil, err
+	}
 	return closer, missions, nil
 }
 
-func publisherWiredMissions(ctx context.Context, cmd *cobra.Command, db libdbexec.DBManager) (missionservice.Service, io.Closer) {
+func publisherWiredMissions(ctx context.Context, cmd *cobra.Command, db libdbexec.DBManager) (missionservice.Service, io.Closer, error) {
 	contenoxDir, err := ResolveContenoxDir(cmd)
 	if err != nil {
-		return missionservice.New(db), db
+		return missionservice.New(db), db, nil
 	}
-	bus := libbus.NewSQLite(db.WithoutTransaction())
+	bus, err := substrate.OpenBus(ctx, db.WithoutTransaction())
+	if err != nil {
+		return nil, nil, err
+	}
 	pub := missionEventPublisher(ctx, db, bus, ResolveWorkspaceID(contenoxDir), libtracker.NoopTracker{}, nil)
 	missions := missionservice.New(db, missionservice.WithEventPublisher(pub))
 	return missions, closerFunc(func() error {
 		bus.Close()
 		return db.Close()
-	})
+	}), nil
 }
 
 func openMissionAndHitlServices(cmd *cobra.Command) (io.Closer, missionservice.Service, hitlservice.Service, error) {
@@ -680,7 +693,11 @@ func openMissionAndHitlServices(cmd *cobra.Command) (io.Closer, missionservice.S
 	}
 	store := runtimetypes.New(db.WithoutTransaction())
 	hitl := newHITLService(contenoxDir, store, libtracker.NoopTracker{}, "")
-	missions, closer := publisherWiredMissions(dbCtx, cmd, db)
+	missions, closer, err := publisherWiredMissions(dbCtx, cmd, db)
+	if err != nil {
+		_ = db.Close()
+		return nil, nil, nil, err
+	}
 	return closer, missions, hitl, nil
 }
 

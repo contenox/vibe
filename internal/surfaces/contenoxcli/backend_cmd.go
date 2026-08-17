@@ -14,19 +14,28 @@ import (
 	"github.com/contenox/contenox/internal/models/backendservice"
 	"github.com/contenox/contenox/internal/models/runtimestate"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/substrate"
 	libdb "github.com/contenox/contenox/libdbexec"
-	"github.com/contenox/contenox/libkvstore"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
-// invalidateBackendModelCache busts the cached model list for a backend so the
-// next run refetches from the provider. Best-effort.
 func invalidateBackendModelCache(ctx context.Context, errW io.Writer, db libdb.DBManager, backendID string) {
-	if err := runtimestate.InvalidateModelCache(ctx, libkvstore.NewSQLiteManager(db), backendID); err != nil {
-		fmt.Fprintf(errW, "warning: model cache invalidation failed for backend %s: %v\n", backendID, err)
+	kv, releaseKV, err := substrate.OpenKV(ctx, db)
+	if err != nil {
+		warnModelCacheKept(errW, backendID, err)
+		return
 	}
+	defer releaseKV()
+	if err := runtimestate.InvalidateModelCache(ctx, kv, backendID); err != nil {
+		warnModelCacheKept(errW, backendID, err)
+	}
+}
+
+func warnModelCacheKept(errW io.Writer, backendID string, err error) {
+	fmt.Fprintf(errW, "warning: model cache invalidation failed for backend %s: %v\n", backendID, err)
+	fmt.Fprintf(errW, "         the backend change is saved; run 'contenox cache clear' to drop the stale model list\n")
 }
 
 var backendCmd = &cobra.Command{

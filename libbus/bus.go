@@ -3,6 +3,7 @@ package libbus
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 var (
@@ -14,6 +15,7 @@ var (
 	ErrMessagePublish = errors.New("message publishing failed")
 	// ErrRequestTimeout is returned when a request-reply operation times out.
 	ErrRequestTimeout = errors.New("request timed out")
+	ErrNoResponders   = fmt.Errorf("%w: no handler was subscribed to the subject, so the request was never delivered and is safe to retry", ErrRequestTimeout)
 )
 
 // Handler processes a request and returns a response for [Messenger.Serve].

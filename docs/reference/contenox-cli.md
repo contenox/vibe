@@ -122,6 +122,8 @@ contenox doctor --bundle        # also write a redacted diagnostics zip to attac
 
 `doctor` also reports vision-capable model availability, flags a HITL policy preset that predates the currently shipped toolset (fix with `contenox init --refresh-policies`), and warns — without changing anything — when `default-max-tokens` exceeds the active provider's output-token ceiling.
 
+When one of the [external state backends](/docs/reference/config/#external-backends-for-state-opt-in) is selected, `doctor` adds a **State storage** section naming the backend behind the store, the message bus and the key-value cache, and whether a remote one answered; an unreachable one is named with the variable that selected it. With none of them set the section is absent and the report is what it always was.
+
 ### `contenox model`
 
 Inspect models from configured LLM backends and manage capability overrides. Managing the local **model registry** (adding custom entries with a URL) is not part of the current CLI — `model list`, `model set-context`, and `model capability` are the full subcommand tree.
@@ -738,5 +740,8 @@ contenox version
 | `CONTENOX_OPT_IN_BETA` | Per-invocation override of the `opt-in-beta` config key (`1`/`true` enables the beta features, any other value disables them; unset falls back to config). |
 | `CONTENOX_RELAY_ENDPOINT` | The relay `/pair` redeems against when none is given inline, instead of the hosted relay compiled into the binary — see [Pairing a machine with a relay](/docs/guide/pairing/). |
 | `CONTENOX_SANDBOX_NETWORK_WALL` | Set to `1` to build the [agent sandbox](/docs/guide/confinement/sandbox/)'s network wall with no route at all, for a fully offline foreign agent. |
+| `CONTENOX_POSTGRES_URL` | Move the store off the SQLite file onto a Postgres database. Requires `CONTENOX_NATS_URL` and `CONTENOX_VALKEY_URL` too — see [External backends for state](/docs/reference/config/#external-backends-for-state-opt-in). |
+| `CONTENOX_NATS_URL` | Move the message bus off the database onto a NATS server (`nats://host:4222`; comma-separate a server list). |
+| `CONTENOX_VALKEY_URL` | Move the key-value cache off the database onto a Valkey server (`valkey://host:6379`, or a bare `host:6379`). Add a user, a database index and a key namespace to keep it out of the way of whatever else uses that server: `valkey://appuser:secret@host:6379/3?namespace=contenox` — see [Isolating contenox inside a Valkey you already run](/docs/reference/config/#isolating-contenox-inside-a-valkey-you-already-run). |
 
 `SANDBOX_SHELL_SCRUB`, `SANDBOX_TERMINAL_SCRUB`, `SANDBOX_ENV_ALLOW`, and `SANDBOX_ENV_DENY` configure the shell environment scrub — see [Least-privilege shell environment](/docs/guide/confinement/environment/) for their modes and current status.

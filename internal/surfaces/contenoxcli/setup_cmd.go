@@ -90,9 +90,13 @@ func runSetup(cmd *cobra.Command, out io.Writer) error {
 
 	alreadyConfigured := false
 	if dbPath, gpErr := globalDBPath(); gpErr == nil {
-		if db, openErr := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
+		ctx := libtracker.WithNewRequestID(context.Background())
+		db, openErr := openOptionalDB(ctx, dbPath)
+		if openErr != nil {
+			return openErr
+		}
+		if db != nil {
 			store := runtimetypes.New(db.WithoutTransaction())
-			ctx := libtracker.WithNewRequestID(context.Background())
 			curProvider := clikv.Read(ctx, store, "default-provider")
 			curModel := clikv.Read(ctx, store, "default-model")
 			svc := backendservice.New(db)
@@ -163,11 +167,16 @@ func runSetup(cmd *cobra.Command, out io.Writer) error {
 			fmt.Fprintf(out, "  ✓ Found %s in environment.\n\n", sp.envKey)
 		} else {
 			if dbPath, gpErr := globalDBPath(); gpErr == nil {
-				if db, openErr := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
+				ctx := libtracker.WithNewRequestID(context.Background())
+				db, openErr := openOptionalDB(ctx, dbPath)
+				if openErr != nil {
+					return openErr
+				}
+				if db != nil {
 					store := runtimetypes.New(db.WithoutTransaction())
 					var cfg runtimestate.ProviderConfig
 					kvKey := runtimestate.ProviderKeyPrefix + sp.key
-					if err := store.GetKV(libtracker.WithNewRequestID(context.Background()), kvKey, &cfg); err == nil && cfg.APIKey != "" {
+					if err := store.GetKV(ctx, kvKey, &cfg); err == nil && cfg.APIKey != "" {
 						apiKey = cfg.APIKey
 						fmt.Fprintf(out, "  ✓ %s API key already stored.\n\n", sp.label)
 					}

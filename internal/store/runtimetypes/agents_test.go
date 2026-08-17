@@ -321,8 +321,9 @@ func TestUnit_Agents_EstimateCount(t *testing.T) {
 		require.NoError(t, s.CreateAgent(ctx, newExternalACPAgent(fmt.Sprintf("count-agent-%d", i))))
 	}
 
-	_, err := s.EstimateAgentCount(ctx)
+	count, err := s.EstimateAgentCount(ctx)
 	require.NoError(t, err)
+	require.EqualValues(t, 3, count, "a whitelisted table falls back to an exact count when the backend has no usable estimate")
 }
 
 func TestUnit_Agents_ExternalACPConfig_WrongKindErrors(t *testing.T) {

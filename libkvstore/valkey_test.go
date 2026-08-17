@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
+	"os"
 	"testing"
 	"time"
 
@@ -13,6 +14,16 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/valkey"
 )
+
+const requireValkeyEnv = "LIBKVSTORE_REQUIRE_VALKEY"
+
+func requireValkey(t *testing.T) {
+	t.Helper()
+	if os.Getenv(requireValkeyEnv) != "" {
+		return
+	}
+	testcontainers.SkipIfProviderIsNotHealthy(t)
+}
 
 func SetupLocalValKeyInstance(ctx context.Context) (string, testcontainers.Container, func(), error) {
 	cleanup := func() {}
@@ -38,7 +49,7 @@ func SetupLocalValKeyInstance(ctx context.Context) (string, testcontainers.Conta
 }
 
 func TestUnit_ValkeyCRUD(t *testing.T) {
-	testcontainers.SkipIfProviderIsNotHealthy(t)
+	requireValkey(t)
 	ctx := context.Background()
 
 	connStr, _, cleanup, err := SetupLocalValKeyInstance(ctx)
@@ -86,7 +97,7 @@ func TestUnit_ValkeyCRUD(t *testing.T) {
 }
 
 func TestUnit_ValkeyTTL(t *testing.T) {
-	testcontainers.SkipIfProviderIsNotHealthy(t)
+	requireValkey(t)
 	ctx := context.Background()
 
 	connStr, _, cleanup, err := SetupLocalValKeyInstance(ctx)
@@ -121,7 +132,7 @@ func TestUnit_ValkeyTTL(t *testing.T) {
 }
 
 func TestUnit_ValkeyList(t *testing.T) {
-	testcontainers.SkipIfProviderIsNotHealthy(t)
+	requireValkey(t)
 	ctx := context.Background()
 
 	connStr, _, cleanup, err := SetupLocalValKeyInstance(ctx)
@@ -165,7 +176,7 @@ func TestUnit_ValkeyList(t *testing.T) {
 }
 
 func TestUnit_ValkeyListOperations(t *testing.T) {
-	testcontainers.SkipIfProviderIsNotHealthy(t)
+	requireValkey(t)
 	ctx := context.Background()
 
 	connStr, _, cleanup, err := SetupLocalValKeyInstance(ctx)
@@ -225,7 +236,7 @@ func TestUnit_ValkeyListOperations(t *testing.T) {
 }
 
 func TestUnit_ValkeySetOperations(t *testing.T) {
-	testcontainers.SkipIfProviderIsNotHealthy(t)
+	requireValkey(t)
 	ctx := context.Background()
 
 	connStr, _, cleanup, err := SetupLocalValKeyInstance(ctx)

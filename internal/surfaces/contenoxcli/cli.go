@@ -19,6 +19,7 @@ import (
 	"github.com/contenox/contenox/internal/services/eventlog"
 	"github.com/contenox/contenox/internal/services/project"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/substrate"
 	"github.com/contenox/contenox/internal/version"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
@@ -55,6 +56,10 @@ var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": tr
 
 // Main runs the contenox CLI: init subcommand or run (default) with optional positional input.
 func Main() {
+	if _, err := substrate.Resolve(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
+		os.Exit(1)
+	}
 	args := os.Args[1:]
 	onlyHelp := len(args) == 0
 	if !onlyHelp {

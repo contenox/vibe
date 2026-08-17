@@ -172,6 +172,24 @@ task test-cli-verbose
 task test-cli-help
 ```
 
+The opt-in storage backends, if you touched anything they run through. Each
+starts a throwaway container, so you only need Docker to exercise this path:
+without a container engine the task prints `SKIPPED, not passed` and exits 0
+instead of a green `ok` you could mistake for a real run.
+
+```bash
+task test-backends          # all of the below
+task test-store-postgres    # the store suite on Postgres
+task test-bus-nats          # the libbus conformance suite, NATS included
+task test-kv-valkey         # libkvstore on Valkey
+task test-substrate         # the wiring that selects them, against real servers
+```
+
+CI runs those same tasks with `CONTENOX_TEST_REQUIRE_POSTGRES`,
+`LIBBUS_REQUIRE_NATS` and `LIBKVSTORE_REQUIRE_VALKEY` set, which turns every
+skip in them into a failure. Set them locally to demand the same of your own
+machine.
+
 ACP wire-conformance harnesses (need the Rust reference peers built — see the
 comments in Taskfile.yml):
 

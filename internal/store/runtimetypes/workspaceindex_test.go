@@ -2,7 +2,6 @@ package runtimetypes_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,15 +10,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func hasFTS5Search() bool {
+	return runtimetypes.TestBackendDefault() == runtimetypes.TestBackendSQLite
+}
+
+func requireFTS5Search(t *testing.T) {
+	t.Helper()
+	if !hasFTS5Search() {
+		t.Skip("SearchWorkspaceChunks speaks FTS5 MATCH/bm25; schema_postgres.sql mirrors the three columns but no Postgres query path exists yet")
+	}
+}
+
 func setupWorkspaceIndexStore(t *testing.T) (context.Context, runtimetypes.Store, libdb.Exec) {
 	t.Helper()
-	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "workspaceindex.db")
-	db, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	exec := db.WithoutTransaction()
-	return ctx, runtimetypes.New(exec), exec
+	return runtimetypes.SetupStoreExec(t)
 }
 
 func newIndexConfig(id, workspaceID string) *runtimetypes.WorkspaceIndexConfig {
@@ -161,9 +165,11 @@ func TestUnit_WorkspaceChunks_RoundTripAndDeletes(t *testing.T) {
 	n, err = store.CountWorkspaceChunks(ctx, "cfg-1")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n)
-	hits, err := store.SearchWorkspaceChunks(ctx, "cfg-1", `"retry"`, 10)
-	require.NoError(t, err)
-	require.Empty(t, hits, "deleting chunks must delete their FTS rows too, or search resurrects the dead")
+	if hasFTS5Search() {
+		hits, err := store.SearchWorkspaceChunks(ctx, "cfg-1", `"retry"`, 10)
+		require.NoError(t, err)
+		require.Empty(t, hits, "deleting chunks must delete their FTS rows too, or search resurrects the dead")
+	}
 
 	require.NoError(t, store.DeleteWorkspaceChunksForConfig(ctx, "cfg-1"))
 	n, err = store.CountWorkspaceChunks(ctx, "cfg-1")
@@ -173,6 +179,7 @@ func TestUnit_WorkspaceChunks_RoundTripAndDeletes(t *testing.T) {
 
 // TestUnit_WorkspaceIndex_FTS5IsAvailable asserts FTS5 works in the driver the product ships (modernc.org/sqlite).
 func TestUnit_WorkspaceIndex_FTS5IsAvailable(t *testing.T) {
+	requireFTS5Search(t)
 	ctx, store, _ := setupWorkspaceIndexStore(t)
 	require.NoError(t, store.CreateWorkspaceIndexConfig(ctx, newIndexConfig("cfg-1", "ws-1")))
 	require.NoError(t, store.CreateWorkspaceIndexConfig(ctx, newIndexConfig("cfg-2", "ws-2")))
@@ -215,6 +222,7 @@ func TestUnit_WorkspaceIndex_FTS5IsAvailable(t *testing.T) {
 
 // TestUnit_WorkspaceIndex_LexicalOnlyGenerationIsSearchable asserts a dimension-0 generation has no vectors but its FTS5 mirror is searchable.
 func TestUnit_WorkspaceIndex_LexicalOnlyGenerationIsSearchable(t *testing.T) {
+	requireFTS5Search(t)
 	ctx, store, _ := setupWorkspaceIndexStore(t)
 
 	cfg := newIndexConfig("cfg-lex", "ws-lex")

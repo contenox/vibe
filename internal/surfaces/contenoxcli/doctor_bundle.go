@@ -35,6 +35,7 @@ type secretPattern struct {
 var secretPatterns = []secretPattern{
 	{regexp.MustCompile(`(?i)(api[_-]?key|apikey|access[_-]?key|secret|password|passwd|token|authorization|credential)("?\s*[:=]\s*"?)([^"\s,&}]+)`), "${1}${2}" + redactedPlaceholder},
 	{regexp.MustCompile(`(?i)([a-z][a-z0-9+.\-]*://[^/\s:@]+:)([^/\s@]+)(@)`), "${1}" + redactedPlaceholder + "${3}"},
+	{regexp.MustCompile(`(?i)([a-z][a-z0-9+.\-]*://)([^/\s:@]+)(@)`), "${1}" + redactedPlaceholder + "${3}"},
 	{regexp.MustCompile(`(?i)(bearer\s+)([A-Za-z0-9._\-]{12,})`), "${1}" + redactedPlaceholder},
 	{regexp.MustCompile(`sk-ant-[A-Za-z0-9_\-]{8,}`), redactedPlaceholder},
 	{regexp.MustCompile(`sk-[A-Za-z0-9_\-]{16,}`), redactedPlaceholder},
