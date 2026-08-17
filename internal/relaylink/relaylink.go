@@ -124,7 +124,8 @@ type Config struct {
 	// Dial opens one connection; defaults to [DialTLS].
 	Dial DialFunc
 	// Handler receives routed frames; nil drops them.
-	Handler Handler
+	Handler   Handler
+	OnConnect func(context.Context)
 	// Backoff governs redial timing; the zero value means [DefaultBackoff].
 	Backoff Backoff
 	// Heartbeat governs liveness probing; the zero value means [DefaultHeartbeat].
@@ -361,6 +362,10 @@ func (c *Connector) hold(ctx context.Context, conn net.Conn, rd *librelay.Reader
 		c.cur.CompareAndSwap(s, nil)
 		c.markDisconnected()
 	}()
+
+	if c.cfg.OnConnect != nil {
+		c.cfg.OnConnect(ctx)
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(3)

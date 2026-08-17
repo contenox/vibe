@@ -97,6 +97,10 @@ type Service interface {
 	// requester parked on it.
 	Respond(ctx context.Context, approvalID string, approved bool) error
 
+	RespondWithGuidance(ctx context.Context, approvalID string, approved bool, decidedBy, guidance string) error
+
+	AnswerFrom(ctx context.Context, askID, text, by string) error
+
 	// RequestAttention durably records a unit's question and blocks until
 	// Answer replies, the ceiling expires it, or ctx ends.
 	RequestAttention(ctx context.Context, req AttentionRequest, sink taskengine.TaskEventSink) (string, error)
@@ -204,6 +208,7 @@ type service struct {
 	approvalCeiling time.Duration
 	resumeHook      ResumeHook
 	adjudicator     Adjudicator
+	askWatcher      AskWatcher
 }
 
 // New constructs a hitlservice bound to a tenant.
@@ -344,6 +349,21 @@ func PolicyNameFromContext(ctx context.Context) string {
 	return strings.TrimSpace(name)
 }
 
+type agentNameContextKey struct{}
+
+func WithAgentName(ctx context.Context, agentName string) context.Context {
+	agentName = strings.TrimSpace(agentName)
+	if agentName == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, agentNameContextKey{}, agentName)
+}
+
+func AgentNameFromContext(ctx context.Context) string {
+	name, _ := ctx.Value(agentNameContextKey{}).(string)
+	return strings.TrimSpace(name)
+}
+
 func (s *service) readActivePolicyName(ctx context.Context) string {
 	if r, ok := s.store.(clikv.Reader); ok {
 		return clikv.ReadHITLPolicy(ctx, r, s.workspace())
@@ -400,6 +420,7 @@ func (s *service) RequestApproval(ctx context.Context, req ApprovalRequest, sink
 		timeoutDur = time.Duration(req.TimeoutS) * time.Second
 	}
 
+	var recorded *runtimetypes.HITLApproval
 	if !adopted {
 		row := buildApprovalRow(approvalID, req, time.Now().UTC(), timeoutDur)
 		if err := s.approvals.CreateHITLApproval(ctx, row); err != nil {
@@ -415,6 +436,8 @@ func (s *service) RequestApproval(ctx context.Context, req ApprovalRequest, sink
 			} else {
 				return false, fmt.Errorf("hitlservice: persist pending approval: %w", err)
 			}
+		} else {
+			recorded = row
 		}
 	}
 
@@ -441,6 +464,7 @@ func (s *service) RequestApproval(ctx context.Context, req ApprovalRequest, sink
 
 	// Offered after the waiter is registered, so a verdict that lands immediately
 	// wakes it rather than racing it.
+	s.askRecorded(ctx, recorded)
 	s.offer(ctx, adjudicationFromApprovalRequest(approvalID, req))
 
 	waitCtx := ctx
@@ -521,6 +545,7 @@ func (s *service) RecordPendingApproval(ctx context.Context, approvalID string, 
 	}
 	// The in-process gating path records its row here rather than through
 	// RequestApproval, so this is where its asks reach an adjudicator.
+	s.askRecorded(ctx, row)
 	s.offer(ctx, adjudicationFromApprovalRequest(approvalID, req))
 	return nil
 }
@@ -533,7 +558,16 @@ func (s *service) Respond(ctx context.Context, approvalID string, approved bool)
 	return s.resolve(ctx, approvalID, approved, true)
 }
 
+func (s *service) RespondWithGuidance(ctx context.Context, approvalID string, approved bool, decidedBy, guidance string) error {
+	return s.resolveRecorded(ctx, approvalID, approved,
+		marshalAgentApprovalResolution(approved, strings.TrimSpace(decidedBy), guidance), true)
+}
+
 func (s *service) resolve(ctx context.Context, approvalID string, approved bool, runHook bool) error {
+	return s.resolveRecorded(ctx, approvalID, approved, marshalApprovalResolution(approved), runHook)
+}
+
+func (s *service) resolveRecorded(ctx context.Context, approvalID string, approved bool, resolution json.RawMessage, runHook bool) error {
 	if s.approvals == nil {
 		return fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
 	}
@@ -548,7 +582,7 @@ func (s *service) resolve(ctx context.Context, approvalID string, approved bool,
 		state = runtimetypes.HITLApprovalDenied
 	}
 	now := time.Now().UTC()
-	err := s.approvals.ResolveHITLApproval(ctx, approvalID, state, marshalApprovalResolution(approved), now)
+	err := s.approvals.ResolveHITLApproval(ctx, approvalID, state, resolution, now)
 	if err != nil {
 		if !errors.Is(err, libdb.ErrNotFound) {
 			return fmt.Errorf("hitlservice: resolve approval %s: %w", approvalID, err)
@@ -567,7 +601,7 @@ func (s *service) resolve(ctx context.Context, approvalID string, approved bool,
 		return ErrApprovalAlreadyResolved
 	}
 	s.hitlLog(ctx, "verdict recorded", "approval_id", approvalID, "approved", approved)
-	s.forgetOffer(approvalID)
+	s.askClosed(ctx, approvalID, AskAnswered)
 
 	s.mu.Lock()
 	ch, ok := s.pending[approvalID]
@@ -615,7 +649,7 @@ func (s *service) SweepExpired(ctx context.Context) (int, error) {
 			return expired, fmt.Errorf("hitlservice: resolve expired approval %s: %w", row.ID, err)
 		}
 		expired++
-		s.forgetOffer(row.ID)
+		s.askClosed(ctx, row.ID, AskExpired)
 		s.mu.Lock()
 		ch, ok := s.pending[row.ID]
 		hook := s.resumeHook
@@ -733,7 +767,7 @@ func (s *service) AbandonMissionAsks(ctx context.Context, missionID string) ([]s
 			default:
 			}
 		}
-		s.forgetOffer(row.ID)
+		s.askClosed(ctx, row.ID, AskSuperseded)
 		closed = append(closed, row.ID)
 	}
 	return closed, nil

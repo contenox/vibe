@@ -62,10 +62,11 @@ func serveRemoteAttachments(
 	contenoxDir string,
 	factory libacp.AgentFactory,
 	triggers relayChainTriggers,
+	asks *relayAskBridge,
 	tracker libtracker.ActivityTracker,
 	warn io.Writer,
 ) func() {
-	stop, err := startRelayTunnel(ctx, contenoxDir, factory, triggers, tracker)
+	stop, err := startRelayTunnel(ctx, contenoxDir, factory, triggers, asks, tracker)
 	if err != nil {
 		fmt.Fprintf(warn, "contenox: remote attachments are unavailable: %v\n", err)
 	}
@@ -77,6 +78,7 @@ func startRelayTunnel(
 	contenoxDir string,
 	factory libacp.AgentFactory,
 	triggers relayChainTriggers,
+	asks *relayAskBridge,
 	tracker libtracker.ActivityTracker,
 ) (stop func(), err error) {
 	noop := func() {}
@@ -110,19 +112,27 @@ func startRelayTunnel(
 		Credentials: relaylink.Credentials{Token: creds.InstanceToken, RelayPublicKey: creds.RelayPublicKey},
 		Agent:       "contenox/" + version.Get(),
 		Handler: func(hctx context.Context, f librelay.Frame) {
-			if f.Type == librelay.TypeChainTrigger {
+			switch f.Type {
+			case librelay.TypeChainTrigger:
 				trig.handle(hctx, f)
-				return
+			case librelay.TypeAskVerdict:
+				asks.handleVerdict(hctx, f)
+			default:
+				tunnel.Handle(hctx, f)
 			}
-			tunnel.Handle(hctx, f)
 		},
-		Tracker: tracker,
+		OnConnect: func(cctx context.Context) { asks.republish(cctx) },
+		Tracker:   tracker,
 	})
 	if err != nil {
 		tunnel.Close()
 		return noop, err
 	}
+	asks.attach(creds.InstanceID, func(f librelay.Frame) error { return connector.Send(f) })
+	triggers.resumes.attach(creds.InstanceID, func(f librelay.Frame) error { return connector.Send(f) })
 	if err := connector.Start(ctx); err != nil {
+		asks.detach()
+		triggers.resumes.detach()
 		tunnel.Close()
 		return noop, err
 	}
@@ -130,6 +140,8 @@ func startRelayTunnel(
 	// joins promptly.
 	return func() {
 		_ = connector.Close()
+		asks.detach()
+		triggers.resumes.detach()
 		tunnel.Close()
 		trig.wait()
 	}, nil

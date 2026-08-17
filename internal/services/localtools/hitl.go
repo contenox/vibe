@@ -209,8 +209,9 @@ func (h *HITLWrapper) Exec(
 		if verdictApproved, ok := taskengine.ApprovalVerdictFromContext(ctx, toolCallID); ok {
 			h.hitlLog(ctx, "tool resumed via verdict", "tool", toolName, "approval_id", toolCallID, "approved", verdictApproved)
 			if !verdictApproved {
-				reportChange("denied", DenyMessage)
-				return DenyMessage, taskengine.DataTypeString, nil
+				msg := h.denyMessage(ctx, toolCallID)
+				reportChange("denied", msg)
+				return msg, taskengine.DataTypeString, nil
 			}
 			// A retry of a partially completed resume must not run the world
 			// twice: a prior result replays verbatim.
@@ -259,6 +260,7 @@ func (h *HITLWrapper) Exec(
 			SessionID:   askSessionID(ctx),
 			// A unit's ask carries which subagent raised it, or nothing downstream can bound it: the adjudicator declines an unattributed ask and the envelope has no mission to count against.
 			MissionID: missiontools.MissionIDFromContext(ctx),
+			AgentName: hitlservice.AgentNameFromContext(ctx),
 		}
 		h.publishDecision(ctx, tools.Name, toolName, args, result, true)
 		h.hitlLog(ctx, "ask raised", "tool", toolName, "approval_id", toolCallID, "rule", result.MatchedRule, "policy", result.PolicyName)

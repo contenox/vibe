@@ -3,7 +3,9 @@ package localtools
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/stretchr/testify/require"
 )
@@ -53,4 +55,41 @@ func TestUnit_DenyMessage_CarriesTheAdjudicatorsRedirect(t *testing.T) {
 		h := &HITLWrapper{recorder: stubGuidance{}}
 		require.Equal(t, DenyMessage, h.denyMessage(ctx, "ask-4"))
 	})
+}
+
+type guidedApprovePolicy struct {
+	stubGuidance
+}
+
+func (p guidedApprovePolicy) Evaluate(context.Context, string, string, map[string]any) (hitlservice.EvaluationResult, error) {
+	return hitlservice.EvaluationResult{Action: hitlservice.ActionApprove, PolicyName: "envelope.json"}, nil
+}
+
+func TestUnit_HITLWrapper_ResumedDenialCarriesTheRecordedNote(t *testing.T) {
+	policy := guidedApprovePolicy{stubGuidance{by: "u_9", guidance: "Refund only up to 40 EUR."}}
+	w := NewHITLWrapper(nil, nil, policy, nil)
+
+	ctx := context.WithValue(context.Background(), taskengine.ContextKeyToolCallID, "ask-1")
+	ctx = taskengine.WithApprovalVerdicts(ctx, map[string]bool{"ask-1": false})
+	res, dt, err := w.Exec(ctx, time.Now(), map[string]any{}, false,
+		&taskengine.ToolsCall{Name: "billing", ToolName: "issue_refund"})
+
+	require.NoError(t, err)
+	require.Equal(t, taskengine.DataTypeString, dt)
+	require.Contains(t, res, "u_9", "the resumed call must name who refused it")
+	require.Contains(t, res, "Refund only up to 40 EUR.", "the note the verdict carried must reach the agent")
+	require.NotContains(t, res, "User denied")
+}
+
+func TestUnit_HITLWrapper_ResumedDenialWithoutANoteKeepsThePlainMessage(t *testing.T) {
+	policy := guidedApprovePolicy{}
+	w := NewHITLWrapper(nil, nil, policy, nil)
+
+	ctx := context.WithValue(context.Background(), taskengine.ContextKeyToolCallID, "ask-2")
+	ctx = taskengine.WithApprovalVerdicts(ctx, map[string]bool{"ask-2": false})
+	res, _, err := w.Exec(ctx, time.Now(), map[string]any{}, false,
+		&taskengine.ToolsCall{Name: "billing", ToolName: "issue_refund"})
+
+	require.NoError(t, err)
+	require.Equal(t, DenyMessage, res)
 }
