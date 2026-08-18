@@ -110,8 +110,10 @@ func TestUnit_MissingPolicyToolsets(t *testing.T) {
 	})
 }
 
-// TestUnit_StalePolicyPresets_PreStateFileInstall asserts an install predating the current toolsets, with no provenance record, is detected as stale and left untouched.
-func TestUnit_StalePolicyPresets_PreStateFileInstall(t *testing.T) {
+// TestUnit_StalePolicyPresets_LegacyInstall asserts a top-level preset an
+// earlier build seeded, now predating the current toolsets, is detected as
+// stale and left exactly where the operator's file wins.
+func TestUnit_StalePolicyPresets_LegacyInstall(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	// A previous build's default envelope: local_fs + git only.
@@ -120,12 +122,11 @@ func TestUnit_StalePolicyPresets_PreStateFileInstall(t *testing.T) {
 		{"tools":"git","tool":"git_status","action":"allow"}
 	]}`
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "hitl-policy-default.json"), []byte(previous), 0o644))
-	require.NoFileExists(t, filepath.Join(dir, presetStateFile))
 
-	// The seeder holds the file back (it cannot prove it is untouched)...
-	stale, err := upgradeEmbeddedHITLPolicies(dir, false)
+	// The file is never rewritten behind the operator's back...
+	onDisk, err := os.ReadFile(filepath.Join(dir, "hitl-policy-default.json"))
 	require.NoError(t, err)
-	require.Contains(t, stale, "hitl-policy-default.json")
+	require.Equal(t, previous, string(onDisk))
 
 	// ...and THIS is what the operator is told instead: the toolsets, not the file hash.
 	detected := stalePolicyPresets([]string{dir}, nil)
@@ -161,14 +162,12 @@ func TestUnit_StalePolicyNotice_StopsAfterRefresh(t *testing.T) {
 		require.NotEmpty(t, stalePolicyNotice("hitl-policy-default.json", []string{dir}, nil))
 
 		// What `contenox init --refresh-policies` does.
-		require.NoError(t, writeEmbeddedHITLPolicies(dir, true))
+		_, err := refreshExistingHITLPolicies(dir)
+		require.NoError(t, err)
 
 		require.Empty(t, stalePolicyNotice("hitl-policy-default.json", []string{dir}, nil))
 		require.Empty(t, stalePolicyPresets([]string{dir}, nil))
-		// And it stays silent on the next run, without rewriting anything.
-		stale, err := upgradeEmbeddedHITLPolicies(dir, false)
-		require.NoError(t, err)
-		require.Empty(t, stale)
+		// And it stays silent on the next run.
 		require.Empty(t, stalePolicyNotice("hitl-policy-default.json", []string{dir}, nil))
 	})
 
@@ -193,9 +192,9 @@ func TestUnit_StalePolicyNotice_StopsAfterRefresh(t *testing.T) {
 
 	t.Run("a fresh install never sees it", func(t *testing.T) {
 		t.Parallel()
+		// Nothing seeds a preset any more, so a fresh install has no top-level
+		// file to be stale — the envelope behind the name is rendered instead.
 		dir := t.TempDir()
-		_, err := upgradeEmbeddedHITLPolicies(dir, false)
-		require.NoError(t, err)
 		require.Empty(t, stalePolicyPresets([]string{dir}, nil))
 		require.Empty(t, stalePolicyNotice("hitl-policy-default.json", []string{dir}, nil))
 	})
@@ -203,7 +202,7 @@ func TestUnit_StalePolicyNotice_StopsAfterRefresh(t *testing.T) {
 	t.Run("a preset that is not on disk is not stale", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		require.Empty(t, stalePolicyPresets([]string{dir}, nil), "an empty dir gets this build's presets written to it")
+		require.Empty(t, stalePolicyPresets([]string{dir}, nil))
 		require.Empty(t, stalePolicyNotice("hitl-policy-default.json", []string{dir}, nil))
 		require.Empty(t, stalePolicyNotice("not-a-shipped-preset.json", []string{dir}, nil))
 	})
@@ -224,7 +223,7 @@ func TestUnit_StalePolicyPresets_ReadsTheFileTheLoaderWouldRead(t *testing.T) {
 		"with the stale copy first, that is the one the loader reads")
 }
 
-// TestUnit_RunRefreshPolicies_RewritesShadowingWorkspaceCopy asserts the refresh verb rewrites the copy the loader actually reads — a stale workspace preset shadowing ~/.contenox — and records provenance where it wrote.
+// TestUnit_RunRefreshPolicies_RewritesShadowingWorkspaceCopy asserts the refresh verb rewrites the copy the loader actually reads — a stale workspace preset shadowing ~/.contenox — and creates no copy anywhere it does not already exist.
 func TestUnit_RunRefreshPolicies_RewritesShadowingWorkspaceCopy(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -250,15 +249,10 @@ func TestUnit_RunRefreshPolicies_RewritesShadowingWorkspaceCopy(t *testing.T) {
 	require.Contains(t, out.String(), "HITL policy presets are now this build's")
 	require.NotContains(t, out.String(), "Still stale")
 
-	// Presets the workspace never held are not seeded into it — that would
-	// widen the shadow; they keep resolving to the refreshed home copies.
+	// A preset neither directory held is created in neither — the refresh
+	// rewrites, it does not seed. Those names resolve to rendered envelopes.
 	require.NoFileExists(t, filepath.Join(workspace, "hitl-policy-strict.json"))
-	require.FileExists(t, filepath.Join(globalDir, "hitl-policy-strict.json"))
-
-	// Provenance lands beside the rewritten copy, so a future upgrade can
-	// prove it untouched.
-	require.Equal(t, presetSHA(shippedPreset(t, "hitl-policy-default.json")),
-		readPresetState(workspace)["hitl-policy-default.json"])
+	require.NoFileExists(t, filepath.Join(globalDir, "hitl-policy-strict.json"))
 }
 
 // TestUnit_RunRefreshPolicies_ReportsResidualStaleness asserts the closing line is earned by the detector: a shadowing copy the refresh could not rewrite is named with its full path and fall-through, never papered over with success.
@@ -311,13 +305,53 @@ func TestUnit_DoctorStalePolicyWarning(t *testing.T) {
 	require.True(t, res.Ready())
 
 	// And with a current envelope doctor stays quiet.
-	require.NoError(t, writeEmbeddedHITLPolicies(dir, true))
+	_, refreshErr := refreshExistingHITLPolicies(dir)
+	require.NoError(t, refreshErr)
 	clean := setupcheck.AddStalePolicyPresetIssue(
 		setupcheck.Result{DefaultModel: "qwen2.5:7b", DefaultProvider: "ollama"},
 		stalePolicyPresetIssues([]string{dir}, nil), RefreshPoliciesCommand)
 	var cleanOut strings.Builder
 	printDoctorText(&cleanOut, clean)
 	require.Contains(t, cleanOut.String(), "All checks passed.")
+}
+
+// TestUnit_OperatorPolicyDirs_ExcludeTheRenderedHalves pins what staleness and
+// the refresh verb are allowed to touch. A rendered envelope is derived: judged
+// as a stale preset it would nag on every fresh install, and refreshed it would
+// be overwritten with the preset the envelope replaced.
+func TestUnit_OperatorPolicyDirs_ExcludeTheRenderedHalves(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, ".contenox")
+	workspace := "/work/.contenox"
+
+	require.Equal(t, []string{workspace, globalDir}, operatorPolicyDirs(workspace))
+	require.Equal(t, []string{globalDir}, operatorPolicyDirs(globalDir))
+}
+
+// TestUnit_RunRefreshPolicies_LeavesRenderedEnvelopesAlone is the same rule at
+// the verb: .generated belongs to the transpiler, and a refresh that rewrote it
+// would replace an envelope's own render with the preset it superseded.
+func TestUnit_RunRefreshPolicies_LeavesRenderedEnvelopesAlone(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, ".contenox")
+	generated := filepath.Join(globalDir, agentdecl.GeneratedDirName)
+	require.NoError(t, os.MkdirAll(generated, 0o750))
+
+	rendered := `{"default_action":"approve","rules":[{"tools":"local_fs","tool":"read_file","action":"allow"}]}`
+	renderedPath := filepath.Join(generated, "hitl-policy-default.json")
+	require.NoError(t, os.WriteFile(renderedPath, []byte(rendered), 0o644))
+
+	var out strings.Builder
+	require.NoError(t, runRefreshPolicies(&out, globalDir, nil))
+
+	onDisk, err := os.ReadFile(renderedPath)
+	require.NoError(t, err)
+	require.Equal(t, rendered, string(onDisk), "a rendered envelope must survive the refresh untouched")
+	require.NotContains(t, out.String(), renderedPath)
+	require.NotContains(t, out.String(), "Still stale",
+		"a rendered envelope must never be reported as an operator's stale preset")
 }
 
 func TestUnit_PolicyDirs(t *testing.T) {

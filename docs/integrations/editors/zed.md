@@ -37,7 +37,7 @@ Restart Zed (or reload the window). Open the agent panel — Contenox now appear
 
 **Native editor surfaces.** `local_fs.read_file`/`local_fs.write_file`/`local_fs.edit_file` route through Zed's own filesystem capability — sandboxed, with a read-before-write contract. `local_shell` runs in a real Zed terminal you can interact with.
 
-**HITL through the editor.** When your chain calls a tool listed in your active HITL policy, Contenox's [HITL policy](/docs/guide/hitl/) applies — and the approval dialog is routed to Zed's permission UI instead of a terminal prompt. The default policy gates `local_fs.write_file`, `local_fs.edit_file`, `local_fs.sed`, and `local_shell.*` calls.
+**HITL through the editor.** When your chain calls a tool listed in your active HITL policy, Contenox's [HITL policy](/docs/guide/hitl/) applies — and the approval dialog is routed to Zed's permission UI instead of a terminal prompt. `contenox acp` runs under the `default` [envelope](/docs/guide/hitl/#shipped-envelopes) — the same one `contenox beam` and the CLI use — which gates `local_fs.write_file`, `local_fs.edit_file`, `local_fs.sed`, and `local_shell.*` calls. Pass `--hitl-policy <name|path>` in the agent-server args to run under a different one.
 
 **Session history that replays.** Close Zed mid-conversation and reopen the project — your prompts, the agent's responses, and every tool call (with its output) come back. State lives in `~/.contenox/local.db`.
 
@@ -68,7 +68,7 @@ Models are global config, shared across every surface that reads `default-model`
 
 ## HITL approval flow
 
-When the chain calls a tool listed in your active HITL policy (default: `local_fs.write_file`, `local_fs.edit_file`, `local_fs.sed`, `local_shell.*`), Contenox emits an ACP permission request which Zed renders as an approval dialog. The card shows the actual command/path, so you approve the specific operation — not a bare tool name.
+When the chain calls a tool listed in your active HITL policy (under the `default` envelope: `local_fs.write_file`, `local_fs.edit_file`, `local_fs.sed`, `local_shell.*`), Contenox emits an ACP permission request which Zed renders as an approval dialog. The card shows the actual command/path, so you approve the specific operation — not a bare tool name.
 
 To skip Contenox HITL entirely (trusted/scripted contexts), launch with `--auto`:
 

@@ -44,7 +44,7 @@ Restart the IDE. Open the agent panel — Contenox now appears in the agent pick
 
 **Shell commands.** `local_shell` runs the command and returns its output in the tool card. GoLand does not advertise the ACP terminal capability, so the command is executed and reported rather than embedded as an interactive terminal session (this differs from [Zed](/docs/integrations/editors/zed/), which does embed a live terminal).
 
-**HITL through the editor.** If your chain uses `local_fs`/`local_shell`, Contenox's [HITL policy](/docs/guide/hitl/) applies — and the approval dialog is routed to the IDE's permission UI instead of a terminal prompt. The default policy gates `local_fs.write_file`, `local_fs.edit_file`, `local_fs.sed`, and `local_shell.*` calls.
+**HITL through the editor.** If your chain uses `local_fs`/`local_shell`, Contenox's [HITL policy](/docs/guide/hitl/) applies — and the approval dialog is routed to the IDE's permission UI instead of a terminal prompt. `contenox acp` runs under the `default` [envelope](/docs/guide/hitl/#shipped-envelopes), which gates `local_fs.write_file`, `local_fs.edit_file`, `local_fs.sed`, and `local_shell.*` calls.
 
 **Session history that replays.** Close the IDE mid-conversation and reopen the project — your prompts, the agent's responses, and every tool call (with its output) come back. State lives in `~/.contenox/local.db`.
 

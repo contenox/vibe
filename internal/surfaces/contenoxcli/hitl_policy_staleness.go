@@ -13,8 +13,8 @@ import (
 	"github.com/contenox/contenox/internal/services/setupcheck"
 )
 
-// RefreshPoliciesCommand rewrites the shipped HITL policy presets and nothing
-// else.
+// RefreshPoliciesCommand rewrites the preset copies an operator already has and
+// nothing else.
 const RefreshPoliciesCommand = "contenox init --refresh-policies"
 
 const catchAllToolset = "*"
@@ -132,6 +132,29 @@ func policyDirs(primaryDir string) []string {
 	return dirs
 }
 
+// operatorPolicyDirs is policyDirs without the rendered halves: the two places
+// a policy file belongs to whoever put it there. Staleness and the refresh verb
+// speak only about those — a file under .generated is the transpiler's, and
+// judging or rewriting one would report the envelope's own render as an
+// operator's stale copy and then clobber it with a preset.
+func operatorPolicyDirs(primaryDir string) []string {
+	all := policyDirs(primaryDir)
+	out := make([]string, 0, len(all))
+	for _, dir := range all {
+		if filepath.Base(dir) == agentdecl.GeneratedDirName {
+			continue
+		}
+		out = append(out, dir)
+	}
+	return out
+}
+
+// isRenderedPolicyPath reports whether a resolved policy file is the
+// transpiler's rather than an operator's.
+func isRenderedPolicyPath(path string) bool {
+	return filepath.Base(filepath.Dir(path)) == agentdecl.GeneratedDirName
+}
+
 func readPolicyFile(dirs []string, name string) (path string, raw []byte, ok bool) {
 	for _, dir := range dirs {
 		if dir == "" {
@@ -224,22 +247,11 @@ func stalePolicyPresetIssues(dirs []string, gated map[string]bool) []setupcheck.
 	return out
 }
 
+// refreshPoliciesOnSearchPath rewrites the preset copies already on the search
+// path. Nothing is created: a directory that holds no preset is served by the
+// rendered envelopes behind it.
 func refreshPoliciesOnSearchPath(out io.Writer, primaryDir string) error {
-	home, err := globalContenoxDir()
-	if err != nil {
-		return fmt.Errorf("could not resolve ~/.contenox: %w", err)
-	}
-	for _, dir := range policyDirs(primaryDir) {
-		if dir == home {
-			// A failure at home is fatal: no copy resolves behind it.
-			if err := writeEmbeddedHITLPolicies(dir, true); err != nil {
-				return err
-			}
-			for _, p := range HITLPolicyPresets {
-				fmt.Fprintf(out, "  Refreshed %s\n", filepath.Join(dir, p.Name))
-			}
-			continue
-		}
+	for _, dir := range operatorPolicyDirs(primaryDir) {
 		written, refreshErr := refreshExistingHITLPolicies(dir)
 		for _, path := range written {
 			fmt.Fprintf(out, "  Refreshed %s\n", path)
@@ -255,7 +267,7 @@ func runRefreshPolicies(out io.Writer, primaryDir string, gated map[string]bool)
 	if err := refreshPoliciesOnSearchPath(out, primaryDir); err != nil {
 		return err
 	}
-	if stale := stalePolicyPresets(policyDirs(primaryDir), gated); len(stale) > 0 {
+	if stale := stalePolicyPresets(operatorPolicyDirs(primaryDir), gated); len(stale) > 0 {
 		for _, s := range stale {
 			fmt.Fprintf(out, "  Still stale: %s predates %s — %s\n",
 				s.Path, strings.Join(s.Toolsets, ", "), staleFallthrough(s.DefaultAction))

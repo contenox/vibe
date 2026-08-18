@@ -390,8 +390,19 @@ func (s *service) Evaluate(ctx context.Context, toolsName, toolName string, args
 	}
 	p, err := loadPolicy(ctx, s.src, s.tenantID, policyPath)
 	if err != nil {
-		reportErr(fmt.Errorf("hitl: falling back to built-in default policy: %w", err))
-		p = defaultPolicy()
+		// A named policy that will not load must not silently downgrade to the
+		// approve-everything built-in: fall to the default file — a real
+		// credential quarantine — before the fail-closed in-code default.
+		if fb := s.fallbackPolicy; fb != "" && fb != policyPath {
+			if fbPol, fbErr := loadPolicy(ctx, s.src, s.tenantID, fb); fbErr == nil {
+				reportErr(fmt.Errorf("hitl: policy %q unreadable, gating on default %q instead: %w", policyPath, fb, err))
+				p, policyPath = fbPol, fb
+			}
+		}
+		if p == nil {
+			reportErr(fmt.Errorf("hitl: falling back to built-in default policy: %w", err))
+			p = defaultPolicy()
+		}
 	}
 	reportChange("policy", policyPath)
 	result := evaluate(ctx, p, toolsName, toolName, args)

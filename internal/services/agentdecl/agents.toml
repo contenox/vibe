@@ -174,6 +174,406 @@ local_fs_read = "allow"
 local_fs_write = "allow"
 local_shell = "approve"
 
+# An envelope is a permission surface with a name. It states what a session may
+# reach — files, shell, network, missions, tools you connected — and the runtime
+# transpiles it into the policy the approval engine already evaluates, rendered to
+# .contenox/.generated/hitl-policy-<name>.json at startup. Nothing about the
+# engine changes here; this is only the vocabulary the rules are written in.
+#
+# The name is the whole identity. Envelope `strict` renders to
+# hitl-policy-strict.json, and `--hitl-policy strict`,
+# `--hitl-policy hitl-policy-strict.json` and
+# `config set hitl-policy-name hitl-policy-strict.json` all resolve to it.
+# Per-agent policies are emitted into that same namespace under the same filename
+# rule, so an envelope may not take a declared agent's name: the collision is a
+# startup error, never a silent overwrite.
+#
+# Seven axes. Each is an action — allow, approve or deny — or a table carrying
+# `grant` plus the refinements listed with it:
+#
+#   files.read       read_file, read_file_range, list_dir
+#   files.write      write_file, edit_file, sed
+#   shell            local_shell
+#   network.read     reserved: nothing in this build serves it
+#   network.write    reserved: nothing in this build serves it
+#   missions.fire    mission_start
+#   missions.answer  who besides a human may answer a mission's asks
+#
+# An axis you leave unset emits no rule and falls to default_action. It is not
+# implicitly "approve".
+#
+# ⚠ The network axes bind to the native web toolset and to nothing else. A
+# web-shaped tool you connected is an MCP tool: it is reached by its own name
+# under [envelopes.<name>.tools], and until you name it there it falls to
+# default_action no matter what the network axes say. The two axes are kept
+# because they are the only place the intent behind a host block survives, and a
+# build that serves nothing for them renders them as a note rather than a rule.
+#
+# `extends` names one other envelope in this table — one parent, never a list —
+# and merges per leaf key, so a child that sets files.write leaves the parent's
+# files.read alone. Two rules make that predictable and both cost some repetition:
+# every list (deny_paths, approve_paths, blacklist, prefix_allowlist, ask_always,
+# deny_hosts) REPLACES the parent's rather than appending to it, and a bare
+# `files.write = "allow"` replaces the whole axis, deny_paths included. Restate
+# what you meant to keep — silent concatenation down a chain makes a deny list
+# impossible to shrink, and silent patching makes it impossible to read. The
+# always_deny blocks are the one exception: those accumulate parent-first, because
+# a rule that exists to be un-waivable must not be waivable from below.
+#
+# What is written here is a floor, not a ceiling. A rendered envelope sits last on
+# the search path, so your own ~/.contenox/hitl-policy-<name>.json shadows it
+# without editing anything in this file.
+
+# The three permission settings a declaration can ask for, in the same vocabulary
+# as everything below — so an imported agent's policy and a profile envelope come
+# out of one transpiler, and so the profiles have a parent worth extending.
+# bypassPermissions is not among them and never will be: it names no envelope, and
+# a declaration asking for it is refused rather than widened.
+#
+# read_only is the base of the chain, which is where the credential quarantine
+# rides. An agent has no legitimate reason to open a key store, a keyring, a
+# wallet, a browser profile or a shell history, so those deny rather than ask — on
+# every local_fs tool, ahead of every grant, under the most permissive posture
+# exactly as under the strictest. A declaration cannot name these paths, so it
+# cannot consent to them either.
+[envelopes.read_only]
+description = "Read the workspace, change nothing."
+default_action = "approve"
+files.read = "allow"
+files.write = "deny"
+shell = "deny"
+
+# Cloud credentials, SSH and GPG key material.
+[[envelopes.read_only.always_deny]]
+tools = "local_fs"
+tool = "*"
+when_key = "path"
+when_op = "glob"
+when_value = "**/{.ssh,.gnupg,.aws,.azure,.kube,.config/gcloud,.config/doctl,.oci}/**"
+
+# Password managers and OS keyrings.
+[[envelopes.read_only.always_deny]]
+tools = "local_fs"
+tool = "*"
+when_key = "path"
+when_op = "glob"
+when_value = "**/{.password-store,.local/share/keyrings,Library/Keychains,.config/1Password,.config/Bitwarden,.config/keepassxc}/**"
+
+# Wallet keystores, and the wallet and database files that carry their own keys.
+[[envelopes.read_only.always_deny]]
+tools = "local_fs"
+tool = "*"
+when_key = "path"
+when_op = "glob"
+when_value = "**/{.electrum,.bitcoin,.ethereum/keystore}/**"
+
+[[envelopes.read_only.always_deny]]
+tools = "local_fs"
+tool = "*"
+when_key = "path"
+when_op = "glob"
+when_value = "**/{wallet.dat,*.kdbx}"
+
+# Browser profiles: saved passwords, cookies and session tokens live here.
+[[envelopes.read_only.always_deny]]
+tools = "local_fs"
+tool = "*"
+when_key = "path"
+when_op = "glob"
+when_value = "**/{.mozilla,.config/google-chrome,.config/chromium,.config/BraveSoftware}/**"
+
+[[envelopes.read_only.always_deny]]
+tools = "local_fs"
+tool = "*"
+when_key = "path"
+when_op = "glob"
+when_value = "**/Library/Application Support/{Google/Chrome,Firefox,BraveSoftware}/**"
+
+# Shell history, and the registry and network logins that sit beside it. History
+# is where a secret typed once on a command line stays.
+[[envelopes.read_only.always_deny]]
+tools = "local_fs"
+tool = "*"
+when_key = "path"
+when_op = "glob"
+when_value = "**/{.bash_history,.zsh_history,.python_history,.netrc,.git-credentials,.npmrc,.pypirc}"
+
+[[envelopes.read_only.always_deny]]
+tools = "local_fs"
+tool = "*"
+when_key = "path"
+when_op = "glob"
+when_value = "**/.docker/config.json"
+
+# Private keys by their conventional names, including the .pub beside them: the
+# suffix is open on purpose, since id_rsa.bak is the same key.
+[[envelopes.read_only.always_deny]]
+tools = "local_fs"
+tool = "*"
+when_key = "path"
+when_op = "glob"
+when_value = "**/{id_rsa,id_dsa,id_ecdsa,id_ed25519}*"
+
+# Edits ask. This is where the write wall lives, so that everything extending it
+# inherits the same answer to "which files are not project files": the ones that
+# run something. A shell rc, a systemd unit, a LaunchAgent, a git hook directory
+# and an approval policy are all commands wearing a filename, so writes to them
+# are denied outright rather than offered for approval — approving one is
+# approving everything it will later do unattended.
+[envelopes.ask_always]
+extends = "read_only"
+description = "Read freely, ask before changing anything."
+shell = "approve"
+
+# Sometimes the work is the .env file itself, so reading one asks rather than
+# silently allowing or denying it.
+[envelopes.ask_always.files.read]
+grant = "allow"
+approve_paths = ["**/{*.pem,*.key,.env,.env.*}"]
+
+[envelopes.ask_always.files.write]
+grant = "approve"
+deny_paths = [
+  # Key material stays readable-on-approval but is never rewritten.
+  "**/{.ssh,.gnupg}/**",
+  # Anything that runs at login or on a timer.
+  "**/{.config/autostart,.config/systemd/user,Library/LaunchAgents,Library/LaunchDaemons}/**",
+  "**/{.bashrc,.zshrc,.profile,.bash_profile,.zprofile,.bash_login,.zshenv,.kshrc,crontab,.crontab}",
+  "**/.config/fish/config.fish",
+  # System trees. Nothing an agent is asked to do belongs in them.
+  "/{etc,usr,bin,sbin,boot,lib,lib64,opt,System}/**",
+  # The approval policy itself. An agent that can rewrite its own envelope has
+  # none.
+  "**/hitl-policy*.json",
+  # Config keys and hooks under .git are commands, not project files.
+  "{**/.git/**,.git/**}",
+]
+
+# Edits land without asking; the shell still asks. auto_edit means edits, not
+# execution, and nothing here grants more than the posture above.
+#
+# The write wall is restated rather than inherited: a child that changes a grant
+# replaces the whole axis value, deny_paths included, so leaving it out would
+# widen the wall away exactly where the widest posture needs it most.
+[envelopes.auto_edit]
+extends = "ask_always"
+description = "Edit without asking; run nothing without asking."
+
+[envelopes.auto_edit.files.write]
+grant = "allow"
+deny_paths = [
+  "**/{.ssh,.gnupg}/**",
+  "**/{.config/autostart,.config/systemd/user,Library/LaunchAgents,Library/LaunchDaemons}/**",
+  "**/{.bashrc,.zshrc,.profile,.bash_profile,.zprofile,.bash_login,.zshenv,.kshrc,crontab,.crontab}",
+  "**/.config/fish/config.fish",
+  "/{etc,usr,bin,sbin,boot,lib,lib64,opt,System}/**",
+  "**/hitl-policy*.json",
+  "{**/.git/**,.git/**}",
+]
+
+# The floor. Every surface that does not name an envelope lands here, and every
+# name that fails to resolve lands here too, so this one is not optional and not
+# removable: a build without it degrades to the no-file fallback, which asks on
+# everything.
+#
+# It is ask_always with the shell spelled out in tiers and with ceilings on what
+# one detached mission may spend. Attached sessions ignore the ceilings; a
+# fire-and-detach mission has nobody watching it, so unbounded would mean a
+# runaway spending real money unchecked. A mission that crosses one finishes at
+# status "stuck" with the reason named.
+[envelopes.default]
+extends = "ask_always"
+description = "The default envelope: read freely, ask before writing or running."
+default_action = "approve"
+# Reserved intent, not a grant. Nothing in this build serves either axis; the
+# reading half was open and the writing half asked, and that is what a revived
+# native web toolset should come back to.
+network.read = "allow"
+network.write = "approve"
+# A mission may start another mission, and its routine questions may be answered
+# by an agent — the firing session's own, or the oracle mounted by
+# `contenox mission fire --oracle` — up to the count in [attention] below. The
+# rest wait for a human, the count is durable per mission, and whatever the unit
+# then DOES stays gated by this same envelope.
+missions.fire = "allow"
+missions.answer = "allow"
+
+[envelopes.default.files.read]
+grant = "allow"
+approve_paths = ["**/{*.pem,*.key,.env,.env.*}"]
+
+[envelopes.default.files.write]
+grant = "approve"
+deny_paths = [
+  "**/{.ssh,.gnupg}/**",
+  "**/{.config/autostart,.config/systemd/user,Library/LaunchAgents,Library/LaunchDaemons}/**",
+  "**/{.bashrc,.zshrc,.profile,.bash_profile,.zprofile,.bash_login,.zshenv,.kshrc,crontab,.crontab}",
+  "**/.config/fish/config.fish",
+  "/{etc,usr,bin,sbin,boot,lib,lib64,opt,System}/**",
+  "**/hitl-policy*.json",
+  "{**/.git/**,.git/**}",
+]
+
+# The shell in five tiers, tried in the order written: blacklist, substitution,
+# prefix_allowlist, ask_always, then the grant as the floor.
+#
+# `blacklist` and `ask_always` match a bare command name — the basename of the
+# program actually being run, so a path or a pipeline cannot smuggle one past.
+# `prefix_allowlist` matches a whole line by its opening words and refuses to fire
+# if the line carries a redirect or a metacharacter, since an allowlisted reader
+# with a `>` on it is a writer. Every git verb is deliberately off it: a git
+# subprocess can execute repository-local config even on a read.
+[envelopes.default.shell]
+grant = "approve"
+blacklist = ["mkfs", "mke2fs", "fdisk", "shred", "wipefs"]
+# A line containing $() or backticks asks, whatever verb it starts with.
+substitution = "approve"
+prefix_allowlist = [
+  "go build", "go test", "go vet", "go list", "go doc", "go env", "go version",
+  "gofmt -l", "gofmt -d",
+  "ls", "cat", "head", "tail", "wc", "pwd", "echo", "grep", "rg",
+  "npm test", "npm ls", "tsc --noEmit", "eslint", "vitest run", "jest",
+  "pytest", "python -m pytest", "python3 -m pytest", "ruff check", "mypy",
+  "pip list", "pip show",
+]
+# Commands that delete, escalate or overwrite ask regardless of the allowlist
+# beside them. The last two are the redirection forms, so that a line whose only
+# effect is to overwrite a file is treated like the write it is.
+ask_always = ["rm", "sudo", "dd", "chmod", "chown", "mv", "cp", ">:", ">>"]
+
+[envelopes.default.compute]
+max_tool_calls = 300
+max_tokens = 2000000
+on_exhausted = "finish_stuck"
+
+[envelopes.default.attention]
+allow_agent_answers = true
+max_agent_answers = 3
+
+# The deliberate step up from default, and the one to name when a session should
+# refuse rather than ask. Two things earn it a name of its own: anything unnamed
+# is denied instead of offered for approval, and the shell loses its allowlist
+# tier entirely, so every command line asks — including `ls`. Nothing else in the
+# shipped set combines those.
+#
+# Everything else it inherits: the same quarantine, the same write wall, the same
+# read-on-approval for secrets.
+[envelopes.strict]
+extends = "ask_always"
+description = "Refuse what is not named; ask about everything that is."
+default_action = "deny"
+network.read = "allow"
+network.write = "approve"
+# Human only. A mission running under this envelope waits for a person.
+missions.answer = "deny"
+
+[envelopes.strict.shell]
+grant = "approve"
+blacklist = ["mkfs", "mke2fs", "fdisk", "shred", "wipefs"]
+substitution = "approve"
+ask_always = ["rm", "sudo", "dd", "chmod", "chown", "mv", "cp", ">:", ">>"]
+
+[envelopes.strict.compute]
+max_tool_calls = 150
+max_tokens = 1000000
+on_exhausted = "finish_stuck"
+
+# The envelope for a driver you did not write. It differs from strict on one
+# word: deny, not ask. There is no approval prompt worth showing for a session
+# whose prompts you do not control, so writes and the shell are refused outright
+# rather than offered, and secret paths are refused on read rather than escalated
+# — asking about a file is already telling the asker the file is there.
+[envelopes.acpx]
+extends = "read_only"
+description = "Untrusted driver: read the workspace, refuse the rest."
+default_action = "deny"
+missions.answer = "deny"
+
+[envelopes.acpx.files.read]
+grant = "allow"
+deny_paths = ["**/{*.pem,*.key,.env,.env.*}"]
+
+# Reserved intent, not a grant — nothing in this build serves these. The host
+# list is the part worth keeping: loopback and the cloud metadata endpoints are
+# how a credential is fetched from inside the machine rather than read off it, so
+# a revived web toolset must come back to a closed door and not to this list
+# having been forgotten.
+[envelopes.acpx.network.read]
+grant = "deny"
+deny_hosts = [
+  "localhost", "127.0.0.1", "0.0.0.0", "::1",
+  "169.254.169.254", "169.254.170.2",
+  "metadata.google.internal", "metadata.azure.com",
+]
+
+[envelopes.acpx.network.write]
+grant = "deny"
+deny_hosts = [
+  "localhost", "127.0.0.1", "0.0.0.0", "::1",
+  "169.254.169.254", "169.254.170.2",
+  "metadata.google.internal", "metadata.azure.com",
+]
+
+[envelopes.acpx.compute]
+max_tool_calls = 150
+max_tokens = 1000000
+on_exhausted = "finish_stuck"
+
+# The oracle adjudication chain, and the only pure allowlist in the set: one
+# toolset granted, everything else denied. Denied rather than approved because
+# nobody watches this chain to answer an ask, and an ask it raised would be
+# offered back to itself.
+#
+# Both attention halves are off for the same reason: the oracle exists to
+# adjudicate somebody else's asks, never its own. It executes nothing, so no
+# command or prefix rule exists here to be subverted through PATH.
+[envelopes.oracle]
+description = "The adjudication chain: submit a verdict, reach nothing else."
+default_action = "deny"
+missions.answer = "deny"
+
+[envelopes.oracle.tools]
+# The toolset, not the two tools by name: it is served in-process and its whole
+# surface is the verdict tool and the deterministic state gate behind it. A
+# verdict that answers or approves is still bounded by the attention block of the
+# envelope the mission itself runs under.
+"oracle.*" = "allow"
+
+[envelopes.oracle.compute]
+on_exhausted = "finish_stuck"
+
+# `contenox serve` is the MCP host, and this envelope is the shape of the host
+# rather than a tightening of it. The host mounts missions and the MCP servers you
+# configured; it mounts no filesystem and no shell at all, and a declaration
+# asking for one is refused at mount time rather than at approval time. Saying so
+# here is the point: an operator reads why the refusal happened without reading
+# the source.
+#
+# default_action stays at approve because the capabilities that do arrive are the
+# ones you connected, and nothing here can know what they do. Name them — an MCP
+# server appears under its own name, so `"github.*" = "approve"` or
+# `"tavily.search" = "allow"` in a [envelopes.serve.tools] block of your own is
+# how a connected tool stops asking.
+[envelopes.serve]
+description = "The MCP host: missions and the servers you connected, nothing local."
+default_action = "approve"
+files.read = "deny"
+files.write = "deny"
+shell = "deny"
+network.read = "deny"
+network.write = "deny"
+missions.fire = "allow"
+missions.answer = "allow"
+
+[envelopes.serve.compute]
+max_tool_calls = 300
+max_tokens = 2000000
+on_exhausted = "finish_stuck"
+
+[envelopes.serve.attention]
+allow_agent_answers = true
+max_agent_answers = 3
+
 [naming]
 # Prefix an agent read from another tool's directory with that tool's name, so
 # a `reviewer` in .claude/agents/ and one in .agents/agents/ stay two agents

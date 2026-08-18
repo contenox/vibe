@@ -14,7 +14,7 @@ There is no YAML file — register backends and set defaults using CLI commands.
 Contenox has two layers of state:
 
 - **Global state** — one shared database at `~/.contenox/local.db`. Holds backends, provider configuration, sessions, MCP registrations, and defaults. Shared by every project on your machine.
-- **Global runtime files** — `~/.contenox/` also holds `agents.toml`, an `agents/` directory for agents you want everywhere, the shipped HITL policy presets, and the shipped chain files under `~/.contenox/system/`.
+- **Global runtime files** — `~/.contenox/` also holds `agents.toml` (which carries the `[envelopes.*]` sections), an `agents/` directory for agents you want everywhere, the transpiled envelopes and compiled chains under `~/.contenox/.generated/`, and the shipped chain files under `~/.contenox/system/`.
 - **Workspace state** — one `.contenox/` directory per project, containing a `workspace.id` file (a UUID written on `contenox init`), this project's [agent declarations](/docs/guide/agents/) and `agents.toml`, and any chain or policy files that override a global one by name. Each workspace scopes its own messages and workspace-specific config overrides inside the single global database.
 
 Files resolve by name, workspace first: the workspace `.contenox/`, then `~/.contenox/`, then `~/.contenox/system/`. Copying a shipped chain up out of `system/` is how you take ownership of it.
@@ -118,9 +118,33 @@ contenox config list   # review current settings and their scope
 | `log-max-files` | global | How many host log files to keep, counted across every date and part (integer; `0` = unlimited; default 14) |
 | `log-max-age-days` | global | Delete host logs whose date is older than this many days (integer; `0` = no age limit; default 14) |
 | `default-chain` | workspace | Chain file used in this workspace; falls back to the global value when unset |
-| `hitl-policy-name` | workspace | Active HITL policy for this workspace; falls back to the global value when unset |
+| `hitl-policy-name` | workspace | Active HITL policy for this workspace; falls back to the global value when unset. Takes an envelope's filename (`hitl-policy-strict.json`) |
 
 `contenox config list` shows each key's current value **and its scope** (`global` / `workspace`) so you can see whether a setting is inherited or overridden locally.
+
+### Which envelope a surface runs under
+
+`hitl-policy-name` is the persistent setting. Per run, `--hitl-policy` overrides
+it on `beam`, `acp`, `acpx` and `serve`, and each surface resolves in three
+steps:
+
+1. **`--hitl-policy <name-or-path>`.** A value carrying a path separator is a
+   path and is used **verbatim** — that exact file, and a missing one is an error
+   rather than a fallback. Anything else is an envelope name; `strict` and
+   `hitl-policy-strict.json` name the same one.
+2. **Your own file** — a top-level `hitl-policy-<name>.json` in the workspace
+   `.contenox/`, then `~/.contenox/`.
+3. **The transpiled envelope**, rendered from `[envelopes.<name>]` in
+   [`agents.toml`](/docs/reference/agents-config/#envelopesname) into
+   `.generated/hitl-policy-<name>.json` on every run.
+
+```bash
+contenox beam --hitl-policy strict                       # by envelope name
+contenox serve ~/src/api --hitl-policy ./ops/locked.json # by path, verbatim
+```
+
+Full detail, including what happens when a name resolves to nothing, is in
+[Policy resolution order](/docs/guide/hitl/#policy-resolution-order).
 
 The `default-*` model settings can also be overridden per process — without persisting anything — via the `CONTENOX_DEFAULT_*` environment variables, and `opt-in-beta` via `CONTENOX_OPT_IN_BETA`; see the [environment variables table](/docs/reference/contenox-cli/#environment-variables) in the CLI reference.
 

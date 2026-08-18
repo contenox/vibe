@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/contenox/contenox/internal/services/agentdecl"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
 )
@@ -35,9 +36,12 @@ func TestUnit_GlobalInit_LeavesNoChainJSONAtTheTopLevel(t *testing.T) {
 	for _, f := range initChainFiles {
 		require.FileExists(t, filepath.Join(contenoxDir, SystemDirName, f.Name))
 	}
-	// The envelopes stay in view: they are what the agent runs under, and the
-	// whole point is that a human can read and argue with them.
-	require.FileExists(t, filepath.Join(contenoxDir, "hitl-policy-default.json"))
+	// The envelopes stay in view, but as the source an operator argues with:
+	// agents.toml at the top level, and the policy it transpiles to under
+	// .generated where every derived file lives.
+	require.NoFileExists(t, filepath.Join(contenoxDir, "hitl-policy-default.json"),
+		"nothing seeds a top-level policy any more; that filename is the operator's to claim")
+	require.FileExists(t, filepath.Join(contenoxDir, agentdecl.GeneratedDirName, "hitl-policy-default.json"))
 	require.FileExists(t, filepath.Join(contenoxDir, "agents.toml"))
 }
 

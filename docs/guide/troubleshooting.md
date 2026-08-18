@@ -86,19 +86,27 @@ For a local Ollama, `doctor` will probe your Ollama URL (`OLLAMA_HOST`, or `http
 
 If you just fixed a key, rerun `doctor` without `--skip-cycle` so the backend cycle actually re-runs.
 
-## `doctor` says a HITL policy preset is stale
+## `doctor` says a HITL policy copy is stale
 
 **Symptom.** A line naming a policy file by full path, saying it predates one or more toolsets.
 
-**Cause.** The policy file on disk carries no rule for a toolset the same-named preset in this build rules on — the envelope is older than the tools. This is invisible from the inside: it is not an error, it is calls to those tools quietly falling through to the file's `default_action`. With a fail-closed default that means an approval card per read; with `default_action: allow` it means those calls run unreviewed.
+**Cause.** A top-level `hitl-policy-*.json` — one an earlier build seeded into `~/.contenox`, or one you wrote — carries no rule for a toolset this build rules on. This is invisible from the inside: it is not an error, it is calls to those tools quietly falling through to the file's `default_action`. With a fail-closed default that means an approval card per read; with `default_action: allow` it means those calls run unreviewed.
 
-**Fix.**
+It only ever means a copy you own. A file under `.generated/` is transpiled from `agents.toml` on every run, so it cannot be stale and is never reported.
+
+**Fix.** Either delete the copy, which lets the search path fall through to the transpiled envelope of the same name:
+
+```bash
+rm ~/.contenox/hitl-policy-default.json
+```
+
+Or refresh it in place:
 
 ```bash
 contenox init --refresh-policies
 ```
 
-This rewrites **only** the `hitl-policy-*.json` presets, in `~/.contenox` and in any workspace `.contenox` copy that shadows it. Chains, config, and sessions are untouched — but your own edits to those policy files are replaced. If you hand-authored a preset, copy it out first, or add the missing rules yourself: the notice stops the moment the file gains them, by refresh or by your own hand.
+This rewrites the top-level `hitl-policy-*.json` copies **that are already there**, in `~/.contenox` and in any workspace `.contenox` that shadows one. It never creates a file and never touches `.generated/`. Chains, config, and sessions are untouched — but your own edits to those policy files are replaced. If you hand-authored one, copy it out first, or add the missing rules yourself: the notice stops the moment the file gains them, by refresh or by your own hand.
 
 A policy never gates which tools the model can *see* — that is the chain's tool allowlist. It gates what happens when one is called.
 

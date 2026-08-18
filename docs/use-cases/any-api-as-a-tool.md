@@ -32,18 +32,19 @@ Register an HTTP API as a tool with the credential hidden from the model, the en
 
 4. For an interactive, device-owner session (`contenox beam`, or `contenox acp` from Zed or JetBrains), calls route through HITL: allow, deny, or approve per call, per your active policy.
 
-5. For an untrusted, non-interactive driver (`contenox acpx` — see [Use from OpenClaw](/docs/integrations/editors/openclaw/)), add an explicit `allow` rule for the tool to `hitl-policy-acpx.json`:
+5. For an untrusted, non-interactive driver (`contenox acpx` — see [Use from OpenClaw](/docs/integrations/editors/openclaw/)), name the tool in the `acpx` envelope in `agents.toml`:
 
-   ```json
-   { "tools": "crm", "tool": "read_contacts", "action": "allow" }
+   ```toml
+   [envelopes.acpx.tools]
+   "crm.read_contacts" = "allow"
    ```
 
-   `hitl-policy-acpx.json` defaults to `default_action: deny`. Registering a tool does not make it callable under `acpx` — until a rule allows it explicitly, the assistant is refused with no prompt and no error.
+   The `acpx` envelope is `default_action = "deny"`. Registering a tool does not make it callable under `acpx` — until you name it, the assistant is refused with no prompt and no error. A tool you connected is reached by its own name here; no capability axis covers it.
 
 ## Expected outcome
 
 - A device-owner session can call the tool and, for any call your policy gates, is prompted to approve or deny it.
-- An `acpx` session can call only the tools you explicitly allowed in its policy file — everything else is silently refused.
+- An `acpx` session can call only the tools you explicitly named in its envelope — everything else is silently refused.
 
 ## Where to next
 

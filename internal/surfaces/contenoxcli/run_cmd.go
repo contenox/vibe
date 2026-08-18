@@ -39,10 +39,17 @@ default-mission-policy config — which is what bounds what the task may touch.
 The mission record and every report survive in the local store, so a run whose
 output was discarded can still be read back with 'contenox mission show'.
 
+Piped stdin is the material the task is about. A dispatch carries one intent and
+nothing else, so the piped body travels inside it, appended to the task between
+'--- begin piped stdin ---' and '--- end piped stdin ---'. Saying the task as one
+sentence lets you drop the word 'run' entirely: 'contenox "<task>"' is this
+command, and a pipe into it is this command too.
+
 Examples:
   contenox run "regenerate the API docs from the openapi spec"
   contenox run reviewer "check the last commit for regressions"
   contenox run "summarise what npm audit wants upgraded" --timeout 5m
+  git diff | contenox run "review this and say what I should check myself"
 
 Quote the task as ONE argument. See declared agents with 'contenox agent list'.`,
 	Args: cobra.RangeArgs(1, 2),
@@ -53,6 +60,21 @@ func init() {
 	runCmd.Flags().String("policy", "", "Mission envelope: the HITL policy bounding the unit (default: the default-mission-policy config)")
 	runCmd.Flags().Duration("timeout", defaultRunTimeout, "Maximum time to wait for a terminal status before tearing the unit down")
 	rootCmd.AddCommand(runCmd)
+}
+
+const (
+	stdinBodyOpen  = "--- begin piped stdin ---"
+	stdinBodyClose = "--- end piped stdin ---"
+)
+
+// attachPipedStdin puts the piped body inside the task text, delimited: a
+// dispatch carries an intent and no second channel to hang an attachment on.
+func attachPipedStdin(task, body string) string {
+	body = strings.Trim(body, "\n")
+	if strings.TrimSpace(body) == "" {
+		return task
+	}
+	return task + "\n\n" + stdinBodyOpen + "\n" + body + "\n" + stdinBodyClose
 }
 
 // runTarget reads `run [agent] "<task>"`: one argument is the task alone.
@@ -67,6 +89,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 	agent, task := runTarget(args)
 	if task == "" {
 		return fmt.Errorf("the task is empty: contenox run %q \"<task>\"", agent)
+	}
+	if body, piped := pipedStdin(); piped {
+		task = attachPipedStdin(task, body)
 	}
 
 	stdout, stderr := cmd.OutOrStdout(), cmd.ErrOrStderr()

@@ -48,7 +48,7 @@ are. Those agents are prefixed with the tool they came from (`reviewer` becomes
 | `description` | yes | when to reach for it |
 | `tools` | no | the tools it may call. **Omitted inherits every tool** — name them to narrow it |
 | `model` | no | routing stays on your configured default unless you pin it |
-| `permissionMode` | no | `acceptEdits` auto-accepts file writes; otherwise writes and shell ask you first |
+| `permissionMode` | no | `acceptEdits` auto-accepts file writes; otherwise writes and shell ask you first. It resolves through the shipped `read_only` / `ask_always` / `auto_edit` [envelopes](/docs/reference/agents-config/#envelopesname), which is where the grant is written down |
 | `effort` | no | reasoning effort: `low`, `medium`, `high`, `xhigh` |
 | `maxTurns` | no | tightens how much one run may spend |
 | `mcpServers` | no | MCP servers this agent may reach, or ones it brings itself — see [Tools an agent brings with it](#tools-an-agent-brings-with-it) |
@@ -267,7 +267,8 @@ rules for the tools contenox hosts. It has no rule for `tavily.search`, so a
 newly connected tool falls through to `default_action` — `approve` — and asks
 you on every call.
 
-To let it run unattended, give it a rule in `agents.toml`:
+To let it run unattended, give it a rule in `agents.toml` — either for every
+agent:
 
 ```toml
 [[policy.always_allow]]
@@ -275,11 +276,25 @@ tools = "tavily"
 tool = "search"
 ```
 
+or in the [envelope](/docs/reference/agents-config/#envelopesname) a session runs
+under, where you can also put it on the `approve` tier rather than releasing it
+outright:
+
+```toml
+[envelopes.default.tools]
+"tavily.search" = "allow"
+"github.*" = "approve"
+```
+
 Two rules apply to every agent and cannot be overridden:
 
 - Filesystem access to `.ssh`, `.aws`, `.kube` and gcloud config is denied under
-  every permission setting.
-- `permissionMode: bypassPermissions` is refused.
+  every permission setting. The shipped envelopes go further — key stores,
+  keyrings, wallets, browser profiles and shell history are denied on the
+  `read_only` base every posture extends, so they are denied under the most
+  permissive posture exactly as under the strictest.
+- `permissionMode: bypassPermissions` is refused. It names no envelope, so there
+  is nothing to write down and nothing to review.
 
 ## Branching: the directory is the chain
 

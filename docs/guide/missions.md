@@ -25,12 +25,14 @@ A mission dispatches a **unit**: a child subprocess running the agent, with its 
 
 ## The envelope
 
-Every mission names an envelope at fire time, and a dispatch with no envelope is refused — there is no implicit default inside the runtime. The envelope is an ordinary [HITL policy file](/docs/guide/hitl/) resolved by name along the policy search path (the workspace `.contenox/` first, then `~/.contenox/`, first match wins), and it supplies:
+Every mission names an envelope at fire time, and a dispatch with no envelope is refused — there is no implicit default inside the runtime. The envelope supplies:
 
 - the per-tool `allow`/`approve`/`deny` rules the unit's tool calls are judged against,
 - the `attention` bounds — whether an agent may answer this unit's questions, and how many,
 - the `compute` ceilings (see [Compute bounds](#compute-bounds-and-what-actually-enforces-them)),
 - the model and backend allowlists the unit resolves within.
+
+You write it as a named `[envelopes.<name>]` section in [`agents.toml`](/docs/reference/agents-config/#envelopesname), and the runtime transpiles it into the [HITL policy file](/docs/guide/hitl/) a mission is fired under. It is resolved **by that file's name** along the policy search path — the workspace `.contenox/`, then `~/.contenox/`, then each of their `.generated/` directories, first match wins — so a `hitl-policy-<name>.json` you wrote yourself shadows the transpiled one of the same name, and the mission runs under whichever the search path found first.
 
 Binding the envelope **at fire time** is the point. The name is written into the mission record and shown by `mission list` and `mission show`, so the bounds a unit ran under are a durable fact you can read back later — not a global setting that may have changed since. Two missions fired an hour apart under different envelopes stay distinguishable forever.
 
@@ -40,6 +42,8 @@ contenox mission fire agent-planner "audit the config loader for unhandled error
 ```
 
 Without `--policy`, the envelope comes from the `default-mission-policy` config key. If neither is set, the fire is refused rather than guessing.
+
+`mission fire` renders every declared envelope before it resolves the name, so an envelope you added to `agents.toml` a moment ago is fireable without an `init` in between.
 
 ## States
 
@@ -168,7 +172,9 @@ An envelope's optional `compute` block declares ceilings. Every field is opt-in 
 
 Crossing an enforced bound is never silent: the mission is finished `stuck` with a reason led by `compute bound exhausted`, naming the bound it crossed.
 
-Nothing catches an over-declared bound at author time. `contenox vet` is silent about `maxToolCalls` and `maxTokens` — its `WARN` lines cover only trusted-binary declarations that no longer match this host. What carries the disclosure is the `//compute-fields` note each shipped preset keeps in its own file, and the `declared, not enforced` label in the `/mission` envelope picker.
+In an envelope these are the `[envelopes.<name>.compute]` keys, in TOML spelling — `max_tool_calls`, `max_tokens`, `max_turns`, `on_exhausted`, `model_allowlist`, `backend_allowlist` — and the transpiler carries them through unchanged.
+
+Nothing catches an over-declared bound at author time. `contenox vet` is silent about `max_tool_calls` and `max_tokens` — its `WARN` lines cover only trusted-binary declarations that no longer match this host. What carries the disclosure is this table, the `declared, not enforced` label in the `/mission` envelope picker, and — on a top-level policy copy an earlier build seeded — the `//compute-fields` note in the file itself. A transpiled envelope carries no such note: it states where it came from instead, and the enforcement table lives here.
 
 ## End to end
 
@@ -239,7 +245,8 @@ contenox mission stop 9f3c… --reason "requirements changed"
 ## Next
 
 - [Declaring agents](/docs/guide/agents/) — the file you fire at
-- [HITL policies](/docs/guide/hitl/) — the envelope format, the presets, and the `attention` bounds
+- [HITL policies](/docs/guide/hitl/) — where an envelope comes from, the shipped set, and the `attention` bounds
+- [`[envelopes.<name>]`](/docs/reference/agents-config/#envelopesname) — the axis grammar you write one in
 - [Troubleshooting](/docs/guide/troubleshooting/) — a mission stuck in `open`, recovering after a crash, and `doctor --bundle`
 - [The oracle](/docs/use-cases/auto-attention/) — an adjudicating agent that answers a subagent's routine asks so unattended runs finish
 - [Authored approval](/docs/use-cases/authored-approval/) — the envelope as a reviewable artifact

@@ -1,14 +1,16 @@
 ---
 title: HITL Policies
-description: Control which tool calls require human approval using named policy presets.
+description: Control which tool calls require human approval. You write an envelope in agents.toml; the runtime transpiles it into the policy the approval engine evaluates.
 order: 9
 ---
 
 # HITL Policies
 
-Human + AI collaboration in contenox is an authored, versioned artifact — not a runtime default. The policy file decides what runs unattended, what pauses to ask a human, and what is denied outright, and it is diffable and swappable like any other file in your repo. Because approvals are durable, a question waits for a person instead of timing out: an unanswered ask checkpoints the run, and answering it later — from any terminal — resumes execution exactly once. A parked turn says so rather than going quiet, and a client that reconnects is shown the question again; see [What a parked approval looks like](#what-a-parked-approval-looks-like). For how these controls fit a sovereignty and oversight posture, see [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/).
+Human + AI collaboration in contenox is an authored, versioned artifact — not a runtime default. The policy decides what runs unattended, what pauses to ask a human, and what is denied outright, and it is diffable and swappable like any other file in your repo.
 
-The file format has a published JSON Schema, generated from the Go types that load it: [`hitl-policy-v1.schema.json`](/schema/hitl-policy-v1.schema.json). Add it as `$schema` in your policy file and your editor validates as you type. The chain format is at [`task-chain.schema.json`](/schema/task-chain.schema.json).
+You do not normally write that policy by hand. You write an **envelope** — a named `[envelopes.<name>]` section in [`agents.toml`](/docs/reference/agents-config/#envelopesname) — and the runtime transpiles it into the JSON below. An envelope transpiles to a policy; the approval engine is unchanged either way. See [Where a policy comes from](#where-a-policy-comes-from). Because approvals are durable, a question waits for a person instead of timing out: an unanswered ask checkpoints the run, and answering it later — from any terminal — resumes execution exactly once. A parked turn says so rather than going quiet, and a client that reconnects is shown the question again; see [What a parked approval looks like](#what-a-parked-approval-looks-like). For how these controls fit a sovereignty and oversight posture, see [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/).
+
+The file format has a published JSON Schema, generated from the Go types that load it: [`hitl-policy-v1.schema.json`](/schema/hitl-policy-v1.schema.json). Add it as `$schema` in your policy file and your editor validates as you type; every transpiled envelope and every emitted per-agent policy already carries it. The chain format is at [`task-chain.schema.json`](/schema/task-chain.schema.json).
 
 Human-in-the-loop (HITL) lets you intercept tool calls before they execute and decide — approve, block, or let them pass automatically — based on a named policy file.
 
@@ -46,7 +48,62 @@ An approval nobody has answered yet does not fail and does not hang. The run che
 
 **Any terminal can still answer.** None of the above is required. `contenox approvals list` shows every pending ask and `contenox approvals respond` answers one from any terminal, whether or not a client is attached — see [`contenox approvals`](/docs/reference/contenox-cli/#contenox-approvals). Whichever route answers first wins: a row becomes terminal exactly once, so a prompt answered on a second screen after the verdict landed is discarded rather than applied twice.
 
+## Where a policy comes from
+
+An **envelope** is a permission surface with a name. It states what a session may
+reach — files, shell, network, missions, the tools you connected — in a
+vocabulary of capability axes, and the runtime compiles it into the rules below.
+Nothing about the evaluation engine changes; the envelope is only the vocabulary
+the rules are written in.
+
+```toml
+# ~/.contenox/agents.toml
+[envelopes.review]
+extends = "read_only"
+description = "Read the tree, run the test suite, change nothing."
+
+[envelopes.review.shell]
+grant = "deny"
+prefix_allowlist = ["go test", "go vet"]
+```
+
+**The name is the whole identity.** Envelope `review` transpiles to
+`hitl-policy-review.json`, and `--hitl-policy review`,
+`--hitl-policy hitl-policy-review.json` and
+`config set hitl-policy-name hitl-policy-review.json` all resolve to it. The
+filename rule is exactly `"hitl-policy-" + name + ".json"` — the same rule
+per-agent policies follow, so the two families share one namespace and a
+collision between a declared agent and an envelope is a startup error rather
+than a silent overwrite.
+
+The rendered file lands in `.generated/`, is stamped with the section it came
+from, and is rewritten on every run:
+
+```
+~/.contenox/.generated/hitl-policy-review.json
+```
+
+That directory is derived and disposable. Edit the envelope, not the render —
+and if you want a file of your own, write
+`~/.contenox/hitl-policy-review.json` at the top level instead, where the search
+path puts it ahead of the render and nothing rewrites it. [`contenox vet`](/docs/reference/contenox-cli/#contenox-vet-path)
+says so when it finds one, because a shadowed render means editing `agents.toml`
+changes nothing.
+
+The full axis grammar — the seven axes, their refinements, `extends`, and the
+order the rules come out in — is in
+[`[envelopes.<name>]`](/docs/reference/agents-config/#envelopesname).
+
+> **Migrating:** an existing `hitl-policy-*.json` keeps winning. Nothing rewrites
+> the top-level copies earlier builds seeded into `~/.contenox/`, and while one is
+> there it is the file that gates your runs. Delete it to fall through to the
+> envelope, or keep it and ignore the envelope of that name.
+
 ## Policy file format
+
+This is what an envelope compiles to, and what the engine loads. Read it when you
+want to know what a rendered envelope actually did, or when you are writing a
+policy file by hand.
 
 A policy is a JSON file with an optional `default_action` and a list of `rules`:
 
@@ -80,8 +137,8 @@ resumes the run until something lists the inbox.
 
 Of the compute bounds, `maxTokens` applies when a unit's provider reports usage
 and is inert when it does not, and `maxToolCalls` is validated at parse time and
-enforced by the unattended permission answerer. Each shipped preset records this
-in its own `//compute-fields` note.
+enforced by the unattended permission answerer. Which bound is enforced how is
+tabulated in [Compute bounds](/docs/guide/missions/#compute-bounds-and-what-actually-enforces-them).
 
 ### Condition operators (`when[].op`)
 
@@ -141,6 +198,23 @@ mission was fired in — and can separately let an **oracle** rule on gated call
 | `attention.allowAgentApprovals` | bool | Let the oracle approve or deny this subagent's `approve`-tier **tool calls**. Omitted/`false` (the default) means every gated call waits for a human. Separate from `allowAgentAnswers` on purpose: letting a model answer a question is a smaller grant than letting it release a gated call. |
 | `attention.maxAgentApprovals` | int | How many of this mission's gated calls the oracle may decide before the rest wait for a human. Omitted uses a default (20); `0` is **not** unlimited. Durable and actor-aware, same as the answer budget. |
 
+In an envelope this block is the `missions.answer` axis, which is the one axis
+whose carrier is not a rule — the mission toolset is exempt from approval, so
+delegation is read from `attention` instead:
+
+```toml
+[envelopes.mine]
+missions.answer = "allow"     # an agent may answer questions
+# missions.answer = "approve" # …and may also rule on gated calls
+# missions.answer = "deny"    # human only; the block is omitted entirely
+
+[envelopes.mine.attention]
+max_agent_answers = 2
+```
+
+An explicit `[attention]` key wins over what the axis would set, so the axis
+states the stance and the block puts a number on it.
+
 Together these are a delegation budget: an envelope may allow a bounded number
 of agent answers and agent-decided calls per mission, and once a bound is spent
 every further ask waits for a human. Every verdict — yours or an agent's —
@@ -159,46 +233,97 @@ agent-to-agent exchange you cannot see. When the agent does answer, it happens a
 a visible turn in your transcript, and the durable ask records that an agent (not
 a person) answered it.
 
-## Built-in presets
+## Shipped envelopes
 
-Contenox ships six policy presets, written to `~/.contenox/` by `contenox init`. (A workspace `.contenox/` file with the same name overrides the global one.) The first three are the general-purpose postures; the next two are the profiles the ACP editor transports load; the last is the pinned envelope of the [oracle](/docs/use-cases/auto-attention/).
+Contenox ships eight envelopes in `agents.toml`, transpiled into `.generated/` on
+every run. Nothing seeds a `hitl-policy-*.json` any more — a name resolves
+because the envelope behind it was rendered, not because a copy of a preset was
+written where your own file goes.
 
-| Name | Behaviour |
+Only envelopes that mean something ship. There is no one-to-one carry-over of the
+old preset filenames: `dev` is gone, and `acp` folded into `default`, which
+absorbed its two extra shell tokens (`>:` and `>>`).
+
+The first three are the postures a [declaration's](/docs/guide/agents/) permission
+setting resolves through; the rest are the profiles a surface runs under.
+
+| Envelope | Renders to | Behaviour |
+|---|---|---|
+| `read_only` | `hitl-policy-read_only.json` | Read the workspace, change nothing. The base of the chain, and where the **credential quarantine** rides: key stores, keyrings, wallets, browser profiles and shell history are denied on every `local_fs` tool, ahead of every grant, under the most permissive posture exactly as under the strictest |
+| `ask_always` | `hitl-policy-ask_always.json` | Read freely, ask before changing anything. Adds the **write wall** — anything that *runs* something (a shell rc, a systemd unit, a LaunchAgent, `.git/`, an approval policy) is denied outright rather than offered, because approving one is approving everything it will later do unattended |
+| `auto_edit` | `hitl-policy-auto_edit.json` | Edits land without asking; the shell still asks. `auto_edit` means edits, not execution |
+| `default` | `hitl-policy-default.json` | The floor, and **not optional**: every surface that names no envelope lands here, and so does every name that fails to resolve. `ask_always` with the shell spelled out in five tiers and with ceilings on what one detached mission may spend |
+| `strict` | `hitl-policy-strict.json` | Refuse what is not named; ask about everything that is. `default_action: deny`, and the shell loses its allowlist tier entirely, so every command line asks — including `ls` |
+| `acpx` | `hitl-policy-acpx.json` | The envelope for a driver you did not write. It differs from `strict` on one word: deny, not ask. Writes and the shell are refused rather than offered, and secret paths are refused **on read** rather than escalated — asking about a file is already telling the asker the file is there |
+| `oracle` | `hitl-policy-oracle.json` | The [oracle's](/docs/use-cases/auto-attention/) pinned envelope, and the only pure allowlist in the set: `default_action: deny` with the in-process `oracle.*` toolset allowed and nothing else. Inert until `default-oracle-chain` mounts the driver |
+| `serve` | `hitl-policy-serve.json` | [`contenox serve`](/docs/guide/serve/), stated structurally rather than tightened: `files.read`, `files.write` and `shell` all deny, because a standing host mounts no filesystem and no shell at all. What does arrive is the MCP servers you connected, so `default_action` stays `approve` — nothing here can know what they do |
+
+Each envelope also states who may answer a unit's question (see
+[`attention`](#who-may-answer-a-subagent-attention)) rather than inheriting the
+invisible default, and the stances follow each envelope's character:
+
+| Envelope | `missions.answer` |
 |---|---|
-| `hitl-policy-default.json` | Prompts for filesystem writes (`write_file`, `edit_file`, `sed`) and shell commands; allows reads (`read_file`, `read_file_range`); anything not matched by a rule fail-closes to approval (`default_action: "approve"`) |
-| `hitl-policy-strict.json` | Deny-by-default; only the rules listed are prompted |
-| `hitl-policy-dev.json` | `default_action: allow`, but explicit rules still gate `local_shell` (every shell call requires approval, and a fixed blacklist is always denied); useful for local development when you don't want prompts on filesystem calls. Unlike `hitl-policy-default.json` it carries **no secret quarantine** — its only rules cover the shell, so reads of `.ssh`, `.gnupg`, `.aws`, `.azure`, `.kube`, gcloud, browser profiles, wallets, shell history, `.netrc`, `.npmrc` and `id_rsa*` are not denied. Use it on a machine whose secrets you would not mind an agent reading |
-| `hitl-policy-acp.json` | Profile for editor (ACP) sessions — gated tool calls route through the editor's own approval UI |
-| `hitl-policy-acpx.json` | Hardened profile for headless / untrusted-driver (ACPX, e.g. OpenClaw) sessions — shell, writes, and network are denied outright rather than offered for approval |
-| `hitl-policy-oracle.json` | the [oracle's](/docs/use-cases/auto-attention/) pinned envelope — `default_action: deny` with exactly two allows, the in-process `oracle.submit_verdict` and `oracle.verdict_state` tools; no shell, filesystem, or network rule of any kind; seeded by init, inert until `default-oracle-chain` mounts the driver |
+| `default` | agent may answer, up to 3 — the mission path's floor: routine questions go to a session agent or the oracle, while whatever the subagent then *does* stays gated by this same envelope |
+| `serve` | agent may answer, up to 3 — a host has nobody sitting at it, and the questions it raises are about tools you connected |
+| `strict` | **human only** — an envelope whose character is "a human decides" does not hand the deciding to a model |
+| `acpx` | **human only** — an untrusted driver's agent must not answer its own subagent's escalation |
+| `oracle` | **human only**, on both halves — the oracle never adjudicates its own asks; a question the oracle chain raises waits for a human |
 
-Each preset also states who may answer a unit's question (see [`attention`](#who-may-answer-a-subagent-attention)) rather than inheriting the invisible default, and the stances follow each preset's character:
-
-| Name | `attention` |
-|---|---|
-| `hitl-policy-acp.json` | agent may answer, up to 3 — an editor session's agent holds the conversation the mission was fired in |
-| `hitl-policy-default.json` | agent may answer, up to 3 — the mission path's default envelope: routine questions (a session agent's, or the oracle's), while whatever the subagent then *does* stays gated by this same envelope; the file's `//attention` note documents the grant |
-| `hitl-policy-dev.json` | agent may answer, up to 5 — the permissive local-development posture |
-| `hitl-policy-strict.json` | **human only** — a policy whose character is "a human decides" does not hand the deciding to a model |
-| `hitl-policy-acpx.json` | **human only** — an untrusted driver's agent must not answer its own subagent's escalation |
-| `hitl-policy-oracle.json` | **human only**, on both halves — the oracle never adjudicates its own asks; a question the oracle chain raises waits for a human |
+The three postures state no `missions.answer` of their own: a posture describes
+what an agent may *do*, and who may answer for it is the profile's business.
 
 ## Selecting the active policy
+
+Per surface, for one run:
+
+```bash
+contenox beam --hitl-policy strict                       # an envelope by name
+contenox acp  --hitl-policy hitl-policy-strict.json      # the same envelope
+contenox serve ~/src/api --hitl-policy ./ops/locked.json # a file, used verbatim
+```
+
+Persistently, for a workspace:
 
 ```bash
 contenox config set hitl-policy-name hitl-policy-strict.json
 contenox config get hitl-policy-name   # verify
 ```
 
-This writes to the KV store and takes effect immediately — no restart required. The setting applies to all subsequent invocations in the same workspace.
+The config key writes to the KV store and takes effect immediately — no restart
+required. It applies to all subsequent invocations in the same workspace.
 
 ## Policy resolution order
 
-When HITL is enabled and a tool call needs evaluation, the engine resolves the policy as follows:
+Each surface resolves its envelope at startup, in three steps:
 
-1. Read the `hitl-policy-name` key from the KV store.
-2. If set, load that file from the workspace `.contenox/` directory, falling back to `~/.contenox/`.
-3. If the key is empty or the file is missing, fall back to `hitl-policy-default.json`.
-4. If that file is also missing, use a built-in fail-closed policy with no rules: every tool call, including reads, requires approval.
+1. **`--hitl-policy <name-or-path>`.** A value carrying a path separator is a
+   path and is honoured verbatim — that exact file, and a missing one is an error
+   rather than a fallback. Anything else is an envelope name, and both
+   `strict` and `hitl-policy-strict.json` name the same one.
+2. **Your own file.** A top-level `hitl-policy-<name>.json` in the workspace
+   `.contenox/`, then `~/.contenox/`, wins if it is there.
+3. **The transpiled envelope**, from `.generated/hitl-policy-<name>.json`.
+
+So the search path, strongest first, is:
+
+```
+.contenox/                    your workspace copy
+~/.contenox/                  your global copy
+.contenox/.generated/         the workspace's rendered envelopes
+~/.contenox/.generated/       the global rendered envelopes
+```
+
+Rendering is **self-healing**: every declared envelope is re-transpiled on every
+run, exactly as the profile's chain is. A render that fails while a readable copy
+is already on the path is reported and survived — a stale envelope still gates,
+an absent one does not. Only a name that resolves to nothing at all is fatal, and
+it names both what it looked for and where.
+
+Within a run, a tool call is then evaluated against the resolved policy. A
+workspace with `hitl-policy-name` set uses that name; empty or unresolvable falls
+back to `hitl-policy-default.json`, which is why the `default` envelope is not
+removable. If even that is missing, the engine uses a built-in fail-closed policy
+with no rules: every tool call, including reads, requires approval.
 
 A policy decides which tool calls need a human. It does not decide **where** the session may run: one instance serves one workspace, fixed when the instance was launched, and no policy widens or narrows it. See [Workspace authority](/docs/reference/contenox-cli/#workspace-authority).

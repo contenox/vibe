@@ -11,7 +11,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
 
 	"github.com/contenox/contenox/internal/kernel/reasoning"
 	"github.com/contenox/contenox/internal/models/modelrepo"
@@ -111,8 +113,38 @@ func dispatchSubcommand(args []string, onlyHelp bool) string {
 		return "beam"
 	case containsExperimentalACPFlag(args) && !firstNonFlagIsReserved(args):
 		return "acp"
+	case isImplicitRun(args):
+		return "run"
 	}
 	return ""
+}
+
+// pipedStdin is read at most once: the dispatch decision and the command it
+// dispatches to have to see the same bytes.
+var pipedStdin = sync.OnceValues(func() (string, bool) {
+	body, ok, err := readStdinIfAvailable(maxCLIStdinBytes)
+	if err != nil || !ok || strings.TrimSpace(body) == "" {
+		return "", false
+	}
+	return body, true
+})
+
+// isImplicitRun is the typo guard: a lone bare word is a mistyped subcommand
+// and must cost nothing, so only a sentence — or a pipe carrying the thing the
+// argument is about — is read as a task for `run`.
+func isImplicitRun(args []string) bool {
+	rest := nonFlagArgs(args)
+	if len(rest) != 1 || reservedSubcommands[rest[0]] {
+		return false
+	}
+	if _, piped := pipedStdin(); piped {
+		return true
+	}
+	return isSentence(rest[0])
+}
+
+func isSentence(s string) bool {
+	return strings.IndexFunc(strings.TrimSpace(s), unicode.IsSpace) >= 0
 }
 
 func recordStartupFailure(execErr error) {
@@ -140,19 +172,22 @@ func recordStartupFailure(execErr error) {
 }
 
 func firstNonFlagIsReserved(args []string) bool {
+	rest := nonFlagArgs(args)
+	return len(rest) > 0 && reservedSubcommands[rest[0]]
+}
+
+func nonFlagArgs(args []string) []string {
 	// Flags here do NOT consume the next token.
 	boolFlags := map[string]bool{
 		"--shell": true, "--trace": true, "--steps": true, "--raw": true,
 		"--no-delete-models": true, "--editor": true,
 		"-e": true, "-h": true, "--help": true, "-v": true, "--version": true,
 	}
+	var rest []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "--" {
-			if i+1 < len(args) {
-				return reservedSubcommands[args[i+1]]
-			}
-			return false
+			return append(rest, args[i+1:]...)
 		}
 		if strings.HasPrefix(a, "--") {
 			if strings.Contains(a, "=") || boolFlags[a] {
@@ -167,9 +202,9 @@ func firstNonFlagIsReserved(args []string) bool {
 			}
 			continue
 		}
-		return reservedSubcommands[a]
+		rest = append(rest, a)
 	}
-	return false
+	return rest
 }
 
 var rootCmd = &cobra.Command{
@@ -186,9 +221,14 @@ Ollama work out of the box; for local inference run Ollama or vLLM.
       contenox beam                # the terminal UI: your files, your shell, your approvals
       contenox acp                 # the same agent inside an ACP editor (Zed, JetBrains,
                                    #   AionUi), which the editor launches for you
+      contenox chat                # a plain conversation, nothing drawn: line in, answer out,
+                                   #   in a session that remembers ('-e' composes in $EDITOR)
 
     a program
       contenox run "<task>"        # one task, the report on stdout, an exit code to branch on
+      contenox "<task>"            # the same, said as a sentence — one bare word stays an
+                                   #   unknown command, so a typo never reaches a model
+      git diff | contenox "<task>" # a filter: stdin is the material the task is about
 
     an organization
       contenox serve               # a standing host reachable from the app, serving one
@@ -222,26 +262,33 @@ Ollama work out of the box; for local inference run Ollama or vLLM.
 
   Scope note:
     Backends and config are GLOBAL (stored in ~/.contenox/local.db).
-    Chain files and HITL policy presets are GLOBAL too: 'contenox init' writes
+    Chain files and agent declarations are GLOBAL too: 'contenox init' writes
     them to ~/.contenox/ and creates a per-project workspace marker
-    (.contenox/workspace.id). Run 'contenox init' once per project for the
-    marker; run 'contenox init --local' to seed workspace-local copies in
-    .contenox/ that override the global files by name.`,
+    (.contenox/workspace.id). Approval policies come from the [envelopes]
+    table in agents.toml, transpiled into .contenox/.generated/. Run
+    'contenox init' once per project for the marker; run 'contenox init --local'
+    to seed workspace-local copies in .contenox/ that override the global files
+    by name.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
 
 var initCmd = &cobra.Command{
 	Use:   "init [provider]",
-	Short: "Seed the default chain files and HITL policy presets; mark the project.",
-	Long: `Seed the default chain files and HITL policy presets, and mark the project.
+	Short: "Seed the default chain files and agent declarations; mark the project.",
+	Long: `Seed the default chain files and agent declarations, and mark the project.
 
-By default the chain files and the hitl-policy-*.json presets are written to
-~/.contenox/ and shared by every project; the project itself only gets a
-workspace marker (.contenox/workspace.id).
+By default the chain files and agents.toml are written to ~/.contenox/ and
+shared by every project; the project itself only gets a workspace marker
+(.contenox/workspace.id).
 With --local they are written into the workspace .contenox/ instead, creating
 deliberate workspace-local overrides — a same-named workspace file wins over
 the global copy.
+
+Approval policies are not seeded: each [envelopes.<name>] section in agents.toml
+is transpiled into .generated/hitl-policy-<name>.json on every run. A
+hitl-policy-<name>.json you write at the top level of .contenox/ or ~/.contenox/
+shadows the rendered one and is never rewritten.
 
 'contenox setup' is the recommended entry point and runs first: it picks a provider
 and model and registers the backend. Run init afterwards, once per project.
@@ -279,10 +326,11 @@ example default-acp-chain.json) to the chain-<role>-<variant>.json convention, b
 in ~/.contenox and the workspace .contenox both — before refreshing; hand-edited files keep
 their content under the new name.
 
-Use --refresh-policies to rewrite ONLY the HITL policy presets (hitl-policy-*.json) from
-this build — in ~/.contenox and in any workspace .contenox copy that shadows it. That is
-what 'contenox doctor' points at when an envelope predates a shipped toolset: it leaves
-chains, config and sessions alone, unlike --force.`,
+Use --refresh-policies to rewrite the hitl-policy-*.json copies an earlier build left at
+the top level of ~/.contenox or a workspace .contenox that shadows it. That is what
+'contenox doctor' points at when one of those copies predates a shipped toolset. It
+rewrites only files that are already there — never .generated/, which the envelopes own —
+and leaves chains, config and sessions alone, unlike --force.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInitCmd,
 }
@@ -361,8 +409,8 @@ func init() {
 	rootCmd.InitDefaultHelpCmd()
 	initCmd.Flags().BoolP("force", "f", false, "Overwrite existing files")
 	initCmd.Flags().Bool("update", false, "Update unchanged default files to the latest version; also renames shipped chain files still under a pre-v0.38 name to the chain-<role>-<variant>.json convention (content kept byte-for-byte)")
-	initCmd.Flags().Bool("refresh-policies", false, "Rewrite ONLY the HITL policy presets from this build, in ~/.contenox and any workspace .contenox copy that shadows it (chains, config and sessions are untouched; your edits to those policy files are replaced)")
-	initCmd.Flags().Bool("local", false, "Write the chain files and HITL policy presets into the workspace .contenox/ instead of ~/.contenox — same-named workspace copies override the global ones")
+	initCmd.Flags().Bool("refresh-policies", false, "Rewrite the hitl-policy-*.json copies already at the top level of ~/.contenox or a shadowing workspace .contenox (chains, config, sessions and .generated are untouched; your edits to those policy files are replaced)")
+	initCmd.Flags().Bool("local", false, "Write the chain files and agent declarations into the workspace .contenox/ instead of ~/.contenox — same-named workspace copies override the global ones")
 	initCmd.Flags().Bool("project", false, "Create a project marker in the CURRENT directory (a fresh workspace id), instead of reusing an ancestor's .contenox")
 	initCmd.Flags().String("name", "", "Friendly project name for the marker (default: the directory name)")
 

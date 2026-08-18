@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/contenox/contenox/internal/services/agentdecl"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/setupcheck"
 	"github.com/spf13/cobra"
@@ -88,6 +89,15 @@ func runHITLTrust(cmd *cobra.Command, args []string) error {
 	}
 	if !refresh && len(args) == 0 {
 		return fmt.Errorf("nothing to do: name at least one command or path, or pass --refresh or --list")
+	}
+	// A rendered envelope is rewritten from agents.toml on the next run, so a
+	// hash written into one is lost without a word. The declaration belongs in a
+	// file the operator owns.
+	if isRenderedPolicyPath(path) {
+		return fmt.Errorf("%s is rendered from [%s.%s] in %s and is rewritten on every run — a hash declared there would be silently discarded.\n"+
+			"Copy it to %s first (a top-level copy shadows the rendered one), then re-run; or pass --policy with an explicit path",
+			path, agentdecl.EnvelopeSection, strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), "hitl-policy-"), ".json"),
+			agentdecl.ConfigFilename, filepath.Join(contenoxDir, filepath.Base(path)))
 	}
 
 	updated := &hitlservice.TrustedBinaries{

@@ -98,7 +98,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to build engine: %w", err)
 	}
 	res := setupcheck.EnrichResultWithOllamaProbe(ctx, engine.SetupCheck)
-	res = setupcheck.AddStalePolicyPresetIssue(res, stalePolicyPresetIssues(policyDirs(contenoxDir), betaGatedToolsets(o.EffectiveOptInBeta)), RefreshPoliciesCommand)
+	res = setupcheck.AddStalePolicyPresetIssue(res, stalePolicyPresetIssues(operatorPolicyDirs(contenoxDir), betaGatedToolsets(o.EffectiveOptInBeta)), RefreshPoliciesCommand)
 	res = setupcheck.AddTrustedBinaryIssue(res, trustedBinaryDrift(policyDirs(contenoxDir)), TrustBinariesRefreshCommand)
 	vision := visionSummaryFromState(engine.State.Get(ctx), res.DefaultModel)
 	engine.Stop()

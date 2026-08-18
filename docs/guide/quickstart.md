@@ -19,6 +19,10 @@ curl -fsSL https://contenox.com/install.sh | sh
 
 Or download the binary directly from [GitHub Releases](https://github.com/contenox/contenox/releases/latest).
 
+The whole path — install, setup, first prompt — in one take:
+
+![Install demo: install.sh, contenox setup, and a first answer](/install.gif)
+
 ---
 
 ## 2. Connect a model
@@ -58,7 +62,7 @@ Run this once in each project directory you want Contenox to work in:
 contenox init
 ```
 
-This creates the project-local `.contenox/workspace.id` marker and seeds `agents/` and `agents.toml`. The HITL policy presets live in `~/.contenox`, the shipped chains under `~/.contenox/system/`; a workspace-local file with the same name overrides its global counterpart.
+This creates the project-local `.contenox/workspace.id` marker and seeds `agents/` and `agents.toml`. The approval envelopes are transpiled from `agents.toml` into `~/.contenox/.generated/`, the shipped chains sit under `~/.contenox/system/`; a workspace-local file with the same name overrides its global counterpart.
 
 ---
 
@@ -93,6 +97,10 @@ contenox beam
 ```
 
 That is the front door. `contenox` on its own opens the same thing.
+
+A first terminal conversation with a local model — backends listed, then a question answered in place:
+
+![contenox backend list showing local and hosted providers, then a first chat on a local model](/quickstart.gif)
 
 The transcript is your native terminal scrollback, so it scrolls, copies and searches the way everything else in that window does. The composer takes `/` for commands and `@` to put a file in front of the agent. The status line carries the live model, the session, and how much context is left.
 

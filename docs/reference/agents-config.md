@@ -1,6 +1,6 @@
 ---
 title: agents.toml
-description: The config file behind agent declarations — budgets, loop bounds, shell allowlists, how a permission setting widens into rules, and what each tool name resolves to.
+description: The config file behind agent declarations — budgets, loop bounds, the envelopes that transpile into HITL policy, and what each tool name resolves to.
 order: 1
 ---
 
@@ -67,7 +67,9 @@ override cannot quietly widen anything:
 - **`tools_policies` merges per knob.** Naming one shell knob keeps the rest of
   the shell policy and every other toolset.
 - **`postures` merges per posture.** Redefining `auto_edit` leaves `read_only`
-  and `ask_always` as the root declared them.
+  and `ask_always` as the root declared them. (`[envelopes.*]` is not per-agent:
+  an envelope is a named surface a *session* runs under, so it lives at the root
+  and is picked by name.)
 - **`always_deny` and `always_allow` append after the root's**, never replace
   them. First match wins in the emitted policy, so the root's credential denies
   keep their position ahead of anything an agent grants itself.
@@ -130,6 +132,12 @@ _denied_path_substrings = "node_modules,.git/,dist/,/.next/,/out/,package-lock.j
 
 Add a table for any toolset you connect; see [Tools](/docs/integrations/tools/)
 for the keys a given toolset reads.
+
+The shipped file also carries a `[tools_policies.webtools]` block, which is
+**inert**: no provider serves the native web toolset in this build. It is kept
+for the same reason the `network.*` envelope axes are — the bounds are the part
+worth not losing, so a revived toolset comes back to them rather than to
+nothing.
 
 ### `[policy]`
 
@@ -200,10 +208,185 @@ tool = "search"
 Without it, a tool you named under `[tools]` matches no rule and falls to
 `default_action`, which asks a human on every call.
 
+### `[envelopes.<name>]`
+
+An **envelope** is a permission surface with a name. It states what a session may
+reach, and the runtime transpiles it into the [HITL policy](/docs/guide/hitl/)
+the approval engine already evaluates. An envelope transpiles to a policy;
+nothing about the engine changes.
+
+```toml
+[envelopes.review]
+extends = "read_only"
+description = "Read the tree, run the test suite, change nothing."
+default_action = "deny"
+
+[envelopes.review.shell]
+grant = "deny"
+prefix_allowlist = ["go test", "go vet"]
+```
+
+`<name>` must match `^[a-z0-9][a-z0-9_-]*$`. **No dots** — a dot would collide
+with TOML sub-table syntax, so `[envelopes.a.b]` could not name an envelope.
+
+**The name is the whole identity.** It transpiles to
+`.generated/hitl-policy-<name>.json`, and `--hitl-policy review`,
+`--hitl-policy hitl-policy-review.json` and
+`config set hitl-policy-name hitl-policy-review.json` all resolve to it.
+Per-agent policies are emitted into that same namespace under the same filename
+rule, so an envelope may **not** take a declared agent's name: the collision is a
+startup error, never a silent overwrite.
+
+The render is derived and disposable. A `hitl-policy-<name>.json` you write at
+the top level of `.contenox/` or `~/.contenox/` shadows it and is never
+rewritten — see [Policy resolution order](/docs/guide/hitl/#policy-resolution-order).
+
+#### Keys
+
+| Key | Type | Meaning |
+|---|---|---|
+| `extends` | string | One other envelope in this table — one parent, never a list |
+| `description` | string | Prose, carried into the rendered file's header |
+| `default_action` | `allow` \| `approve` \| `deny` | Applied to a call no emitted rule matched. Omitted fail-closes to `approve` |
+| `files.read` | axis | `read_file`, `read_file_range`, and the directory probe |
+| `files.write` | axis | `write_file`, `edit_file`, `sed` |
+| `shell` | axis | `local_shell` |
+| `network.read` / `network.write` | axis | **Reserved** — see below |
+| `missions.fire` | axis | `mission_start` |
+| `missions.answer` | axis | Who besides a human may answer this mission's asks |
+| `tools` | table | `pattern = action` for tools you connected |
+| `compute` | table | `max_tool_calls`, `max_tokens`, `max_turns`, `on_exhausted`, `model_allowlist`, `backend_allowlist` |
+| `attention` | table | `allow_agent_answers`, `max_agent_answers`, `allow_agent_approvals`, `max_agent_approvals` |
+| `trusted_binaries` | table | `dirs`, `hashes` — see [Trusted binaries](/docs/guide/confinement/trusted-binaries/) |
+| `always_deny` / `always_allow` | array of tables | Same shape as `[[policy.always_deny]]` above |
+
+An unknown key is an error naming the known ones, not a key that silently does
+nothing.
+
+#### Axes
+
+Each axis is either an action string or a table carrying `grant` plus that axis's
+refinements. The two forms are the same document — `shell = "approve"` is sugar
+for `shell = { grant = "approve" }` — and dotted keys and sub-tables are
+interchangeable, so `files.read = "allow"` and an `[envelopes.x.files]` with
+`read = "allow"` arrive identically.
+
+**An axis you leave unset emits no rule at all.** It falls through to
+`default_action`; it is not implicitly `approve`.
+
+| Axis | Refinements |
+|---|---|
+| `files.read`, `files.write` | `deny_paths`, `approve_paths` — lists of globs, one rule emitted per glob |
+| `shell` | `blacklist`, `substitution` (`deny` \| `approve` \| `off`), `prefix_allowlist`, `ask_always` |
+| `network.read`, `network.write` | `deny_hosts` |
+| `missions.fire`, `missions.answer` | none |
+
+```toml
+[envelopes.mine.files.write]
+grant = "approve"
+deny_paths = ["**/{.ssh,.gnupg}/**", "**/hitl-policy*.json"]
+
+[envelopes.mine.shell]
+grant = "approve"
+blacklist = ["mkfs", "fdisk", "shred"]
+substitution = "approve"
+prefix_allowlist = ["go test", "ls", "cat"]
+ask_always = ["rm", "sudo", "chmod"]
+```
+
+Every list except the two path lists is joined into one comma-separated
+condition value, so an entry containing a comma is **refused** rather than
+silently read as two.
+
+`missions.answer` is the one axis whose carrier is not a rule: the mission
+toolset is exempt from approval, so it compiles into the `attention` block
+instead — `allow` grants agent answers, `approve` grants answers *and* rulings on
+gated calls, `deny` omits the block so a human decides. An explicit `[attention]`
+key wins over what the axis would set.
+
+#### Rule order
+
+Rules are first-match-wins, so the emission order **is** the semantics.
+Unconditional denies lead, conditional refinements precede the grants they carve
+out of, and an axis nobody set falls through:
+
+1. `always_deny`
+2. `files.write` `deny_paths`, then `files.read` `deny_paths`
+3. `files.read` `approve_paths`, then `files.write` `approve_paths`
+4. `tools` patterns
+5. `always_allow`
+6. `missions.fire`
+7. `files.read`, then `files.write` grants
+8. `shell`: `blacklist` → `substitution` → `prefix_allowlist` → `ask_always` → the grant as the floor
+9. `default_action`
+
+The five shell tiers are in the one order that keeps them meaningful: the
+blacklist cannot be reached past, substitution is judged before any verb is
+trusted, the allowlist grants, `ask_always` claws back, and the grant is where an
+unrecognized command lands.
+
+#### `tools` patterns
+
+A pattern is `*`, `<toolset>`, or `<toolset>.<tool>`, and each half is a literal
+name or `*`. Names are compared exactly, so a partial glob like `git*` is
+refused at parse time rather than emitted as a rule that can never match.
+
+```toml
+[envelopes.mine.tools]
+"github.*" = "approve"
+"tavily.search" = "allow"
+```
+
+Order in the file is not precedence: the table is emitted most-specific first
+(exact `toolset.tool`, then one wildcard, then `*`), then by action, then
+lexically, so the same table always renders the same bytes.
+
+This is the only way to reach a tool you connected. A mapping under `[tools]`
+makes a tool *reachable*, not permitted; until you name it here it falls to
+`default_action`.
+
+#### `extends`
+
+One parent, merged per leaf key, so a child that sets `files.write` leaves the
+parent's `files.read` alone. Two rules make that predictable, and both cost some
+repetition:
+
+- **A list replaces the parent's** rather than appending to it. Silent
+  concatenation down a chain would make a deny list impossible to shrink.
+- **A bare `files.write = "allow"` replaces the whole axis**, `deny_paths`
+  included. Restate what you meant to keep; silent patching makes an envelope
+  impossible to read.
+
+`always_deny` and `always_allow` are the one exception — they accumulate
+parent-first, deduplicated, because a rule that exists to be un-waivable must not
+be waivable from below.
+
+A missing parent, a cycle, and a chain deeper than eight envelopes are all errors
+naming the offender.
+
+#### Reserved: the network axes
+
+`network.read` and `network.write` bind to the native web toolset, which nothing
+in this build serves. An envelope that sets one is valid and **inert**: the
+render carries a `//reserved` note saying so instead of a rule.
+
+They are kept because they are the only place the intent behind a host block
+survives a quarantined toolset. A web-shaped tool you connected is an MCP tool —
+it is reached by its own name under `tools` above, and no network axis touches
+it.
+
+#### Shipped envelopes
+
+`read_only`, `ask_always`, `auto_edit`, `default`, `strict`, `acpx`, `oracle`,
+`serve`. What each one is for is in
+[Shipped envelopes](/docs/guide/hitl/#shipped-envelopes); what each one *says* is
+in the shipped `agents.toml`, commented.
+
 ### `[policy.postures.<name>]`
 
-How a declaration's single permission setting widens into rules. Three postures are
-required and validated: `read_only`, `ask_always`, `auto_edit`.
+The older, narrower way to say the same thing, kept for configurations that
+already use it. Three postures are required and validated: `read_only`,
+`ask_always`, `auto_edit`.
 
 | Key | Value |
 |---|---|
@@ -218,6 +401,13 @@ local_fs_write = "allow"
 local_shell = "approve"
 ```
 
+**An `[envelopes.<name>]` of the same name wins.** The three postures ship as
+envelopes, which is where the credential quarantine and the write wall live; a
+`[policy.postures.*]` block is consulted only when no envelope of that name is
+declared, and is then adapted onto the same three axes. Both routes reach the
+emitter through one vocabulary, so an imported agent's policy and a profile
+envelope come out of one transpiler.
+
 Shipped mapping from declaration settings:
 
 | Source | Posture |
@@ -226,7 +416,7 @@ Shipped mapping from declaration settings:
 | Claude Code `default` / `manual`, Antigravity default | `ask_always` |
 | Claude Code / Antigravity `acceptEdits`, Claude Code `auto` | `auto_edit` |
 | Claude Code `plan`, `dontAsk` | `read_only`, with a note in the loss report |
-| Claude Code / Antigravity `bypassPermissions` | **refused.** Use `acceptEdits` and grant what the agent needs below, where the grant is written down |
+| Claude Code / Antigravity `bypassPermissions` | **refused.** It names no envelope, and a declaration asking for it is refused rather than widened. Use `acceptEdits` and grant what the agent needs, where the grant is written down |
 
 Loosening a posture here loosens it for every agent that uses it. `auto_edit`
 granting `local_shell = "allow"` would mean an agent whose source asked only to
@@ -273,8 +463,8 @@ Overlays merge, so naming one tool leaves the built-in names alone.
 **A mapping makes a tool reachable, not permitted.** The emitted policy carries
 rules for the tools contenox hosts; a name you mapped yourself matches none of
 them and falls to `default_action` — so it works, and asks a human on every
-call. Give it a rule in the emitted policy, or in `[policy.postures.*]` above to
-cover every agent.
+call. Name it under [`[envelopes.<name>.tools]`](#envelopesname) to give it a
+rule, or under `[[policy.always_allow]]` to cover every agent.
 
 Two kinds of name are absent from the shipped table for different reasons:
 
@@ -311,7 +501,8 @@ routing stays templated and the raw name is kept in provenance.
 
 ## Worked example
 
-Run every agent read-only, with a tighter shell:
+Run every agent read-only, with a tighter shell, and add an envelope of your own
+for review sessions:
 
 ```toml
 # .contenox/agents.toml
@@ -324,9 +515,19 @@ _allowed_commands = "git,go"
 [policy]
 default_action = "deny"
 
+[envelopes.review]
+extends = "read_only"
+description = "Read the tree, run the test suite, change nothing."
+
+[envelopes.review.shell]
+grant = "deny"
+prefix_allowlist = ["go test", "go vet"]
+
 [naming]
 scope_with_dialect = false
 ```
 
-Everything not named here — loop bounds, postures, the credential denies —
-keeps its shipped value.
+Everything not named here — loop bounds, the other envelopes, the credential
+denies — keeps its shipped value. `review` renders to
+`.contenox/.generated/hitl-policy-review.json` on the next run, and
+`contenox beam --hitl-policy review` runs under it.

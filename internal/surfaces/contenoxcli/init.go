@@ -239,7 +239,7 @@ func hasBackendOfType(ctx context.Context, db libdb.DBManager, providerType stri
 	return false
 }
 
-// RunGlobalInit ensures ~/.contenox/ has chain files and HITL policies, without creating a workspace-scoped .contenox/ directory.
+// RunGlobalInit ensures ~/.contenox/ has chain files, declarations and rendered envelopes, without creating a workspace-scoped .contenox/ directory.
 func RunGlobalInit(out io.Writer) error {
 	homeDir, err := globalContenoxDir()
 	if err != nil {
@@ -274,16 +274,28 @@ func RunGlobalInit(out io.Writer) error {
 			return err
 		}
 	}
-	if err := writeEmbeddedHITLPolicies(homeDir, false); err != nil {
-		return err
-	}
 	if _, err := agentdecl.Preseed(homeDir); err != nil {
 		return err
 	}
 	// The seeded declarations are the shipped agents, so they have to be chains
 	// before anything looks one up.
 	transpileSeededAgents(io.Discard, homeDir)
+	renderEnvelopePolicies(out, homeDir)
 	return nil
+}
+
+// renderEnvelopePolicies transpiles the declared envelopes into contenoxDir's
+// .generated, which is where the shipped postures live now that nothing seeds
+// hitl-policy-*.json. Reported rather than fatal: a surface that needs its own
+// envelope ensures it again, and hard errors there.
+func renderEnvelopePolicies(out io.Writer, contenoxDir string) {
+	rendered, err := syncEnvelopePolicies(contenoxDir)
+	if err != nil {
+		fmt.Fprintf(out, "  note: rendering envelopes from %s failed (%v)\n", agentdecl.ConfigFilename, err)
+	}
+	for _, path := range rendered {
+		fmt.Fprintf(out, "  Rendered %s\n", path)
+	}
 }
 
 func writeInitFile(out io.Writer, force, update bool, path, content string) error {
@@ -331,7 +343,7 @@ func writeInitFile(out io.Writer, force, update bool, path, content string) erro
 	return nil
 }
 
-// RunLocalInit seeds contenoxDir with the same chain files and HITL policy presets RunInit writes to ~/.contenox, as workspace-local overrides that shadow the global copies.
+// RunLocalInit seeds contenoxDir with the same chain files and declarations RunInit writes to ~/.contenox, as workspace-local overrides that shadow the global copies.
 func RunLocalInit(out io.Writer, force, update bool, contenoxDir, projectName string) error {
 	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
 		return fmt.Errorf("failed to create .contenox directory: %w", err)
@@ -358,9 +370,17 @@ func RunLocalInit(out io.Writer, force, update bool, contenoxDir, projectName st
 			return err
 		}
 	}
-	kept, err := upgradeEmbeddedHITLPolicies(contenoxDir, force)
-	if err != nil {
-		return err
+	// --force refreshes the workspace's own preset copies and no one else's; a
+	// preset the workspace never held is not planted here, since the rendered
+	// envelope behind that name already answers for it.
+	if force {
+		written, refreshErr := refreshExistingHITLPolicies(contenoxDir)
+		for _, path := range written {
+			fmt.Fprintf(out, "  Refreshed %s\n", path)
+		}
+		if refreshErr != nil {
+			return refreshErr
+		}
 	}
 	seeded, err := agentdecl.Preseed(contenoxDir)
 	if err != nil {
@@ -372,20 +392,9 @@ func RunLocalInit(out io.Writer, force, update bool, contenoxDir, projectName st
 	for _, path := range seeded {
 		fmt.Fprintf(out, "  Created %s\n", path)
 	}
-	keptSet := map[string]bool{}
-	for _, name := range kept {
-		keptSet[name] = true
-	}
-	for _, p := range HITLPolicyPresets {
-		path := filepath.Join(contenoxDir, p.Name)
-		if keptSet[p.Name] {
-			fmt.Fprintf(out, "  Kept %s (has been modified; use --force to overwrite)\n", path)
-			continue
-		}
-		fmt.Fprintf(out, "  Wrote %s\n", path)
-	}
+	renderEnvelopePolicies(out, contenoxDir)
 	fmt.Fprintln(out, "Done.")
-	fmt.Fprintf(out, "These workspace copies shadow the presets in ~/.contenox — the workspace file wins by name.\n")
+	fmt.Fprintf(out, "These workspace copies shadow the ones in ~/.contenox — the workspace file wins by name.\n")
 	return nil
 }
 
@@ -488,13 +497,6 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 		if err := refreshPoliciesOnSearchPath(out, contenoxDir); err != nil {
 			return err
 		}
-	} else {
-		if err := writeEmbeddedHITLPolicies(homeDir, false); err != nil {
-			return err
-		}
-		for _, p := range HITLPolicyPresets {
-			noteShadowed(p.Name)
-		}
 	}
 	if _, err := agentdecl.Preseed(homeDir); err != nil {
 		return err
@@ -503,6 +505,10 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 	// acp before anything asks for one. Reported, not fatal.
 	if problems := transpileSeededAgents(out, homeDir); problems != nil {
 		printSyncProblems(out, problems)
+	}
+	renderEnvelopePolicies(out, homeDir)
+	for _, name := range envelopePolicyNames(homeDir) {
+		noteShadowed(name)
 	}
 
 	fmt.Fprintln(out, "Done.")

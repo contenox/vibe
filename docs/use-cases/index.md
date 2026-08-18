@@ -10,6 +10,8 @@ Each recipe is a **pre-built solution**: a chain or agent declaration that does 
 
 Most recipes here are written as chain files rather than [agent declarations](/docs/guide/agents/), because a recipe is a pipeline you point at — a fixed shape you can diff — rather than an agent you fire at an intent. Where a recipe needs branching, a per-step model, or a declared human gate, the chain is the only tier that says so.
 
+The scripting recipes at the end are the other way round: one declaration under `.contenox/agents/`, fired by [`contenox run`](/docs/reference/contenox-cli/#contenox-run) from a Makefile, a git hook or a CI step, with the report on stdout and an exit code to branch on.
+
 > **Prerequisites**
 > - Run `contenox init` in your project once, then either point Contenox at a local Ollama model or configure a cloud backend — see [Quickstart](/docs/guide/quickstart/).
 > - Tool access — `local_shell`, `local_fs`, and any MCP servers or registered remote tools — is governed by each chain's `tools_policies`.
@@ -30,3 +32,12 @@ Several recipes below are one branch of a router rather than a standalone chain:
 - [The nested permission bomb](/docs/use-cases/nested-permission-bomb/) — give a workflow its own scoped credential and authored HITL policy instead of inheriting the operator's access
 - [HubSpot via MCP](/docs/use-cases/hubspot-mcp/) — OAuth + pre-issued client credentials, works for any vendor MCP without dynamic registration
 - [The oracle](/docs/use-cases/auto-attention/) — an adjudicating agent rules on a subagent's routine asks so unattended runs finish; consequential ones still wait for you
+
+## Scripted work
+
+A program is the caller: one declaration, fired by `contenox run`.
+
+- [Git & DevOps recipes](/docs/use-cases/git-devops/) — commit messages, branch reviews and test-failure triage as agents with read-only tool lists, wired to aliases and pipeline steps
+- [Codebase documentation](/docs/use-cases/codebase-docs/) — a docs agent that reads the tree, writes the architecture guide, and updates it from the diff that made it wrong
+- [Automated release notes](/docs/use-cases/release-notes/) — an agent reads the commit range with the git tools and writes `RELEASE_NOTES.md`; the exit code gates the release step
+- [Leads → HubSpot](/docs/use-cases/leads-to-hubspot/) — one agent finds leads through Tavily's MCP server, another writes them into HubSpot through a three-operation OpenAPI subset

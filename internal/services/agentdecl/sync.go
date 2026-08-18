@@ -210,10 +210,20 @@ func Sync(sourceDirs []SourceDir, generatedDir string, cfg Config, opts ...SyncO
 			SourcePath:   path,
 			SourceSHA256: ir.Source.SHA256,
 			ChainFile:    "chain-agent-" + stem + ".json",
-			PolicyFile:   "hitl-policy-" + stem + ".json",
+			PolicyFile:   PolicyFileFor(stem),
+		}
+		// One namespace: an envelope of this name renders the same filename, and
+		// the envelope owns it. The declaration still compiles; what it cannot
+		// carry is its own posture, which is reported rather than overwritten.
+		if _, taken := cfg.Envelopes[stem]; taken {
+			rec.PolicyFile = ""
+			res.Unmapped = append(res.Unmapped, Unmapped{
+				Field: "posture",
+				Reason: fmt.Sprintf("%q is also an envelope in %s, which owns %s; this agent runs under the envelope",
+					stem, ConfigFilename, PolicyFileFor(stem)),
+			})
 		}
 		chainPath := filepath.Join(generatedDir, rec.ChainFile)
-		policyPath := filepath.Join(generatedDir, rec.PolicyFile)
 
 		chainJSON, err := marshalWithSchema(chain, ChainSchemaURL)
 		if err != nil {
@@ -224,9 +234,15 @@ func Sync(sourceDirs []SourceDir, generatedDir string, cfg Config, opts ...SyncO
 			return nil, err
 		}
 
+		policyPath := ""
+		policyCurrent := true
+		if rec.PolicyFile != "" {
+			policyPath = filepath.Join(generatedDir, rec.PolicyFile)
+			policyCurrent = fileHas(policyPath, policyJSON)
+		}
 		// Compared against what is on disk, not the source hash alone: agents.toml
 		// is the other half of the input.
-		if _, ok := state[path]; ok && fileHas(chainPath, chainJSON) && fileHas(policyPath, policyJSON) {
+		if _, ok := state[path]; ok && fileHas(chainPath, chainJSON) && policyCurrent {
 			res.Action = ActionUnchanged
 			next[path] = rec
 			results = append(results, res)
@@ -236,8 +252,10 @@ func Sync(sourceDirs []SourceDir, generatedDir string, cfg Config, opts ...SyncO
 		if err := os.WriteFile(chainPath, chainJSON, 0o644); err != nil {
 			return nil, fmt.Errorf("agentdecl: write %s: %w", chainPath, err)
 		}
-		if err := os.WriteFile(policyPath, policyJSON, 0o644); err != nil {
-			return nil, fmt.Errorf("agentdecl: write %s: %w", policyPath, err)
+		if policyPath != "" {
+			if err := os.WriteFile(policyPath, policyJSON, 0o644); err != nil {
+				return nil, fmt.Errorf("agentdecl: write %s: %w", policyPath, err)
+			}
 		}
 
 		if _, had := state[path]; had {
@@ -254,7 +272,9 @@ func Sync(sourceDirs []SourceDir, generatedDir string, cfg Config, opts ...SyncO
 			continue
 		}
 		_ = os.Remove(filepath.Join(generatedDir, rec.ChainFile))
-		_ = os.Remove(filepath.Join(generatedDir, rec.PolicyFile))
+		if rec.PolicyFile != "" {
+			_ = os.Remove(filepath.Join(generatedDir, rec.PolicyFile))
+		}
 	}
 	for _, name := range cfg.UnknownAgents(declared) {
 		results = append(results, SyncResult{
@@ -279,7 +299,9 @@ func retireAll(generatedDir string) error {
 	state := readSyncState(generatedDir)
 	for _, rec := range state {
 		_ = os.Remove(filepath.Join(generatedDir, rec.ChainFile))
-		_ = os.Remove(filepath.Join(generatedDir, rec.PolicyFile))
+		if rec.PolicyFile != "" {
+			_ = os.Remove(filepath.Join(generatedDir, rec.PolicyFile))
+		}
 	}
 	if len(state) == 0 {
 		return nil

@@ -18,6 +18,20 @@ The filesystem root comes from the ACP session's workspace context.
 
 Directory listing, searching, and globbing are not part of this toolset — ACP defines no `fs/list` or `fs/grep` method to forward them through. Use [`local_shell`](#local_shell--shell-command-execution) (`ls`, `find`, `grep`/`rg`) for those instead.
 
+### What the envelope axes reach
+
+The `files.read` and `files.write` [axes](/docs/reference/agents-config/#envelopesname) bind to these tools by name, which is what makes a one-word grant enforceable:
+
+| Axis | Tools it emits rules for |
+|---|---|
+| `files.read` | `read_file`, `read_file_range`, and the directory probe `accessview`/`agentview` run |
+| `files.write` | `write_file`, `edit_file`, `sed` |
+| `shell` | `local_shell` |
+
+Between them the two file axes cover every tool `local_fs` exposes, so `files.read = "deny"` is a complete answer for reads rather than a partial one — there is no sixth `local_fs` tool to slip past it. The `always_deny` rules use `tool = "*"` instead, so the credential quarantine holds regardless of what the toolset grows.
+
+The consequence worth internalising: **a tool the axes do not name is not covered by them.** A tool you connected is an MCP tool reached by its own name, so it matches no axis rule and falls to `default_action` until you name it under `[envelopes.<name>.tools]`.
+
 ### Tools
 
 | Tool | Parameters | Description |
@@ -105,6 +119,18 @@ Values are strings even when conceptually numeric — `tools_policies` is the ch
 _allowed_commands = "git,go,make,ls,cat"
 _denied_commands  = "sudo,su,dd,mkfs"
 ```
+
+This is the toolset's own gate — it decides what the tool will run at all. Which of the surviving commands *ask* is the envelope's `shell` axis, a separate and later question:
+
+```toml
+[envelopes.mine.shell]
+grant = "approve"
+blacklist = ["mkfs", "fdisk", "shred"]
+prefix_allowlist = ["go test", "ls", "cat"]
+ask_always = ["rm", "sudo", "chmod"]
+```
+
+Two gates, deliberately: `tools_policies` is per-task and travels in the chain, while the envelope is per-session and is what a human reviews. A command has to pass both.
 
 In a chain you author yourself it is a `tools_policies` block on `execute_config`, per task:
 

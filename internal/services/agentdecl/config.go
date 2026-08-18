@@ -30,6 +30,11 @@ type Config struct {
 	// "provider:model".
 	Tools  map[string]string `toml:"tools"`
 	Models map[string]string `toml:"models"`
+	// Envelopes holds [envelopes.<name>] sections, each transpiling to one HITL
+	// policy. Held raw for the same reason Agents is: an axis omitted must stay
+	// omitted through the overlay merge, and a typed struct could not tell
+	// `shell = "deny"` from an absent key.
+	Envelopes map[string]map[string]any `toml:"envelopes"`
 	// Agents holds per-agent overlays keyed by the agent's id. Held raw so For
 	// can replay it through the same decode the roots use; a typed struct could
 	// not tell `retry_on_failure = 0` from an absent key.
@@ -87,7 +92,9 @@ type ComputeDefaults struct {
 	OnExhausted  string `toml:"on_exhausted"`
 	// MaxTurns is the drive loop's own budget; it applies to a mission-role
 	// agent only, since a primary agent's turns are the operator's prompts.
-	MaxTurns int `toml:"max_turns"`
+	MaxTurns         int      `toml:"max_turns"`
+	ModelAllowlist   []string `toml:"model_allowlist"`
+	BackendAllowlist []string `toml:"backend_allowlist"`
 }
 
 // AttentionDefaults say who besides a human may resolve a mission-role agent's
@@ -153,6 +160,10 @@ func Load(roots ...string) (Config, error) {
 			return Config{}, fmt.Errorf("agentdecl: read %s: %w", path, err)
 		}
 		tools, models, agents := d.Tools, d.Models, d.Agents
+		envelopes := d.Envelopes
+		// Emptied first: decoding [[envelopes.x.always_deny]] onto a map that
+		// already holds one appends through an unaddressable value.
+		d.Envelopes = nil
 		if err := toml.Unmarshal(raw, &d); err != nil {
 			return Config{}, fmt.Errorf("agentdecl: parse %s: %w", path, err)
 		}
@@ -160,7 +171,8 @@ func Load(roots ...string) (Config, error) {
 		// drop every shipped mapping.
 		d.Tools = mergeNames(tools, d.Tools)
 		d.Models = mergeNames(models, d.Models)
-		d.Agents = mergeAgents(agents, d.Agents)
+		d.Agents = mergeRawSections(agents, d.Agents)
+		d.Envelopes = mergeRawSections(envelopes, d.Envelopes)
 	}
 	return d, nil
 }
@@ -184,11 +196,12 @@ func (cfg Config) For(agent string) (Config, error) {
 	toolsPolicies, postures := out.ToolsPolicies, out.Policy.Postures
 	deny, allow := out.Policy.AlwaysDeny, out.Policy.AlwaysAllow
 	tools, models := out.Tools, out.Models
+	envelopes := out.Envelopes
 	// Emptied so the decode cannot merge into the root's maps, which every agent shares.
 	out.ToolsPolicies, out.Policy.Postures = nil, nil
 	out.Policy.AlwaysDeny, out.Policy.AlwaysAllow = nil, nil
 	out.Tools, out.Models = nil, nil
-	out.Agents = nil
+	out.Agents, out.Envelopes = nil, nil
 
 	if err := toml.Unmarshal(raw, &out); err != nil {
 		return Config{}, fmt.Errorf("agentdecl: parse [agents.%s]: %w", agent, err)
@@ -196,6 +209,7 @@ func (cfg Config) For(agent string) (Config, error) {
 
 	out.ToolsPolicies = mergeToolsPolicies(toolsPolicies, out.ToolsPolicies)
 	out.Policy.Postures = mergePostures(postures, out.Policy.Postures)
+	out.Envelopes = mergeRawSections(copyRawSections(envelopes), out.Envelopes)
 	// Standing rules append rather than replace, and the root's come first, so a
 	// per-agent grant can never reach past a credential deny the root declared.
 	out.Policy.AlwaysDeny = concatRules(deny, out.Policy.AlwaysDeny)
@@ -237,8 +251,11 @@ func (cfg Config) Validate() error {
 		return fmt.Errorf("agentdecl: chain.recovery_rounds must be positive, got %d", cfg.Chain.RecoveryRounds)
 	}
 	for _, p := range []Posture{PostureReadOnly, PostureAskAlways, PostureAutoEdit} {
+		if _, ok := cfg.Envelopes[string(p)]; ok {
+			continue
+		}
 		if _, ok := cfg.Policy.Postures[string(p)]; !ok {
-			return fmt.Errorf("agentdecl: policy.postures is missing %q", p)
+			return fmt.Errorf("agentdecl: neither [%s.%s] nor policy.postures.%s is declared", EnvelopeSection, p, p)
 		}
 	}
 	return nil
@@ -252,6 +269,14 @@ func mergeNames(base, overlay map[string]string) map[string]string {
 		base[k] = v
 	}
 	return base
+}
+
+func copyRawSections(base map[string]map[string]any) map[string]map[string]any {
+	out := make(map[string]map[string]any, len(base))
+	for k, v := range base {
+		out[k] = v
+	}
+	return out
 }
 
 func copyNames(base map[string]string) map[string]string {
@@ -299,7 +324,7 @@ func mergePostures(base, overlay map[string]PostureGrants) map[string]PostureGra
 	return out
 }
 
-func mergeAgents(base, overlay map[string]map[string]any) map[string]map[string]any {
+func mergeRawSections(base, overlay map[string]map[string]any) map[string]map[string]any {
 	if len(overlay) == 0 {
 		return base
 	}

@@ -1,6 +1,7 @@
 package agentdecl
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/contenox/contenox/internal/services/hitlservice"
@@ -36,47 +37,70 @@ func EmitPolicy(ir *AgentIR, cfg Config) (*hitlservice.Policy, error) {
 		return nil, &ErrUnsafePosture{Name: ir.Name, Dialect: ir.Source.Dialect}
 	}
 
-	grants, ok := cfg.Policy.Postures[string(ir.Posture)]
-	if !ok {
-		return nil, fmt.Errorf("agentdecl: no posture grants configured for %q", ir.Posture)
-	}
-
-	rules := make([]hitlservice.Rule, 0, len(cfg.Policy.AlwaysDeny)+len(cfg.Policy.AlwaysAllow)+16)
-	rules = append(rules, standingRules(cfg.Policy.AlwaysDeny, hitlservice.ActionDeny)...)
-	rules = append(rules, standingRules(cfg.Policy.AlwaysAllow, hitlservice.ActionAllow)...)
-	rules = append(rules, missionToolRules(ir)...)
-
-	for _, g := range []struct {
-		tools  string
-		tool   string
-		action string
-	}{
-		{"local_fs", "read_file", grants.LocalFSRead},
-		{"local_fs", "read_file_range", grants.LocalFSRead},
-		{"local_fs", "write_file", grants.LocalFSWrite},
-		{"local_fs", "edit_file", grants.LocalFSWrite},
-		{"local_fs", "sed", grants.LocalFSWrite},
-		{"local_shell", "local_shell", grants.LocalShell},
-	} {
-		action, err := parseAction(g.action)
-		if err != nil {
-			return nil, fmt.Errorf("agentdecl: posture %q: %w", ir.Posture, err)
-		}
-		rules = append(rules, hitlservice.Rule{Tools: g.tools, Tool: g.tool, Action: action})
-	}
-
-	defaultAction, err := parseAction(cfg.Policy.DefaultAction)
-	if err != nil {
+	if _, err := parseAction(cfg.Policy.DefaultAction); err != nil {
 		return nil, fmt.Errorf("agentdecl: policy.default_action: %w", err)
 	}
+	env, err := cfg.PostureEnvelope(ir.Posture)
+	if err != nil {
+		return nil, err
+	}
+	// The [policy] block is the root every posture sits in: its standing rules
+	// are the ones a declaration can neither request nor waive, so they lead.
+	env.AlwaysDeny = concatStandingRules(cfg.Policy.AlwaysDeny, env.AlwaysDeny)
+	env.AlwaysAllow = concatStandingRules(cfg.Policy.AlwaysAllow, env.AlwaysAllow)
+	if env.DefaultAction == "" {
+		env.DefaultAction = cfg.Policy.DefaultAction
+	}
 
-	return &hitlservice.Policy{
-		Version:       hitlservice.PolicySchemaVersion,
-		DefaultAction: defaultAction,
-		Rules:         rules,
-		Compute:       computeBounds(ir, cfg),
-		Attention:     attentionBounds(ir, cfg),
-	}, nil
+	// The mission tools land where the missions axis would: after every standing
+	// rule, before any capability grant.
+	out, err := env.transpile(transpileOptions{extraRules: missionToolRules(ir)})
+	if err != nil {
+		return nil, err
+	}
+	policy := out.Policy
+	// An envelope that states its own bounds keeps them; otherwise the [policy]
+	// block's, narrowed by what the declaration asked for.
+	if len(env.Compute) == 0 {
+		policy.Compute = computeBounds(ir, cfg)
+	}
+	if len(env.Attention) == 0 && env.Axes[AxisMissionsAnswer].Grant == "" {
+		policy.Attention = attentionBounds(ir, cfg)
+	}
+	return policy, nil
+}
+
+// PostureEnvelope resolves one posture to the envelope that expresses it. The
+// envelopes table is authoritative; a configuration that still writes
+// [policy.postures] directly is adapted onto the same axes, so both reach the
+// emitter through one vocabulary.
+func (cfg Config) PostureEnvelope(p Posture) (Envelope, error) {
+	env, err := cfg.ResolveEnvelope(string(p))
+	switch {
+	case err == nil:
+		return env, nil
+	case !errors.Is(err, ErrNoEnvelope):
+		return Envelope{}, err
+	}
+	grants, ok := cfg.Policy.Postures[string(p)]
+	if !ok {
+		return Envelope{}, fmt.Errorf("agentdecl: no posture grants configured for %q", p)
+	}
+	out := Envelope{Name: string(p), Axes: map[string]AxisGrant{}}
+	for axis, action := range map[string]string{
+		AxisFilesRead:  grants.LocalFSRead,
+		AxisFilesWrite: grants.LocalFSWrite,
+		AxisShell:      grants.LocalShell,
+	} {
+		if action == "" {
+			continue
+		}
+		if _, err := parseAction(action); err != nil {
+			return Envelope{}, fmt.Errorf("agentdecl: posture %q: %w", p, err)
+		}
+		out.Axes[axis] = AxisGrant{Grant: action}
+	}
+	return out, nil
 }
 
 func missionToolRules(ir *AgentIR) []hitlservice.Rule {
@@ -108,9 +132,11 @@ func (ir *AgentIR) RunsAsSubagent() bool {
 
 func computeBounds(ir *AgentIR, cfg Config) *hitlservice.ComputeBounds {
 	bounds := &hitlservice.ComputeBounds{
-		MaxToolCalls: cfg.Policy.Compute.MaxToolCalls,
-		MaxTokens:    cfg.Policy.Compute.MaxTokens,
-		OnExhausted:  hitlservice.OnExhausted(cfg.Policy.Compute.OnExhausted),
+		MaxToolCalls:     cfg.Policy.Compute.MaxToolCalls,
+		MaxTokens:        cfg.Policy.Compute.MaxTokens,
+		OnExhausted:      hitlservice.OnExhausted(cfg.Policy.Compute.OnExhausted),
+		ModelAllowlist:   cfg.Policy.Compute.ModelAllowlist,
+		BackendAllowlist: cfg.Policy.Compute.BackendAllowlist,
 	}
 	declared := 0
 	if ir.Budgets.MaxTurns != nil && *ir.Budgets.MaxTurns > 0 {

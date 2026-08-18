@@ -11,6 +11,14 @@
         "maxAgentAnswers": {
           "type": "integer",
           "description": "MaxAgentAnswers caps how many of this mission's questions an agent may\nanswer; zero means the default cap (DefaultMaxAgentAnswers), never unlimited."
+        },
+        "allowAgentApprovals": {
+          "type": "boolean",
+          "description": "AllowAgentApprovals lets an adjudicating agent rule on this mission's\napprove-tier tool calls instead of the unit waiting for a human."
+        },
+        "maxAgentApprovals": {
+          "type": "integer",
+          "description": "MaxAgentApprovals caps how many of this mission's gated tool calls an\nagent may decide; zero means DefaultMaxAgentApprovals, never unlimited."
         }
       },
       "type": "object",

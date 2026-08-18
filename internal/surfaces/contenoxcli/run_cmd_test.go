@@ -57,13 +57,40 @@ func TestUnit_RunTarget_DefaultsToTheRunAgent(t *testing.T) {
 }
 
 func TestUnit_RunCommand_EmptyTaskIsRefusedBeforeAnythingIsFired(t *testing.T) {
+	pinPipedStdin(t, "")
+	require.Error(t, executeRunCmd(t, "   "))
+}
+
+// A pipe is material for a task, never a task of its own: stdin cannot rescue
+// an empty argument into something worth firing.
+func TestUnit_RunCommand_PipedStdinDoesNotStandInForTheTask(t *testing.T) {
+	pinPipedStdin(t, "diff --git a/x b/x\n")
+	require.Error(t, executeRunCmd(t, "   "))
+}
+
+func executeRunCmd(t *testing.T, args ...string) error {
+	t.Helper()
 	cmd := &cobra.Command{Use: "run", Args: cobra.RangeArgs(1, 2), RunE: runRun}
 	cmd.Flags().String("policy", "", "")
 	cmd.Flags().Duration("timeout", time.Minute, "")
 	cmd.SetOut(new(strings.Builder))
 	cmd.SetErr(new(strings.Builder))
-	cmd.SetArgs([]string{"   "})
-	require.Error(t, cmd.Execute())
+	cmd.SetArgs(args)
+	return cmd.Execute()
+}
+
+// A dispatch carries one intent and no attachment, so the piped body rides
+// inside the task between delimiters a reader can find.
+func TestUnit_AttachPipedStdin_DelimitsTheBodyInsideTheTask(t *testing.T) {
+	got := attachPipedStdin("review this", "diff --git a/x b/x\n@@ -1 +1 @@\n")
+	require.Equal(t,
+		"review this\n\n--- begin piped stdin ---\ndiff --git a/x b/x\n@@ -1 +1 @@\n--- end piped stdin ---",
+		got)
+	require.Contains(t, got, "review this\n\n", "the task stays first: it says what to do with the body")
+
+	// An empty or whitespace-only pipe adds nothing rather than an empty block.
+	require.Equal(t, "review this", attachPipedStdin("review this", ""))
+	require.Equal(t, "review this", attachPipedStdin("review this", "\n\n  \n"))
 }
 
 // Stdout is the report and only the report: a caller pipes it somewhere. The

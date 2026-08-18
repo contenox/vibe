@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -69,9 +68,10 @@ var acpxCmd = &cobra.Command{
 	Use:   "acpx",
 	Short: "Run as an ACP agent under the headless / untrusted-driver profile (OpenClaw).",
 	Long: `Same Agent Client Protocol server as 'acp', for drivers that are not the
-device owner — OpenClaw and other non-editor clients. It loads the hardened
-hitl-policy-acpx.json (local_shell denied, web mutations denied, web reads
-gated) and the chain compiled from its agents/ declaration into
+device owner — OpenClaw and other non-editor clients. It runs under the hardened
+'acpx' envelope from agents.toml, rendered to hitl-policy-acpx.json (writes and
+the shell denied, secret paths refused on read, anything unnamed denied — pass
+--hitl-policy to name another), and the chain compiled from its agents/ declaration into
 ~/.contenox/.generated/chain-agent-acpx.json (operator copy, then .generated/,
 then system/ — override the path entirely with CONTENOX_ACPX_CHAIN_PATH).
 
@@ -88,6 +88,7 @@ func init() {
 		c.Flags().Bool("setup", false, "Run interactive setup wizard to configure provider and model, then exit.")
 		c.Flags().String("workspace-id", "", "Workspace ID for new ACP sessions (default: the stable workspace from ~/.contenox/workspace.id, same as the CLI). Existing sessions are always located by their session ID regardless of workspace.")
 		registerOracleFlags(c)
+		registerHITLPolicyFlag(c)
 	}
 	acpCmd.Flags().Bool("experimental-acp", false, "Accepted for compatibility with ACP clients that hardcode this launch flag (e.g. AionUi); no effect.")
 	_ = acpCmd.Flags().MarkHidden("experimental-acp")
@@ -100,7 +101,9 @@ func (acpStdio) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
 func (acpStdio) Close() error                { return os.Stdin.Close() }
 
 type acpProfile struct {
-	hitlPolicy   string
+	// hitlEnvelope is the [envelopes.<name>] section this surface runs under,
+	// which is also the stem of the policy file it resolves.
+	hitlEnvelope string
 	chainFile    string
 	chainEnv     string
 	embedFleet   bool
@@ -112,7 +115,7 @@ type acpProfile struct {
 }
 
 var acpProfileACP = acpProfile{
-	hitlPolicy:   "hitl-policy-acp.json",
+	hitlEnvelope: "default",
 	chainFile:    chainAgentACPFilename,
 	chainEnv:     "CONTENOX_ACP_CHAIN_PATH",
 	embedFleet:   true,
@@ -122,7 +125,7 @@ var acpProfileACP = acpProfile{
 
 // acpProfileServe is the editor profile with the stdio connection removed.
 var acpProfileServe = acpProfile{
-	hitlPolicy:   "hitl-policy-acp.json",
+	hitlEnvelope: "serve",
 	chainFile:    chainAgentACPFilename,
 	chainEnv:     "CONTENOX_ACP_CHAIN_PATH",
 	embedFleet:   true,
@@ -132,19 +135,19 @@ var acpProfileServe = acpProfile{
 }
 
 var acpProfileBeam = acpProfile{
-	hitlPolicy: "hitl-policy-acp.json",
-	chainFile:  chainAgentACPFilename,
-	chainEnv:   "CONTENOX_ACP_CHAIN_PATH",
-	embedFleet: true,
-	beam:       true,
-	name:       "beam",
+	hitlEnvelope: "default",
+	chainFile:    chainAgentACPFilename,
+	chainEnv:     "CONTENOX_ACP_CHAIN_PATH",
+	embedFleet:   true,
+	beam:         true,
+	name:         "beam",
 }
 
 var acpProfileACPX = acpProfile{
-	hitlPolicy: "hitl-policy-acpx.json",
-	chainFile:  chainAgentACPXFilename,
-	chainEnv:   "CONTENOX_ACPX_CHAIN_PATH",
-	name:       "acpx",
+	hitlEnvelope: "acpx",
+	chainFile:    chainAgentACPXFilename,
+	chainEnv:     "CONTENOX_ACPX_CHAIN_PATH",
+	name:         "acpx",
 }
 
 func runACP(cmd *cobra.Command, _ []string) error  { return runACPProfile(cmd, acpProfileACP) }
@@ -251,11 +254,14 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	if workspaceID == "" {
 		workspaceID = ResolveWorkspaceID(contenoxDir)
 	}
-	if err := writeEmbeddedHITLPolicies(contenoxDir, false); err != nil {
-		reportErr(err)
-		return fmt.Errorf("seed HITL policy presets: %w", err)
+	// Every declared envelope, not just this profile's: the mission envelopes
+	// this surface offers and the names /policy accepts are resolved by
+	// filename, so they have to be rendered before a session asks for one. The
+	// profile's own is ensured again below, where a failure is fatal.
+	if _, err := syncEnvelopePolicies(contenoxDir); err != nil {
+		fmt.Fprintf(noticeOut, "contenox acp: rendering envelopes: %v\n", err)
 	}
-	reportChange("phase", "seed_hitl")
+	reportChange("phase", "render_envelopes")
 	seedOptionalFIMChain(profile, contenoxDir)
 	reportChange("phase", "seed_fim_chain")
 
@@ -309,6 +315,13 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	}
 	reportChange("phase", "ensure_profile_chain")
 
+	policy, err := resolveProfilePolicy(ctx, cmd, contenoxDir, profile.hitlEnvelope, tracker)
+	if err != nil {
+		reportErr(err)
+		return err
+	}
+	reportChange("phase", "ensure_profile_policy")
+
 	chains, err := acpsvc.LoadChainRegistryFrom(profile.chainFile, profile.chainEnv)
 	if err != nil {
 		return err
@@ -334,7 +347,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	missionPub := missionEventPublisher(ctx, db, bus, workspaceID, tracker, trigHook)
 	missions := missionservice.New(db, missionservice.WithEventPublisher(missionPub))
 
-	acpHITL := hitlservice.NewWithDefaultPolicy(acpPolicySource(contenoxDir), runtimetypes.LocalTenantID, runtimetypes.New(db.WithoutTransaction()), tracker, profile.hitlPolicy)
+	acpHITL := hitlservice.NewWithDefaultPolicy(policy.source(contenoxDir), runtimetypes.LocalTenantID, runtimetypes.New(db.WithoutTransaction()), tracker, policy.Name)
 	// /policy and `contenox config set hitl-policy-name` both write this workspace's row; the evaluator must read the same one.
 	hitlservice.SetWorkspaceID(acpHITL, workspaceID)
 	askBridge := newRelayAskBridge(acpHITL, tracker)
@@ -403,8 +416,8 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		if enableHITL {
 			cfg.EnableHITL = true
 			cfg.AskApproval = askApproval
-			cfg.HITLPolicySource = acpPolicySource(contenoxDir)
-			cfg.HITLDefaultPolicyName = profile.hitlPolicy
+			cfg.HITLPolicySource = policy.source(contenoxDir)
+			cfg.HITLDefaultPolicyName = policy.Name
 			// The process's one durable-ask service: two instances cannot wake each other's parked waiters.
 			cfg.HITLService = acpHITL
 		}
@@ -467,7 +480,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			// Late-bound: nil until the conn factory runs below.
 			Transport:    func() *acpsvc.Transport { return transport },
 			HITL:         acpHITL,
-			PolicySource: hitlPolicySource(contenoxDir),
+			PolicySource: policy.source(contenoxDir),
 			DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
 				discoverChainAgents(dctx, agents, contenoxDir, tracker, DiscoverDeps{Store: runtimetypes.New(db.WithoutTransaction()), Bus: bus})
 			},
@@ -527,8 +540,8 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		WorkspaceID:           workspaceID,
 		ContenoxDir:           contenoxDir,
 		SessionRouter:         sessionRouter,
-		KnownPolicies:         embeddedPolicyNames(),
-		HITLDefaultPolicyName: profile.hitlPolicy,
+		KnownPolicies:         knownPolicyNames(contenoxDir),
+		HITLDefaultPolicyName: policy.Name,
 		UpdateBanner:          updateBanner,
 		Fleet:                 missionFleet,
 		Agents:                missionAgents,
@@ -602,19 +615,6 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		return fmt.Errorf("acp run: %w", runErr)
 	}
 	return nil
-}
-
-// acpPolicySource is the same search path every other host uses, including
-// .generated, where a declared agent's emitted envelope lives.
-func acpPolicySource(contenoxDir string) hitlservice.PolicySource {
-	if contenoxDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return hitlservice.NewFSPolicySource()
-		}
-		contenoxDir = filepath.Join(home, ".contenox")
-	}
-	return hitlPolicySource(contenoxDir)
 }
 
 func acpUpdateBanner(ctx context.Context, db libdb.DBManager, contenoxDir string) string {

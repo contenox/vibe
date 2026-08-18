@@ -27,6 +27,7 @@ The oracle is a configured default, not a flag you remember to pass:
 contenox config set default-oracle-chain chain-oracle-default.json
 
 # Optional: the envelope the oracle chain itself runs under.
+# Unset already uses hitl-policy-oracle.json, transpiled from [envelopes.oracle].
 contenox config set default-oracle-policy hitl-policy-oracle.json
 
 # Optional: let it rule on gated TOOL CALLS, not just questions.
@@ -44,7 +45,19 @@ The oracle mounts on the **ACP host**, which is where subagents actually come fr
 
 ## The two grants
 
-Turning the oracle on is not enough to let it release a gated call. The **subagent's own envelope** decides that, and it is a separate file from the oracle's:
+Turning the oracle on is not enough to let it release a gated call. The **subagent's own envelope** decides that, and it is a separate envelope from the oracle's:
+
+```toml
+# agents.toml
+[envelopes.mine]
+missions.answer = "approve"   # answers AND rulings on gated calls
+
+[envelopes.mine.attention]
+max_agent_answers = 3
+max_agent_approvals = 10
+```
+
+which transpiles to:
 
 ```json
 {
@@ -92,9 +105,21 @@ If a subagent raises enough asks for that to matter, the oracle is treating a sy
 
 ## The oracle's own envelope
 
-`hitl-policy-oracle.json` is `default_action: deny` with exactly two allows — `oracle.submit_verdict` and `oracle.verdict_state`, both in-process. No shell, no filesystem, no network, and no `command_prefix_allowlist` (a prefix allowlist pins a *name*, and `PATH` decides what a name resolves to).
+`[envelopes.oracle]` in `agents.toml`, transpiled to `hitl-policy-oracle.json`, is the only pure allowlist in the shipped set:
 
-Its own `attention` block is human-only on both halves: the oracle never adjudicates its own asks. An ask the oracle chain raises waits for a person, which is also what stops it from being offered its own question in a loop.
+```toml
+[envelopes.oracle]
+description = "The adjudication chain: submit a verdict, reach nothing else."
+default_action = "deny"
+missions.answer = "deny"
+
+[envelopes.oracle.tools]
+"oracle.*" = "allow"
+```
+
+`default_action: deny` with the in-process `oracle` toolset allowed and nothing else — its whole surface is the verdict tool and the deterministic state gate behind it. No file axis, no shell axis, no network axis, and therefore no `command_prefix_allowlist` to subvert through `PATH`. Denied rather than approved because nobody watches this chain to answer an ask, and an ask it raised would be offered back to itself.
+
+`missions.answer = "deny"` is human-only on both halves: the oracle never adjudicates its own asks. An ask the oracle chain raises waits for a person, which is also what stops it from being offered its own question in a loop.
 
 ## Reading what it did
 

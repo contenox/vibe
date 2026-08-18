@@ -28,13 +28,14 @@ var oracleSeededNames = []string{
 	"hitl-policy-oracle.json",
 }
 
-// seededOraclePaths is where init actually writes the oracle set. The chain
-// goes under system/ with the rest of the machinery; the envelope stays at the
-// top level, because the rules an agent runs under are meant to be read.
+// seededOraclePaths is where init actually puts the oracle set. The chain goes
+// under system/ with the rest of the machinery; the envelope is transpiled from
+// [envelopes.oracle] into .generated, which is where every rendered envelope
+// lands and where the loader looks behind the operator's own files.
 func seededOraclePaths(contenoxDir string) []string {
 	return []string{
 		filepath.Join(contenoxDir, SystemDirName, chainOracleDefaultFilename),
-		filepath.Join(contenoxDir, "hitl-policy-oracle.json"),
+		filepath.Join(contenoxDir, agentdecl.GeneratedDirName, "hitl-policy-oracle.json"),
 	}
 }
 
@@ -63,9 +64,12 @@ func TestUnit_InitLocal_SeedsOracleSet(t *testing.T) {
 
 	var out bytes.Buffer
 	require.NoError(t, RunLocalInit(&out, false, false, workspace, ""))
-	for _, name := range oracleSeededNames {
-		require.FileExistsf(t, filepath.Join(workspace, name), "%s must be seeded by init --local", name)
-	}
+	require.FileExists(t, filepath.Join(workspace, chainOracleDefaultFilename),
+		"the workspace chain override must be seeded by init --local")
+	require.FileExists(t, filepath.Join(workspace, agentdecl.GeneratedDirName, "hitl-policy-oracle.json"),
+		"the envelope must be rendered by init --local")
+	require.NoFileExists(t, filepath.Join(workspace, "hitl-policy-oracle.json"),
+		"init --local renders the envelope; it never plants a top-level policy the operator did not write")
 
 	systemNames := initSystemFileNames()
 	for _, name := range oracleSeededNames {
@@ -364,7 +368,7 @@ func TestUnit_ACPPolicySource_SeesGeneratedEnvelopes(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(generated, name),
 		[]byte(`{"default_action":"deny","rules":[]}`), 0o644))
 
-	raw, err := acpPolicySource(contenoxDir).ReadPolicy(context.Background(), "", name)
+	raw, err := profilePolicy{Name: name}.source(contenoxDir).ReadPolicy(context.Background(), "", name)
 	require.NoError(t, err, "a declared subagent's emitted envelope must be loadable by name")
 	require.Contains(t, string(raw), `"deny"`)
 }

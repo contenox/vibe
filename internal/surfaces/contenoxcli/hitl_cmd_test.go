@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/contenox/contenox/internal/services/agentdecl"
 	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -127,4 +129,56 @@ func TestUnit_CoverDirForBinary_NeverCreatesTheDirsList(t *testing.T) {
 	before := len(declared.Dirs)
 	coverDirForBinary(io.Discard, declared, filepath.FromSlash("/opt/tools/other"))
 	assert.Len(t, declared.Dirs, before, "an already-covered directory must not be re-added")
+}
+
+// TestUnit_HITLTrust_RefusesToWriteIntoARenderedEnvelope pins the hazard the
+// flip introduced: with nothing seeded at the top level, --policy <name>
+// resolves to .generated, and a hash written there is discarded by the next
+// render without a word.
+func TestUnit_HITLTrust_RefusesToWriteIntoARenderedEnvelope(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	contenoxDir := filepath.Join(home, ".contenox")
+	generated := filepath.Join(contenoxDir, agentdecl.GeneratedDirName)
+	require.NoError(t, os.MkdirAll(generated, 0o750))
+
+	name := "hitl-policy-default.json"
+	rendered := filepath.Join(generated, name)
+	require.NoError(t, os.WriteFile(rendered, []byte(hitlPolicyDefault), 0o644))
+
+	require.True(t, isRenderedPolicyPath(rendered))
+	require.False(t, isRenderedPolicyPath(filepath.Join(contenoxDir, name)))
+
+	cmd := newHITLTrustProbeCmd(t, contenoxDir)
+	require.NoError(t, cmd.Flags().Set("policy", name))
+	err := runHITLTrust(cmd, []string{"go"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), rendered)
+	require.Contains(t, err.Error(), filepath.Join(contenoxDir, name),
+		"the refusal must name the file to copy it to")
+
+	onDisk, readErr := os.ReadFile(rendered)
+	require.NoError(t, readErr)
+	require.Equal(t, hitlPolicyDefault, string(onDisk), "the rendered envelope must be untouched")
+
+	// --list is a read, so it still reports the rendered envelope.
+	listCmd := newHITLTrustProbeCmd(t, contenoxDir)
+	require.NoError(t, listCmd.Flags().Set("policy", name))
+	require.NoError(t, listCmd.Flags().Set("list", "true"))
+	require.NoError(t, runHITLTrust(listCmd, nil))
+}
+
+func newHITLTrustProbeCmd(t *testing.T, contenoxDir string) *cobra.Command {
+	t.Helper()
+	root := &cobra.Command{Use: "contenox"}
+	root.PersistentFlags().String("data-dir", "", "")
+	require.NoError(t, root.PersistentFlags().Set("data-dir", contenoxDir))
+	cmd := &cobra.Command{Use: "trust"}
+	cmd.Flags().String("policy", "hitl-policy-default.json", "")
+	cmd.Flags().Bool("refresh", false, "")
+	cmd.Flags().Bool("list", false, "")
+	cmd.Flags().Bool("remove", false, "")
+	cmd.SetOut(io.Discard)
+	root.AddCommand(cmd)
+	return cmd
 }

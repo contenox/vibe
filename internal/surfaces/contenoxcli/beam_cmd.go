@@ -77,6 +77,7 @@ func init() {
 	beamCmd.Flags().Bool("new", false, "Start a fresh session instead of reopening the newest one")
 	beamCmd.Flags().Bool("light", false, "Render for a light terminal background (overrides detection)")
 	beamCmd.Flags().Bool("plain", false, "Drop all colour and unicode: ASCII glyphs, no styling")
+	registerHITLPolicyFlag(beamCmd)
 	rootCmd.AddCommand(beamCmd)
 }
 

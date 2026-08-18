@@ -17,10 +17,15 @@ each is a file you write, diff and review like any other change.
 |---|---|
 | Which model answers | `model:` in the [agent declaration](/docs/guide/agents/); `execute_config.model` / `provider` in an authored chain |
 | Which tools exist at all | `tools:` in the declaration; `execute_config.tools` allowlist in an authored chain |
-| Where it may act | the instance's one workspace, and the [sandbox](/docs/guide/confinement/sandbox/) |
-| What runs, asks, or is refused | the envelope — [HITL policy](/docs/guide/hitl/) |
+| Where it may act | the instance's one workspace, the [sandbox](/docs/guide/confinement/sandbox/), and the envelope's `files.*` path lists |
+| What runs, asks, or is refused | the envelope's capability axes — [HITL policy](/docs/guide/hitl/) |
 | What content gets through | a `route` task — [moderation gate](/docs/use-cases/moderation-gate/) |
 | What it may spend | `compute` bounds in the envelope |
+
+Four of the six are the envelope, which is why it has a vocabulary of its own: a
+named `[envelopes.<name>]` section in
+[`agents.toml`](/docs/reference/agents-config/#envelopesname), transpiled into
+the policy the approval engine evaluates.
 
 ## 1. Which model answers
 
@@ -51,6 +56,16 @@ client-passed set, and `tools_policies` to constrain a provider before it runs �
 A tool the task was never granted is not a tool the model can be argued into
 calling.
 
+Reachable is not the same as permitted. A tool you connected — an MCP server, an
+OpenAPI subset — matches no shipped rule, so it falls to the envelope's
+`default_action` and asks on every call until you name it:
+
+```toml
+[envelopes.mine.tools]
+"github.*" = "approve"
+"tavily.search" = "allow"
+```
+
 ## 3. Where it may act
 
 An instance serves exactly one workspace, fixed when it was launched: the
@@ -58,6 +73,22 @@ directory `beam` or `run` started in, the path `serve` was given, the project an
 editor opened. Its sessions run there and nowhere else — never in a directory a
 client asked for, and never in the runtime's own config, database or policies.
 See [workspace authority](/docs/reference/contenox-cli/#workspace-authority).
+
+Inside that workspace the envelope narrows further. The two file axes take path
+lists, and a `deny_paths` glob is emitted **ahead** of the grant it carves out
+of, so a directory can be unreachable while the tree around it is readable:
+
+```toml
+[envelopes.mine.files.read]
+grant = "allow"
+approve_paths = ["**/{*.pem,*.key,.env,.env.*}"]
+```
+
+The shipped envelopes use this for the **credential quarantine** — key stores,
+keyrings, wallets, browser profiles, shell history — which rides on `read_only`,
+the base every other posture extends, and is therefore in force under the most
+permissive posture exactly as under the strictest. A declaration cannot name
+those paths, so it cannot consent to them either.
 
 Every agent-reachable shell gets a
 [scrubbed environment](/docs/guide/confinement/environment/), so credentials in
@@ -73,14 +104,30 @@ The envelope is evaluated before **every** tool call. Three verdicts:
 - `approve` — pauses and waits for a person
 - `deny` — refused
 
-A call no rule matches takes `default_action`. Set that to `approve` and
-anything you did not think of asks instead of proceeding — which is the point of
-declaring rules rather than enumerating threats.
+You write those verdicts against capability **axes**, and the runtime compiles
+them into the rules the engine matches:
 
-Rules match on the tool and its arguments, with conditions like
-`command_prefix_allowlist`, so `git` and `go test` can pass while everything
-else on the same shell stops. The full grammar is in
-[HITL policies](/docs/guide/hitl/), and the format has a
+```toml
+[envelopes.mine]
+files.read = "allow"
+files.write = "approve"
+shell = "deny"
+missions.fire = "allow"
+```
+
+An axis you leave unset emits no rule and takes `default_action`. Set that to
+`approve` and anything you did not think of asks instead of proceeding — which
+is the point of declaring capabilities rather than enumerating threats.
+
+The `shell` axis is the one with tiers, because "which commands" is never one
+answer: a `blacklist` that cannot be reached past, a `substitution` verdict
+judged before any verb is trusted, a `prefix_allowlist` that grants, and an
+`ask_always` list that claws back. So `go test` and `ls` can pass while `rm` and
+`sudo` still ask and `mkfs` is refused, all on the same shell.
+
+The full axis grammar is in
+[`[envelopes.<name>]`](/docs/reference/agents-config/#envelopesname), the
+compiled format is in [HITL policies](/docs/guide/hitl/), and that format has a
 [published JSON Schema](/schema/hitl-policy-v1.schema.json) you can point your
 editor at.
 
@@ -112,9 +159,22 @@ you can read what it decides on.
 
 ## 6. What it may spend
 
-`compute` caps turns, tool calls and tokens. A unit that crosses a bound ends as
-`stuck` rather than running on. `attention` decides who may answer a unit's
-question — by default a human, never the agent itself.
+The envelope's `compute` block caps turns, tool calls and tokens. A unit that
+crosses a bound ends as `stuck` rather than running on. The `missions.answer`
+axis decides who may answer a unit's question — by default a human, never the
+agent itself — and `attention` puts the numbers on it.
+
+```toml
+[envelopes.mine.compute]
+max_tool_calls = 300
+max_tokens = 2000000
+on_exhausted = "finish_stuck"
+```
+
+Enforcement differs per field and
+[Missions](/docs/guide/missions/#compute-bounds-and-what-actually-enforces-them)
+says which is which; the runtime is explicit about it rather than implying
+uniform coverage.
 
 ## None of this asks the model to behave
 
@@ -126,7 +186,8 @@ instructions.
 
 ## Next
 
-- [HITL policies](/docs/guide/hitl/) — the envelope format in full.
+- [HITL policies](/docs/guide/hitl/) — where an envelope comes from, and what it compiles to.
+- [`[envelopes.<name>]`](/docs/reference/agents-config/#envelopesname) — the axis grammar in full.
 - [The agent sandbox](/docs/guide/confinement/sandbox/) — the filesystem and exec fence.
 - [The threat model](/docs/guide/confinement/why/) — why the fence exists.
 - [Nested permission bomb](/docs/use-cases/nested-permission-bomb/) — why

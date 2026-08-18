@@ -93,7 +93,9 @@ Then, as the operator:
 
 ## What `contenox acpx` can and cannot do
 
-`contenox acpx` runs under `hitl-policy-acpx.json` — a **pure allow/deny** policy, no approval tier, because an untrusted non-interactive channel has no one to approve anything.
+`contenox acpx` runs under the `acpx` [envelope](/docs/guide/hitl/#shipped-envelopes) — `[envelopes.acpx]` in `agents.toml`, transpiled to `hitl-policy-acpx.json`. It is a **pure allow/deny** surface, no approval tier, because an untrusted non-interactive channel has no one to approve anything. It differs from `strict` on one word: deny, not ask.
+
+Pass `--hitl-policy <name|path>` to run this profile under a different envelope, and write your own `[envelopes.<name>]` section to define one.
 
 **Works:**
 
@@ -141,7 +143,7 @@ Reads working while every write, shell, and network action is refused is the pro
 ## Where to next
 
 - [The nested permission bomb](/docs/use-cases/nested-permission-bomb/) — why an untrusted driver gets an authored policy, not your keyring.
-- [HITL policies](/docs/guide/hitl/) — the acpx policy is an authored file you can tighten.
+- [HITL policies](/docs/guide/hitl/) — the `acpx` envelope is an authored section you can tighten, or replace with one of your own.
 - [Use from Zed](/docs/integrations/editors/zed/) · [JetBrains](/docs/integrations/editors/jetbrains/) · [AionUi](/docs/integrations/editors/aionui/) — device-owner clients, with interactive approval.
 
 Sources: [ACP agents](https://docs.openclaw.ai/tools/acp-agents) · [Channels](https://docs.openclaw.ai/cli/channels) · [Pairing](https://docs.openclaw.ai/cli/pairing)

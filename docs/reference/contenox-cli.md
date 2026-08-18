@@ -8,6 +8,8 @@ order: 3
 
 Every contenox subcommand, flag, and environment variable. Agents, tools, models and the rules they run under are files on your machine, and so is everything it executes.
 
+![A natural-language task in the terminal: contenox reads the repo and answers](/hero.gif)
+
 Three commands are the ones you reach for; the rest configure what they run. [`contenox beam`](#contenox-beam) is the front door — you, at a terminal. [`contenox run`](#contenox-run) is the scripting shape — a program is the caller. [`contenox serve`](#contenox-serve-path) is the standing host — an organization is accountable for it.
 
 ## Global Flags
@@ -64,6 +66,7 @@ The transcript is written into your native scrollback rather than a managed pane
 | `--session <name>` | Open (or create) the named session |
 | `--light` | Light-background colour scheme |
 | `--plain` | Plain output: no colour and no redrawing, for terminals and captures that want neither |
+| `--hitl-policy <name\|path>` | Envelope this session runs under: a name from `[envelopes]` in `agents.toml`, or a path to a policy file used verbatim. Default `default` |
 | `--log-dir <dir>` | Write structured logs here (default: `<data-dir>/logs`) |
 
 ### `contenox run`
@@ -151,7 +154,7 @@ contenox doctor --bundle        # also write a redacted diagnostics zip to attac
 
 `--bundle` is the flag to reach for when you are stuck and filing a bug. The archive holds `doctor.json` (this report), `build.txt` (version, Go toolchain, platform, VCS build settings), and the tail of every `telemetry.log` it finds — capped at the last 256 KB each, one entry per source directory (workspace `.contenox`, the database's directory, `~/.contenox`). Every member is passed through credential redaction on the way in: named assignments (`api_key`, `token`, `password`, `authorization`, …), URL userinfo, `Bearer` values, and recognizable provider key shapes are replaced with `[REDACTED]`, and the command prints how many values it replaced. The issue URL is pre-filled with the environment facts a maintainer asks for first and names the bundle as the attachment — it carries no log content, so nothing leaves your machine until you attach the file yourself. Review the zip before sharing it.
 
-`doctor` also reports vision-capable model availability, flags a HITL policy preset that predates the currently shipped toolset (fix with `contenox init --refresh-policies`), and warns — without changing anything — when `default-max-tokens` exceeds the active provider's output-token ceiling.
+`doctor` also reports vision-capable model availability, flags a top-level HITL policy copy that predates the currently shipped toolset (fix with `contenox init --refresh-policies`, or delete it to fall through to the envelope), and warns — without changing anything — when `default-max-tokens` exceeds the active provider's output-token ceiling. It judges only the copies you own: a file under `.generated/` is the transpiler's and is re-rendered on every run, so it is never reported as stale.
 
 When one of the [external state backends](/docs/reference/config/#external-backends-for-state-opt-in) is selected, `doctor` adds a **State storage** section naming the backend behind the store, the message bus and the key-value cache, and whether a remote one answered; an unreachable one is named with the variable that selected it. With none of them set the section is absent and the report is what it always was.
 
@@ -273,6 +276,8 @@ contenox vet ./mychains/      # every .json under a directory
 
 Files are classified by content: a `"tasks"` array is a chain, a `"rules"` array (or a `hitl-policy-*.json` name) is an envelope; anything else is skipped. A chain is checked with the load-time linter (handler input/output signatures, dataflow across every `goto`/`on_failure` edge, `input_var` and template references, branches that can never fire, structural defects). A policy is checked for unknown fields, invalid rule shapes, tool patterns that can never match, and timeout values. A file can also print a `WARN` line — a field that parses and is accepted but is not enforced as strongly as it reads; warnings never fail the run. `vet` exits non-zero when any vetted file fails.
 
+`vet` also reports a policy file that **shadows a rendered envelope** of the same name. Neither file is wrong — the search path is doing what it promises — but the transpiled one is then never read, so editing `[envelopes.<name>]` in `agents.toml` would change nothing. Worth knowing before you spend an afternoon editing the wrong file.
+
 ### `contenox hitl trust [command-or-path ...]`
 
 Declare, refresh, or list the binaries a policy's allow rules may run. An allowlist entry pins a command **name**; `PATH` decides what that name is. This records the absolute real path a name resolves to and that file's SHA256 into the policy's `trusted_binaries` block, so a substituted or tampered binary is refused instead of inheriting the allow.
@@ -287,18 +292,22 @@ contenox hitl trust --remove go     # drop a declaration
 
 | Flag | Description |
 | ---- | ----------- |
-| `--policy <name\|path>` | Policy to update: a preset name resolved along the policy search path, or an explicit file path (default `hitl-policy-default.json`) |
+| `--policy <name\|path>` | Policy to update: a name resolved along the policy search path, or an explicit file path (default `hitl-policy-default.json`) |
 | `--refresh` | Re-read every already-declared binary and rewrite its hash — the legitimate-upgrade path |
 | `--list` | List every declaration and its state on this host; changes nothing |
 | `--remove` | Remove the named declarations instead of adding them |
 
-Names are resolved exactly as the policy evaluator resolves them (`PATH` lookup, `PATHEXT` on Windows, then symlinks followed to the real file), so a declaration written here is by construction the one the evaluator will look up. Declarations are spliced into the policy without disturbing any other byte of the file, and the result is validated before it is written. Declaring any hash makes the pin strict for that policy: a command with no declared hash is refused. See [Trusted binaries](/docs/guide/confinement/trusted-binaries/) for the full workflow, the per-platform guarantees, and what this does not protect.
+Names are resolved exactly as the policy evaluator resolves them (`PATH` lookup, `PATHEXT` on Windows, then symlinks followed to the real file), so a declaration written here is by construction the one the evaluator will look up. Declarations are spliced into the policy without disturbing any other byte of the file, and the result is validated before it is written. Declaring any hash makes the pin strict for that policy: a command with no declared hash is refused.
+
+A `--policy` that resolves to a **rendered envelope** under `.generated/` is **refused**, not written: that file is re-transpiled from `agents.toml` on the next run, so the hash would be discarded without a word. The message names the top-level copy to make instead, which shadows the render and is nobody's to rewrite. See [Trusted binaries](/docs/guide/confinement/trusted-binaries/) for the full workflow, the per-platform guarantees, and what this does not protect.
 
 ### `contenox init [provider]`
 
 Initializes a workspace (`.contenox/`) and ensures default runtime presets exist globally (`~/.contenox/`). It's best to run `contenox setup` first for a guided configuration.
 
-`init` creates the `.contenox/workspace.id` marker — a project's portable identity. The marker carries a stable workspace UUID (the database scoping token every session under the project is filed under) plus an optional friendly **name**. It travels *with* the directory, so a project means one thing to the CLI and every ACP session alike. It also seeds `agents.toml` and an `agents/` directory — where you [declare an agent](/docs/guide/agents/) — plus the HITL policies and the [oracle](/docs/use-cases/auto-attention/) set (`chain-oracle-default.json` and `hitl-policy-oracle.json` — inert until `default-oracle-chain` names one) under `~/.contenox/`, and the shipped chain files under `~/.contenox/system/`, unless they already exist. Workspace-local `.contenox/` files can override these global presets by name; `init --local` seeds those workspace copies for you instead of writing to `~/.contenox/`. The seeded chain files follow the `chain-<role>-<variant>.json` convention — [Chain files: naming, roles, and resolution](/docs/guide/chains/naming/) covers the grammar and the exact touch/never-touch matrix of every init flag.
+`init` creates the `.contenox/workspace.id` marker — a project's portable identity. The marker carries a stable workspace UUID (the database scoping token every session under the project is filed under) plus an optional friendly **name**. It travels *with* the directory, so a project means one thing to the CLI and every ACP session alike. It also seeds `agents.toml` and an `agents/` directory — where you [declare an agent](/docs/guide/agents/) — plus the [oracle](/docs/use-cases/auto-attention/) chain (`chain-oracle-default.json`, inert until `default-oracle-chain` names one) under `~/.contenox/`, and the shipped chain files under `~/.contenox/system/`, unless they already exist. Workspace-local `.contenox/` files can override these global presets by name; `init --local` seeds those workspace copies for you instead of writing to `~/.contenox/`. The seeded chain files follow the `chain-<role>-<variant>.json` convention — [Chain files: naming, roles, and resolution](/docs/guide/chains/naming/) covers the grammar and the exact touch/never-touch matrix of every init flag.
+
+**Approval policies are not seeded.** Each `[envelopes.<name>]` section in `agents.toml` is transpiled into `.generated/hitl-policy-<name>.json` instead, on every run rather than once at init — so a name resolves because the envelope behind it was rendered, not because a copy was written where your own file goes. `init` renders them and prints each one it wrote. A `hitl-policy-<name>.json` you write at the top level of `.contenox/` or `~/.contenox/` shadows the render and is never rewritten. See [Where a policy comes from](/docs/guide/hitl/#where-a-policy-comes-from).
 
 By default `init` walks up to reuse an ancestor's `.contenox` if one exists (like `git`). Pass `--project` to force a *fresh* project marker in the current directory instead — a distinct workspace nested under a larger one — and `--name` to give it a friendly name (default: the folder's own name).
 
@@ -310,7 +319,7 @@ contenox init gemini                   # pre-configure for Gemini
 contenox init openai                   # pre-configure for OpenAI
 contenox init --force                  # overwrite existing files
 contenox init --update                 # refresh unchanged default files
-contenox init --refresh-policies       # rewrite only the HITL policy presets
+contenox init --refresh-policies       # rewrite policy copies an earlier build left behind
 contenox init --local                  # seed workspace-local override copies
 contenox init --project --name "API"   # a fresh named project in the current dir
 ```
@@ -319,8 +328,8 @@ contenox init --project --name "API"   # a fresh named project in the current di
 | ----------- | ----------------------------------- |
 | `-f, --force` | Overwrite existing preset files |
 | `--update`  | Refresh unchanged default files to the latest embedded versions; first renames shipped chain files still under a pre-v0.38 name (e.g. `default-acp-chain.json`) to the `chain-<role>-<variant>.json` convention, byte-for-byte, in `~/.contenox` and the workspace `.contenox` both |
-| `--local`   | Write the chain files and HITL policy presets into the workspace `.contenox/` instead of `~/.contenox` — deliberate workspace-local overrides that win over the global copies by name |
-| `--refresh-policies` | Rewrite only the HITL policy presets (`hitl-policy-*.json`) in `~/.contenox` from this build; chains, config, and sessions are left untouched — this is what `contenox doctor` points at when an envelope predates a shipped toolset |
+| `--local`   | Write the chain files and agent declarations into the workspace `.contenox/` instead of `~/.contenox` — deliberate workspace-local overrides that win over the global copies by name |
+| `--refresh-policies` | Rewrite the `hitl-policy-*.json` copies an earlier build left at the top level of `~/.contenox` or a shadowing workspace `.contenox`, from this build. It **only rewrites files that are already there** — it never creates one, and never touches `.generated/`, which the envelopes own. Chains, config and sessions are left alone, unlike `--force`. This is what `contenox doctor` points at when one of those copies predates a shipped toolset |
 | `--project` | Create a fresh project marker in the current directory (a new workspace id) instead of reusing an ancestor's `.contenox` |
 | `--name <name>` | Friendly project name for the marker (default: the directory name) |
 
@@ -381,12 +390,13 @@ Valid workspace keys: `default-chain`, `hitl-policy-name`.
 
 | Key | Description |
 |---|---|
+| `hitl-policy-name` | Envelope this workspace runs under, as the filename it transpiles to (`hitl-policy-strict.json`). Empty uses `hitl-policy-default.json`. Overridden per run by `--hitl-policy` on `beam`, `acp`, `acpx` and `serve` — see [Policy resolution order](/docs/guide/hitl/#policy-resolution-order). |
 | `default-audio-model` | Model preferred for requests carrying audio attachments, independent from `default-model`. Unset falls back to `default-model`; audio requests resolve only to audio-capable models either way. |
 | `default-audio-provider` | Provider type for the audio model, independent from `default-provider`. Unset uses `default-provider`. |
 | `default-mission-agent` | Declared agent the ACP `/mission <intent>` slash command falls back to when none is named. `contenox mission fire` always requires the agent name as a positional argument, so this key does not affect it. |
 | `default-mission-policy` | Envelope (HITL policy) name that both `/mission` and `contenox mission fire --policy` fall back to when none is named. `/mission --policy <envelope>` overrides it for one mission. It is also the envelope a subagent started by `/plan` or the `mission_start` tool runs under. |
 | `default-oracle-chain` | Chain that adjudicates a subagent's asks, e.g. `chain-oracle-default.json`. **Setting it is what turns the [oracle](/docs/use-cases/auto-attention/) on**; unset means no oracle and every ask waits for a human. `contenox acp --oracle <chain>` overrides it for one run, and `--oracle off` disables it. |
-| `default-oracle-policy` | Envelope the oracle chain itself runs under. Unset uses `hitl-policy-oracle.json`. Override per run with `--oracle-policy`. |
+| `default-oracle-policy` | Envelope the oracle chain itself runs under. Unset uses `hitl-policy-oracle.json`, transpiled from `[envelopes.oracle]`. Override per run with `--oracle-policy`. |
 | `oracle-approves-tool-calls` | `true`/`false` (default false). Lets the oracle rule on a subagent's `approve`-tier **tool calls**, not just its questions. The subagent's own envelope must also grant `attention.allowAgentApprovals` — both have to agree. Override per run with `--oracle-approves-tool-calls`. |
 | `fleet-max-parallel` | Fleet-wide admission cap: max concurrently open mission units (integer; `0` = unlimited; default 8). |
 
@@ -591,7 +601,7 @@ From inside a session (`contenox beam`, or an editor over `contenox acp`) fire a
 - `/mission <agent-name> <intent>` — fires the named agent instead.
 - `/mission --policy <envelope> [agent-name] <intent>` — bounds this one mission under a different envelope. `--policy=<envelope>` is accepted too. Flags must come **before** the agent and intent, so a `--` inside an intent stays literal text.
 
-Envelopes are discovered the way the runtime's policy loader resolves them — the workspace `.contenox/` first, then `~/.contenox/`, first match wins — so an operator-authored `hitl-policy-*.json` is offered beside the shipped presets, and a shadowing workspace copy is the one listed. A name that resolves to no file is refused in the session, with the available names listed, instead of dispatching a unit under a fallback nobody chose.
+Envelopes are discovered the way the runtime's policy loader resolves them — the workspace `.contenox/`, then `~/.contenox/`, then each of their `.generated/` directories, first match wins — so an envelope transpiled from `[envelopes.<name>]` in `agents.toml` is offered beside any `hitl-policy-*.json` you wrote yourself, and where both exist the top-level copy is the one listed. The picker stats the filesystem on every call rather than caching a startup snapshot, so an envelope you add mid-session shows up on the next `/mission`. A name that resolves to no file is refused in the session, with the available names listed, instead of dispatching a unit under a fallback nobody chose.
 
 The two agent forms are the same shape, so contenox resolves the first token against the declared-agent registry: a hit is the named form, a miss means the whole line is the intent for the default agent. The confirmation states which agent was chosen, the envelope, where that envelope came from (`--policy` or `default-mission-policy`), and the envelope's character — so the bounds just accepted are in the transcript, not only in a config file.
 
@@ -657,7 +667,10 @@ contenox acpx                # headless / untrusted-driver profile
 | --------------------- | -------------------------------------------------------------------------------------------- |
 | `--auto`             | Non-interactive mode: disable HITL permission prompts (gated tools run unattended)             |
 | `--setup`            | Run the interactive setup wizard to configure provider and model, then exit                    |
+| `--hitl-policy <name\|path>` | Envelope this profile runs under, overriding its default (`default` for `acp`, `acpx` for `acpx`) |
 | `--workspace-id <id>` | Workspace ID for new ACP sessions (default: the stable workspace from `~/.contenox/workspace.id`, same as the CLI) |
+
+Each profile names the [envelope](/docs/guide/hitl/#shipped-envelopes) it runs under: `acp` runs under `default`, the same envelope `beam` and the CLI use, and `acpx` under the hardened `acpx`. There is no separate `acp` envelope — it folded into `default`, which absorbed its two extra shell tokens.
 
 Each profile's chain resolves in order: an operator copy at `~/.contenox/<name>.json`, then a compiled `~/.contenox/.generated/<name>.json`, then the shipped `~/.contenox/system/<name>.json` — first match wins. `CONTENOX_ACP_CHAIN_PATH` (acp) and `CONTENOX_ACPX_CHAIN_PATH` (acpx) override this for one run. See the [editor integration guides](/docs/integrations/editors/zed/) for client setup.
 
@@ -675,12 +688,13 @@ contenox serve ~/src/api    # one project
 
 The optional path is **the** workspace this instance serves, fixed for the life of the process — see [Workspace authority](#workspace-authority). With no path the host serves your home directory: a host outlives the shell that started it and is reached from a device that knows nothing about that shell's working directory, so scoping it to the launch directory would make its scope depend on where you happened to be standing. `contenox serve .` asks for the narrow scope explicitly.
 
-A host has **no `local_fs` and no `local_shell`**, under any policy. Those tools are forwarded to a connected client's `fs/*` and `terminal/*` capabilities, and a standing host has no such client; every capability it has is an MCP server or OpenAPI service you attached. See [contenox serve: the standing host](/docs/guide/serve/).
+A host has **no `local_fs` and no `local_shell`**, under any policy. Those tools are forwarded to a connected client's `fs/*` and `terminal/*` capabilities, and a standing host has no such client; every capability it has is an MCP server or OpenAPI service you attached. Its `serve` envelope says so structurally — `files.read`, `files.write` and `shell` all deny — so an operator reading the policy sees the shape of the host rather than having to read the source. `default_action` stays `approve`, because what does arrive is the servers you connected and nothing here can know what they do; name them under `[envelopes.serve.tools]` to change that. See [contenox serve: the standing host](/docs/guide/serve/).
 
 The status screen reports what the process actually is — setup readiness (the same check `contenox doctor` runs), the workspace, the model, the relay and app URL when paired, and the log directory with the retention bounds in force. An unpaired host says so and prints the steps to pair it; it still runs, it is simply reachable on that machine only.
 
 | Flag           | Description                                                              |
 | -------------- | ------------------------------------------------------------------------ |
+| `--hitl-policy <name\|path>` | Envelope this host runs under: a name from `[envelopes]` in `agents.toml`, or a path to a policy file used verbatim. Default `serve` |
 | `--log-dir <dir>` | Write host logs here (default: `<data-dir>/logs`)                     |
 
 Structured logs go to the log directory rather than the screen, so the screen stays a status display. Files are named `serve-<YYYY-MM-DD>.log`, and a day that outgrows its size bound continues in `serve-<YYYY-MM-DD>.2.log`, `.3.log`, and so on. Retention is bounded by the `log-*` [config keys](/docs/reference/config/#set-persistent-defaults); restarting a host continues the current part rather than starting a new file per launch.

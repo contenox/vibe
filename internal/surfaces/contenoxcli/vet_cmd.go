@@ -3,6 +3,7 @@ package contenoxcli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -60,7 +61,7 @@ func runVetCmd(cmd *cobra.Command, args []string) error {
 	}
 	// Trigger files are a beta surface: without the opt-in they stay in the
 	// "skip" class.
-	vo := vetOpts{triggers: betaEnabledGlobal(), contenoxDir: contenoxDir}
+	vo := vetOpts{triggers: betaEnabledGlobal(), contenoxDir: contenoxDir, envelopeSearchPath: policyDirs(contenoxDir)}
 
 	var files []string
 	switch {
@@ -137,6 +138,9 @@ const (
 type vetOpts struct {
 	triggers    bool
 	contenoxDir string
+	// envelopeSearchPath turns on the two checks that need to know where else a
+	// policy of this name lives; empty leaves a single file judged on its own.
+	envelopeSearchPath []string
 }
 
 func classifyVetFile(path string, data []byte, vo vetOpts) vetFileKind {
@@ -186,7 +190,11 @@ func vetOneFile(path string, vo vetOpts) (bool, error, []hitlservice.PolicyDiagn
 	case vetKindEnvelope:
 		// A missing or mismatched trusted-binary entry is a warning: the envelope is
 		// still valid, and the runtime refuses the call.
-		return true, hitlservice.VetPolicy(data), hitlservice.TrustedBinaryDiagnostics(data)
+		diags := hitlservice.TrustedBinaryDiagnostics(data)
+		diags = append(diags, shadowedEnvelopeDiagnostics(path, vo.envelopeSearchPath)...)
+		errs := []error{hitlservice.VetPolicy(data)}
+		errs = append(errs, unservedToolErrors(data)...)
+		return true, errors.Join(errs...), diags
 	case vetKindTrigger:
 		return true, eventtrigger.Vet(data, resolveTriggerRef(vo.contenoxDir)), nil
 	default:

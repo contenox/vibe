@@ -143,7 +143,45 @@ Rules for the two keys:
 - A malformed block fails the **whole policy** to load, and contenox falls back to its rule-free, approve-everything default. That is fail-closed by design — you get approval prompts, not silent unreviewed execution. `contenox vet` catches it first.
 
 > **Note:**
-> Declarations describe **one host**. Absolute paths and digests are machine-specific, and `/usr/bin` is not even an absolute path on Windows. A policy file shared across platforms needs a per-platform copy of the `trusted_binaries` block — this is why contenox ships no declarations in its presets: seeding one would ship a false claim.
+> Declarations describe **one host**. Absolute paths and digests are machine-specific, and `/usr/bin` is not even an absolute path on Windows. A policy file shared across platforms needs a per-platform copy of the `trusted_binaries` block — this is why contenox ships no declarations in its envelopes: seeding one would ship a false claim.
+
+## Where it sits in an envelope
+
+`trusted_binaries` is a **pass-through** block. An
+[envelope](/docs/reference/agents-config/#envelopesname) carries it verbatim into
+the rendered policy — the transpiler validates its shape and changes nothing
+about it, because there is nothing to compile: the block is already the two lists
+the evaluator reads.
+
+```toml
+[envelopes.mine.trusted_binaries]
+dirs = ["/usr/bin", "/usr/lib/go-1.22/bin"]
+
+[envelopes.mine.trusted_binaries.hashes]
+"/usr/lib/go-1.22/bin/go" = "89b81bd72c27404ccfd701c136b7e3ace9a4ccb26d96d97e874b48829aed27a1"
+```
+
+Under `extends` it merges per leaf key, so a child adding one hash keeps the
+parent's `dirs`.
+
+**But an envelope is usually the wrong place for it.** Digests describe one host,
+and `agents.toml` is a file you share across machines and check into a repo.
+`contenox hitl trust` therefore refuses to write into a rendered envelope at all
+— that file is rewritten from `agents.toml` on the next run, so a hash declared
+there would be silently discarded:
+
+```console
+$ contenox hitl trust --policy hitl-policy-default.json go
+~/.contenox/.generated/hitl-policy-default.json is rendered from [envelopes.default]
+in agents.toml and is rewritten on every run — a hash declared there would be
+silently discarded.
+Copy it to ~/.contenox/hitl-policy-default.json first (a top-level copy shadows
+the rendered one), then re-run; or pass --policy with an explicit path
+```
+
+That copy is the intended home: a per-host file, owned by whoever runs that host,
+sitting ahead of the render on the search path. Put the axes in the envelope and
+the digests in the copy.
 
 ## The upgrade workflow
 
@@ -167,7 +205,7 @@ Other verbs:
 ```bash
 contenox hitl trust --list             # every declaration and its state here
 contenox hitl trust --remove go        # drop a declaration
-contenox hitl trust --policy hitl-policy-acp.json go   # a specific policy
+contenox hitl trust --policy ./ops/host.json go        # a specific file
 ```
 
 ## How vet and doctor report drift

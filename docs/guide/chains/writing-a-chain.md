@@ -25,13 +25,13 @@ If you haven't installed Contenox yet, do the [Quickstart](/docs/guide/quickstar
 ```
 ~/.contenox/                    ← global (shared across all workspaces)
 ├── local.db                    ← SQLite: backends, config, sessions, MCP registrations
-├── agents.toml                 ← the knobs a declaration cannot reach
+├── agents.toml                 ← the knobs a declaration cannot reach, and the envelopes
 ├── agents/                     ← your agents, one Markdown file each
-├── hitl-policy-default.json    ← default HITL policy
-├── hitl-policy-strict.json
-├── hitl-policy-dev.json
-├── hitl-policy-acp.json        ← editor (ACP) sessions
-├── hitl-policy-acpx.json       ← headless / untrusted-driver (ACPX) sessions
+├── .generated/                 ← derived, rewritten every run: never edit, never commit
+│   ├── hitl-policy-default.json    ← transpiled from [envelopes.default]
+│   ├── hitl-policy-strict.json     ← …from [envelopes.strict]
+│   ├── hitl-policy-acpx.json       ← …and so on, one per declared envelope
+│   └── chain-agent-*.json          ← the chains your declarations compiled to
 └── system/                     ← the shipped chains: machinery, not yours to author
     ├── chain-planner-default.json  ← the default mission planner
     ├── chain-compact-default.json  ← history compaction
@@ -41,11 +41,13 @@ If you haven't installed Contenox yet, do the [Quickstart](/docs/guide/quickstar
 └── workspace.id                ← unique workspace ID
 ```
 
+Nothing seeds a `hitl-policy-*.json` at the top level any more. Write one there yourself and it shadows the transpiled envelope of the same name — which is the supported way to take a machine-specific policy out of a shared `agents.toml`.
+
 To make any directory a workspace, run `contenox init` inside it. Workspace-scoped config (like `default-chain` and `hitl-policy-name`) is stored per-workspace in the SQLite database.
 
 **Taking ownership of a shipped chain is a copy.** Files resolve by name — the workspace `.contenox/` first, then `~/.contenox/`, then `~/.contenox/system/`. So copying one up a level makes it yours, and `contenox init` will not write over it or put a shipped copy back underneath.
 
-> **Note:** `contenox init --local` seeds the shipped chains and HITL policy presets into the workspace `.contenox/` for you — the supported way to create workspace-local overrides without copying files by hand. `contenox doctor` lists which workspace copies are currently shadowing global ones.
+> **Note:** `contenox init --local` seeds the shipped chains into the workspace `.contenox/` for you — the supported way to create workspace-local overrides without copying files by hand. Envelopes need no seeding: put an `[envelopes.<name>]` section in the workspace `agents.toml` and it transpiles into `.contenox/.generated/`, ahead of the global one. `contenox doctor` lists which workspace copies are currently shadowing global ones.
 
 ## What `contenox init` already gave you
 

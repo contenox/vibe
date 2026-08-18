@@ -37,6 +37,10 @@ var termOnlyImports = map[string]bool{
 //	    or beam/style — components are pure (state, width) -> frame.Line
 //	    renderers;
 //	(d) beam/frame imports only the standard library.
+//	(e) no beam package imports this module outside beam/ except libacp —
+//	    beam was a separate module the compiler kept to libacp; in-tree this
+//	    rule is what preserves that, so the runtime's internals cannot leak
+//	    back into a client (the drift that cost the previous in-tree TUI).
 //
 // A violation reports the offending file and import path.
 func TestUnit_ImportBoundaries(t *testing.T) {
@@ -75,12 +79,34 @@ func TestUnit_ImportBoundaries(t *testing.T) {
 			checkEngineBridgeBoundary(t, rel, relDir, importPath)
 			checkCompBoundary(t, rel, relDir, importPath)
 			checkFrameBoundary(t, rel, relDir, importPath)
+			checkModuleBoundary(t, rel, importPath)
 		}
 		return nil
 	})
 	if walkErr != nil {
 		t.Fatalf("testkit: walking %s: %v", root, walkErr)
 	}
+}
+
+const contenoxModule = "github.com/contenox/contenox/"
+
+// checkModuleBoundary is rule (e): a beam production file may import this
+// module only under beam/ (beamModule) or as libacp; any other
+// contenox/internal or contenox/lib* path is the leak the rule exists to
+// stop. Test files are exempt — a wire-contract test legitimately imports the
+// producer type it pins beam's decoder against, and a test is never shipped.
+func checkModuleBoundary(t *testing.T, file, importPath string) {
+	t.Helper()
+	if strings.HasSuffix(file, "_test.go") {
+		return
+	}
+	if !strings.HasPrefix(importPath, contenoxModule) {
+		return
+	}
+	if strings.HasPrefix(importPath, beamModule) || importPath == contenoxModule+"libacp" {
+		return
+	}
+	t.Errorf("import boundary: %s imports %q — a beam package may reach this module only under beam/ or libacp", file, importPath)
 }
 
 // inPackageOrSub reports whether relDir is exactly name or a subpackage of

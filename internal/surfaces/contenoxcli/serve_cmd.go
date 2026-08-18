@@ -66,6 +66,7 @@ const hostLogDirName = "logs"
 
 func init() {
 	serveCmd.Flags().String("log-dir", "", "Write host logs here (default: <data-dir>/"+hostLogDirName+")")
+	registerHITLPolicyFlag(serveCmd)
 	rootCmd.AddCommand(serveCmd)
 }
 

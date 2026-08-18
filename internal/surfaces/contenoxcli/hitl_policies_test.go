@@ -276,78 +276,37 @@ func TestUnit_InteractivePoliciesRequireApprovalForPlainShellFallback(t *testing
 	}
 }
 
-// TestUnit_PolicyPresetUpgrade asserts untouched presets refresh automatically while hand-edited or unrecorded ones are left alone and reported stale.
-func TestUnit_PolicyPresetUpgrade(t *testing.T) {
+// TestUnit_RefreshExistingHITLPolicies asserts the refresh verb rewrites the
+// preset copies a directory already holds and creates none that it does not —
+// a preset is an operator's file now, never something a run puts back.
+func TestUnit_RefreshExistingHITLPolicies(t *testing.T) {
+	t.Parallel()
 	name := HITLPolicyPresets[0].Name
 
-	t.Run("untouched preset is upgraded", func(t *testing.T) {
+	t.Run("an existing copy is rewritten", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
-		// A previous build's file, recorded as ours.
-		old := `{"default_action":"approve","rules":[]}`
-		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(old), 0644))
-		writePresetState(dir, map[string]string{name: presetSHA(old)})
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(`{"default_action":"approve","rules":[]}`), 0644))
 
-		stale, err := upgradeEmbeddedHITLPolicies(dir, false)
+		written, err := refreshExistingHITLPolicies(dir)
 		require.NoError(t, err)
-		require.Empty(t, stale)
+		require.Equal(t, []string{filepath.Join(dir, name)}, written)
 
 		got, err := os.ReadFile(filepath.Join(dir, name))
 		require.NoError(t, err)
-		require.Equal(t, HITLPolicyPresets[0].Content, string(got), "an unedited preset must be refreshed")
+		require.Equal(t, HITLPolicyPresets[0].Content, string(got))
 	})
 
-	t.Run("hand-edited preset is kept and reported", func(t *testing.T) {
+	t.Run("an empty dir stays empty", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
-		edited := `{"default_action":"deny","rules":[]}`
-		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(edited), 0644))
-		writePresetState(dir, map[string]string{name: presetSHA("something else entirely")})
-
-		stale, err := upgradeEmbeddedHITLPolicies(dir, false)
+		written, err := refreshExistingHITLPolicies(dir)
 		require.NoError(t, err)
-		require.Contains(t, stale, name)
-
-		got, err := os.ReadFile(filepath.Join(dir, name))
-		require.NoError(t, err)
-		require.Equal(t, edited, string(got), "the operator's edit must survive")
-	})
-
-	t.Run("unrecorded preset is kept and reported", func(t *testing.T) {
-		dir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(`{"default_action":"approve"}`), 0644))
-
-		stale, err := upgradeEmbeddedHITLPolicies(dir, false)
-		require.NoError(t, err)
-		require.Contains(t, stale, name, "a preset with no provenance record is treated as the operator's")
-	})
-
-	t.Run("a byte-identical preset with no record is adopted", func(t *testing.T) {
-		// Transition case: predates .preset-state.json but matches this
-		// build byte for byte, so it's adopted rather than held back.
-		dir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(HITLPolicyPresets[0].Content), 0644))
-		require.NoFileExists(t, filepath.Join(dir, presetStateFile))
-
-		stale, err := upgradeEmbeddedHITLPolicies(dir, false)
-		require.NoError(t, err)
-		require.NotContains(t, stale, name, "a preset identical to this build's is provably ours")
-		require.Equal(t, presetSHA(HITLPolicyPresets[0].Content), readPresetState(dir)[name],
-			"the adoption must be recorded, or the next upgrade repeats this stand-off")
-	})
-
-	t.Run("fresh install writes and records every preset", func(t *testing.T) {
-		dir := t.TempDir()
-		stale, err := upgradeEmbeddedHITLPolicies(dir, false)
-		require.NoError(t, err)
-		require.Empty(t, stale)
-
-		state := readPresetState(dir)
+		require.Empty(t, written)
 		for _, p := range HITLPolicyPresets {
-			require.Equal(t, presetSHA(p.Content), state[p.Name], "every written preset is recorded")
+			require.NoFileExists(t, filepath.Join(dir, p.Name),
+				"a preset nothing seeded must not appear on a refresh either")
 		}
-		// A second run is a no-op that still reports nothing stale.
-		stale, err = upgradeEmbeddedHITLPolicies(dir, false)
-		require.NoError(t, err)
-		require.Empty(t, stale)
 	})
 }
 
@@ -369,7 +328,7 @@ func TestUnit_NoFilePolicyFallback_FailsClosed(t *testing.T) {
 		r, err := svc.Evaluate(ctx, call.tools, call.tool, call.args)
 		require.NoError(t, err)
 		assert.Equalf(t, hitlservice.ActionApprove, r.Action,
-			"%s.%s: with no loadable policy file, everything asks — allow tiers exist only in seeded, readable envelopes", call.tools, call.tool)
+			"%s.%s: with no loadable policy file, everything asks — allow tiers exist only in rendered, readable envelopes", call.tools, call.tool)
 	}
 }
 

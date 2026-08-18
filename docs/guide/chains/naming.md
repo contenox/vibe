@@ -33,7 +33,7 @@ The seeded set:
 - `chain-compact-default.json` — history compaction
 - `chain-fim-default.json` — editor autocomplete
 
-`trigger-*.json` and `hitl-policy-*.json` are different kinds of files (event triggers and HITL envelopes) and keep their own conventions; init seeds no trigger files (triggers are operator-authored) and seeds the HITL policy presets.
+`trigger-*.json` and `hitl-policy-*.json` are different kinds of files (event triggers and HITL envelopes) and keep their own conventions; init seeds neither. Triggers are operator-authored, and a `hitl-policy-*.json` is either one you wrote or one transpiled into `.generated/` from an `[envelopes.<name>]` section.
 
 > **Note:** the fleet agent's *name* is the chain's `id` field, not its filename. The seeded planner's id is `agent-planner`, so `contenox mission fire agent-planner` and a stored `default-mission-agent` config are stable however the file is named.
 
@@ -81,11 +81,13 @@ The ACP surfaces resolve differently, by design: `contenox acp` and `acpx` load 
 
 | Invocation | Touches | Never touches |
 | ---------- | ------- | ------------- |
-| `contenox init` | Writes the `.contenox/workspace.id` marker (an existing marker keeps its id); seeds `agents.toml` and `agents/`, the `hitl-policy-*.json` presets into `~/.contenox/`, and the chain files into `~/.contenox/system/`, **only where absent**; relocates unmodified chain files an older build left at the top level; prints a note for every workspace copy that shadows a global file | Existing files (it never overwrites), a chain you copied up out of `system/`, workspace chain files, config, sessions, the database |
+| `contenox init` | Writes the `.contenox/workspace.id` marker (an existing marker keeps its id); seeds `agents.toml` and `agents/` into `~/.contenox/` and the chain files into `~/.contenox/system/`, **only where absent**; transpiles every declared envelope into `.generated/`; relocates unmodified chain files an older build left at the top level; prints a note for every workspace copy that shadows a global file | Existing files (it never overwrites), a chain you copied up out of `system/`, workspace chain files, top-level `hitl-policy-*.json` copies, config, sessions, the database |
 | `contenox init --local` | Same seeding, into the **workspace** `.contenox/` instead — deliberate overrides that shadow the global copies by name | `~/.contenox/` chain files |
-| `contenox init --force` | Overwrites every seeded chain file and rewrites the HITL presets across the whole search path (home and any shadowing workspace copy) — your edits to seeded files are replaced | User-authored files (anything init does not seed), config, sessions |
+| `contenox init --force` | Overwrites every seeded chain file — your edits to seeded files are replaced | User-authored files (anything init does not seed), top-level policy copies, config, sessions |
 | `contenox init --update` | First **renames** any shipped chain file still carrying a pre-v0.38 name to its new name (see below); then refreshes a seeded file only when its checksum matches a known unmodified prior build — edited files are skipped and reported | Hand-edited content (a rename moves bytes, the refresh skips them), user-authored files, config, sessions |
-| `contenox init --refresh-policies` | Rewrites **only** the `hitl-policy-*.json` presets from this build, in `~/.contenox` and any workspace copy that shadows one — this is what `contenox doctor` points at when an envelope predates a shipped toolset | Chain files, config, sessions |
+| `contenox init --refresh-policies` | Rewrites the `hitl-policy-*.json` copies **already present** at the top level of `~/.contenox` or a shadowing workspace `.contenox`, from this build — this is what `contenox doctor` points at when one of those copies predates a shipped toolset. It never creates a file and never touches `.generated/` | Chain files, config, sessions, `.generated/` (the envelopes own it) |
+
+Policy files are not seeded at all any more: each `[envelopes.<name>]` section in `agents.toml` transpiles to `.generated/hitl-policy-<name>.json` on every run, and a top-level copy you write shadows it. See [Where a policy comes from](/docs/guide/hitl/#where-a-policy-comes-from).
 
 ## Migrating an old install
 

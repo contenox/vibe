@@ -279,9 +279,12 @@ func fireMissionAndWait(cmd *cobra.Command, spec missionFireSpec) (*missionFireO
 	}
 	defer db.Close()
 
-	if home, herr := globalContenoxDir(); herr == nil {
-		_ = writeEmbeddedHITLPolicies(home, false)
+	// A mission names the envelope that bounds it, so every declared one has to
+	// be rendered before the name is looked up.
+	if home, herr := globalContenoxDir(); herr == nil && home != contenoxDir {
+		_, _ = syncEnvelopePolicies(home)
 	}
+	_, _ = syncEnvelopePolicies(contenoxDir)
 
 	store := runtimetypes.New(db.WithoutTransaction())
 	policy := strings.TrimSpace(spec.policy)
@@ -376,7 +379,7 @@ func fireMissionAndWait(cmd *cobra.Command, spec missionFireSpec) (*missionFireO
 		return nil, err
 	}
 	fmt.Fprintf(out, "Mission fired at agent %q under envelope %q.\nIntent: %s\nMission %s (instance %s, session %s).\nWaiting for a terminal status (timeout %s; the unit is a child of this process and is torn down when it exits)…\n",
-		agentName, policy, intent, res.MissionID, res.InstanceID, res.SessionID, timeout)
+		agentName, policy, narratedIntent(intent), res.MissionID, res.InstanceID, res.SessionID, timeout)
 
 	m, waitErr := waitForTerminalMission(ctx, missions, res.MissionID, missionWaitPollInterval, timeout)
 	if waitErr != nil {
@@ -450,6 +453,16 @@ func renderMissionTable(w io.Writer, missions []*missionservice.Mission, now tim
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", m.ID, m.AgentName, m.HITLPolicyName, m.Status, formatMissionAge(now, m.CreatedAt))
 	}
 	return tw.Flush()
+}
+
+// narratedIntent keeps the fire narration one line: a piped stdin body rides
+// inside the intent and would otherwise echo whole into the terminal or a CI
+// log, so everything from the attachment marker on is summarized by size.
+func narratedIntent(intent string) string {
+	if i := strings.Index(intent, stdinBodyOpen); i >= 0 {
+		return strings.TrimSpace(intent[:i]) + fmt.Sprintf(" (+ %d bytes piped stdin)", len(intent)-i)
+	}
+	return intent
 }
 
 func renderMissionShow(w io.Writer, m *missionservice.Mission, reports []*missionservice.Report, asks []*runtimetypes.HITLApproval, now time.Time) {

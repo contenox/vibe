@@ -1,10 +1,7 @@
 package contenoxcli
 
 import (
-	"crypto/sha256"
 	_ "embed"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,8 +25,12 @@ var hitlPolicyACPX string
 //go:embed hitl-policy-oracle.json
 var hitlPolicyOracle string
 
-// HITLPolicyPresets lists the embedded HITL policy presets in the order they
-// should be written to disk.
+// HITLPolicyPresets are the policies earlier builds seeded into ~/.contenox.
+// Nothing writes them there any more — envelopes render into .generated
+// instead — so they are kept for the copies still on operator machines: the
+// staleness detector reads them to say what a file predates, the refresh verb
+// rewrites a file that already exists, and the envelope ratchet holds the
+// shipped envelopes to them.
 var HITLPolicyPresets = []struct {
 	Name    string
 	Content string
@@ -50,77 +51,10 @@ func embeddedPolicyNames() []string {
 	return names
 }
 
-const presetStateFile = ".preset-state.json"
-
-func presetSHA(s string) string {
-	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:])
-}
-
-func readPresetState(contenoxDir string) map[string]string {
-	state := map[string]string{}
-	raw, err := os.ReadFile(filepath.Join(contenoxDir, presetStateFile))
-	if err != nil {
-		return state
-	}
-	_ = json.Unmarshal(raw, &state)
-	return state
-}
-
-func writePresetState(contenoxDir string, state map[string]string) {
-	raw, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return
-	}
-	_ = os.WriteFile(filepath.Join(contenoxDir, presetStateFile), raw, 0644)
-}
-
-func writeEmbeddedHITLPolicies(contenoxDir string, overwrite bool) error {
-	_, err := upgradeEmbeddedHITLPolicies(contenoxDir, overwrite)
-	return err
-}
-
-func upgradeEmbeddedHITLPolicies(contenoxDir string, overwrite bool) (stale []string, err error) {
-	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
-		return nil, fmt.Errorf("failed to create config dir: %w", err)
-	}
-	state := readPresetState(contenoxDir)
-	changed := false
-	for _, p := range HITLPolicyPresets {
-		dst := filepath.Join(contenoxDir, p.Name)
-		shipped := presetSHA(p.Content)
-		if !overwrite {
-			if onDisk, readErr := os.ReadFile(dst); readErr == nil {
-				current := presetSHA(string(onDisk))
-				if current == shipped {
-					if state[p.Name] != shipped {
-						state[p.Name] = shipped
-						changed = true
-					}
-					continue
-				}
-				if recorded, ok := state[p.Name]; !ok || recorded != current {
-					// Hand-edited or unrecorded: the operator's file wins.
-					stale = append(stale, p.Name)
-					continue
-				}
-			}
-		}
-		if err := os.WriteFile(dst, []byte(p.Content), 0644); err != nil {
-			return stale, fmt.Errorf("failed to write %s: %w", p.Name, err)
-		}
-		state[p.Name] = shipped
-		changed = true
-	}
-	if changed {
-		writePresetState(contenoxDir, state)
-	}
-	return stale, nil
-}
-
+// refreshExistingHITLPolicies rewrites the preset copies a directory already
+// holds. It never creates one: a file that is not there is an envelope's to
+// render, and seeding it back would only widen the shadow.
 func refreshExistingHITLPolicies(contenoxDir string) (written []string, err error) {
-	state := readPresetState(contenoxDir)
-	changed := false
 	for _, p := range HITLPolicyPresets {
 		dst := filepath.Join(contenoxDir, p.Name)
 		if _, statErr := os.Stat(dst); statErr != nil {
@@ -130,12 +64,7 @@ func refreshExistingHITLPolicies(contenoxDir string) (written []string, err erro
 			err = fmt.Errorf("failed to write %s: %w", dst, writeErr)
 			break
 		}
-		state[p.Name] = presetSHA(p.Content)
-		changed = true
 		written = append(written, dst)
-	}
-	if changed {
-		writePresetState(contenoxDir, state)
 	}
 	return written, err
 }

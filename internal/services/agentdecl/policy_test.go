@@ -84,18 +84,22 @@ func TestUnit_PolicyDeniesCredentialPathsUnderEveryPosture(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: emit: %v", posture, err)
 		}
+		// First match wins, so a deny placed after a grant is inert.
+		firstGrant := len(p.Rules)
+		for i, r := range p.Rules {
+			if len(r.When) == 0 && r.Action != hitlservice.ActionDeny {
+				firstGrant = i
+				break
+			}
+		}
 		var found bool
 		for i, r := range p.Rules {
-			if len(r.When) == 0 || r.When[0].Op != hitlservice.OpGlob {
+			if len(r.When) == 0 || r.When[0].Op != hitlservice.OpGlob || r.Action != hitlservice.ActionDeny {
 				continue
 			}
 			found = true
-			if r.Action != hitlservice.ActionDeny {
-				t.Errorf("%s: credential-path rule is %q, want deny", posture, r.Action)
-			}
-			// First match wins, so a deny placed after a grant is inert.
-			if i != 0 {
-				t.Errorf("%s: credential deny is rule %d; it must precede every grant", posture, i)
+			if i > firstGrant {
+				t.Errorf("%s: credential deny is rule %d, behind the grant at %d; it must precede every grant", posture, i, firstGrant)
 			}
 		}
 		if !found {

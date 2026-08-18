@@ -14,9 +14,9 @@ import (
 )
 
 // TestUnit_HitlPolicyPath pins how acpsvc resolves a policy name to its on-disk
-// path: "<ContenoxDir>/<name>", the same layout writeEmbeddedHITLPolicies
-// (contenoxcli/hitl_policies.go) writes to and acpPolicySource
-// (contenoxcli/acp_cmd.go) reads from.
+// path: "<ContenoxDir>/<name>", the front of the search path acpPolicySource
+// (contenoxcli/acp_cmd.go) reads over — where an operator's own file sits,
+// ahead of the envelopes rendered into .generated.
 func TestUnit_HitlPolicyPath(t *testing.T) {
 	tr := &Transport{}
 	tr.deps.ContenoxDir = filepath.Join(string(filepath.Separator), "home", "op", ".contenox")
