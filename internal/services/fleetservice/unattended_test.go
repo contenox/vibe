@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	"github.com/contenox/contenox/internal/kernel/taskengine"
@@ -98,6 +99,9 @@ func (f *fakeHITL) AgentGuidanceFor(context.Context, string) ([]hitlservice.Guid
 }
 func (f *fakeHITL) SweepExpired(context.Context) (int, error) { return 0, nil }
 func (f *fakeHITL) ListPending(context.Context, int) ([]*runtimetypes.HITLApproval, error) {
+	return nil, nil
+}
+func (f *fakeHITL) ListPendingBefore(context.Context, *time.Time, int) ([]*runtimetypes.HITLApproval, error) {
 	return nil, nil
 }
 func (f *fakeHITL) ListPendingForSession(context.Context, string, int) ([]*runtimetypes.HITLApproval, error) {

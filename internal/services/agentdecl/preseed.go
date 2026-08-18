@@ -17,6 +17,9 @@ var preseedResearcher string
 //go:embed preseed/README.md
 var preseedReadme string
 
+//go:embed preseed/run.md
+var preseedRun string
+
 // preseedTrees is the worked example of the directory convention: a router and
 // the branches it chooses between.
 //
@@ -33,6 +36,7 @@ var Preseeded = []struct {
 	{filepath.Join(NativeSourceDir, "README.md"), func() string { return preseedReadme }},
 	{filepath.Join(NativeSourceDir, "reviewer.md"), func() string { return preseedReviewer }},
 	{filepath.Join(NativeSourceDir, "researcher.md"), func() string { return preseedResearcher }},
+	{filepath.Join(NativeSourceDir, "run.md"), func() string { return preseedRun }},
 }
 
 // Preseed writes the authoring convention into contenoxDir, leaving existing

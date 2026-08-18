@@ -149,6 +149,10 @@ type Service interface {
 	// ListPending returns pending approvals newest first, bounded by limit.
 	ListPending(ctx context.Context, limit int) ([]*runtimetypes.HITLApproval, error)
 
+	// ListPendingBefore is ListPending resumed from a page boundary: only asks
+	// raised strictly before createdBefore, nil for the newest page.
+	ListPendingBefore(ctx context.Context, createdBefore *time.Time, limit int) ([]*runtimetypes.HITLApproval, error)
+
 	// ListPendingForSession is ListPending narrowed to one session's asks.
 	ListPendingForSession(ctx context.Context, sessionID string, limit int) ([]*runtimetypes.HITLApproval, error)
 
@@ -560,7 +564,7 @@ func (s *service) Respond(ctx context.Context, approvalID string, approved bool)
 
 func (s *service) RespondWithGuidance(ctx context.Context, approvalID string, approved bool, decidedBy, guidance string) error {
 	return s.resolveRecorded(ctx, approvalID, approved,
-		marshalAgentApprovalResolution(approved, strings.TrimSpace(decidedBy), guidance), true)
+		marshalDecidedApprovalResolution(approved, strings.TrimSpace(decidedBy), guidance, false), true)
 }
 
 func (s *service) resolve(ctx context.Context, approvalID string, approved bool, runHook bool) error {
@@ -681,10 +685,14 @@ func (s *service) resumeExpired(ctx context.Context, hook ResumeHook, approvalID
 }
 
 func (s *service) ListPending(ctx context.Context, limit int) ([]*runtimetypes.HITLApproval, error) {
+	return s.ListPendingBefore(ctx, nil, limit)
+}
+
+func (s *service) ListPendingBefore(ctx context.Context, createdBefore *time.Time, limit int) ([]*runtimetypes.HITLApproval, error) {
 	if s.approvals == nil {
 		return nil, fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
 	}
-	rows, err := s.approvals.ListHITLApprovals(ctx, runtimetypes.HITLApprovalPending, nil, limit)
+	rows, err := s.approvals.ListHITLApprovals(ctx, runtimetypes.HITLApprovalPending, createdBefore, limit)
 	if err != nil {
 		return nil, fmt.Errorf("hitlservice: list pending approvals: %w", err)
 	}
@@ -713,11 +721,15 @@ func onTimeoutOutcome(onTimeout Action) bool {
 }
 
 type approvalResolution struct {
-	Approved   *bool   `json:"approved,omitempty"`
-	Answer     *string `json:"answer,omitempty"`
-	AnsweredBy *string `json:"answeredBy,omitempty"`
-	DecidedBy  *string `json:"decidedBy,omitempty"`
-	Guidance   *string `json:"guidance,omitempty"`
+	Approved *bool   `json:"approved,omitempty"`
+	Answer   *string `json:"answer,omitempty"`
+	// AnsweredBy and DecidedBy hold a non-human actor and are the only fields a
+	// mission's agent bounds count; the Human twins hold a person and never are.
+	AnsweredBy      *string `json:"answeredBy,omitempty"`
+	AnsweredByHuman *string `json:"answeredByHuman,omitempty"`
+	DecidedBy       *string `json:"decidedBy,omitempty"`
+	DecidedByHuman  *string `json:"decidedByHuman,omitempty"`
+	Guidance        *string `json:"guidance,omitempty"`
 }
 
 type answer struct {
@@ -725,10 +737,14 @@ type answer struct {
 	text     string
 }
 
-func marshalAttentionResolution(text, by string) json.RawMessage {
+func marshalAttentionResolution(text, by string, byAgent bool) json.RawMessage {
 	res := approvalResolution{Answer: &text}
-	if by != "" {
+	switch {
+	case by == "":
+	case byAgent:
 		res.AnsweredBy = &by
+	default:
+		res.AnsweredByHuman = &by
 	}
 	raw, err := json.Marshal(res)
 	if err != nil {

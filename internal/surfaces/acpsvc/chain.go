@@ -41,12 +41,14 @@ func LoadChainRegistryFrom(filename, envVar string) (*ChainRegistry, error) {
 		if err != nil {
 			return nil, fmt.Errorf("acpsvc: cannot determine home directory and %s is not set: %w", envVar, err)
 		}
-		path = filepath.Join(home, ".contenox", filename)
-		if _, statErr := os.Stat(path); statErr != nil {
-			path = filepath.Join(home, ".contenox", agentdecl.GeneratedDirName, filename)
-		}
-		if _, statErr := os.Stat(path); statErr != nil {
-			path = filepath.Join(home, ".contenox", SystemDirName, filename)
+		candidates := ChainSearchPath(filepath.Join(home, ".contenox"), filename)
+		// Falls back to the last candidate so a total miss names the system copy.
+		path = candidates[len(candidates)-1]
+		for _, c := range candidates {
+			if _, statErr := os.Stat(c); statErr == nil {
+				path = c
+				break
+			}
 		}
 	}
 
@@ -65,6 +67,29 @@ func LoadChainRegistryFrom(filename, envVar string) (*ChainRegistry, error) {
 		return nil, fmt.Errorf("acpsvc: chain at %q has no tasks", path)
 	}
 	return &ChainRegistry{defaultChain: &chain, source: path}, nil
+}
+
+// ChainSearchPath is where LoadChainRegistryFrom looks for filename under
+// contenoxDir when the env override is unset, nearest first: an operator copy at
+// the top level, then the compiled declarations, then the shipped system copy.
+func ChainSearchPath(contenoxDir, filename string) []string {
+	return []string{
+		filepath.Join(contenoxDir, filename),
+		filepath.Join(contenoxDir, agentdecl.GeneratedDirName, filename),
+		filepath.Join(contenoxDir, SystemDirName, filename),
+	}
+}
+
+// ChainFileResolves reports whether any ChainSearchPath candidate exists, which
+// is what separates a contenox directory that can serve filename from one a
+// caller still has to populate.
+func ChainFileResolves(contenoxDir, filename string) bool {
+	for _, p := range ChainSearchPath(contenoxDir, filename) {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *ChainRegistry) Default() *taskengine.TaskChainDefinition { return r.defaultChain }

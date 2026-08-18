@@ -45,7 +45,7 @@ func TestUnit_OpenDB_PostgresSettingSelectsPostgresAndNeverTheFile(t *testing.T)
 	t.Setenv(ValkeyURLEnv, "valkey://"+closedLoopbackAddr(t))
 
 	sqlitePath := filepath.Join(t.TempDir(), "never-created", "local.db")
-	db, err := OpenDB(ctx, sqlitePath)
+	db, err := OpenDB(ctx, sqlitePath, false)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
@@ -71,7 +71,7 @@ func TestUnit_OpenBus_NATSSettingReachesTheServerItNames(t *testing.T) {
 	clearSubstrateEnv(t)
 	t.Setenv(NATSURLEnv, natsURL)
 
-	db, err := OpenDB(ctx, filepath.Join(t.TempDir(), "local.db"))
+	db, err := OpenDB(ctx, filepath.Join(t.TempDir(), "local.db"), false)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
@@ -112,7 +112,7 @@ func TestUnit_OpenKV_ValkeySettingReachesTheServerItNames(t *testing.T) {
 	clearSubstrateEnv(t)
 	t.Setenv(ValkeyURLEnv, "valkey://"+target.Host+"?namespace=substrate-test")
 
-	db, err := OpenDB(ctx, filepath.Join(t.TempDir(), "local.db"))
+	db, err := OpenDB(ctx, filepath.Join(t.TempDir(), "local.db"), false)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
@@ -138,7 +138,7 @@ func TestUnit_OpenBusAndOpenKV_RefuseAnUnreachableServerByName(t *testing.T) {
 	clearSubstrateEnv(t)
 	ctx := context.Background()
 
-	db, err := OpenDB(ctx, filepath.Join(t.TempDir(), "local.db"))
+	db, err := OpenDB(ctx, filepath.Join(t.TempDir(), "local.db"), false)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 

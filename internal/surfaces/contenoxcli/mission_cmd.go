@@ -210,8 +210,52 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 	}
 
 	out := cmd.OutOrStdout()
-	agentName := strings.TrimSpace(args[0])
-	intent := strings.TrimSpace(strings.Join(args[1:], " "))
+	policy, _ := cmd.Flags().GetString("policy")
+	timeout, _ := cmd.Flags().GetDuration("timeout")
+	outcome, err := fireMissionAndWait(cmd, missionFireSpec{
+		agent:   strings.TrimSpace(args[0]),
+		intent:  strings.TrimSpace(strings.Join(args[1:], " ")),
+		policy:  policy,
+		timeout: timeout,
+		narrate: out,
+	})
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintln(out, missionOutcomeLine(outcome.mission))
+	if len(outcome.reports) > 0 {
+		fmt.Fprintln(out, "Reports:")
+		renderReportSummaries(out, outcome.reports)
+	}
+	fmt.Fprintf(out, "Full detail: contenox mission reports %s\n", outcome.mission.ID)
+	if outcome.mission.Status != missionservice.StatusLanded {
+		return &exitError{1}
+	}
+	return nil
+}
+
+// missionFireSpec is one in-process dispatch; narrate takes the progress lines `run` keeps off stdout.
+type missionFireSpec struct {
+	agent   string
+	intent  string
+	policy  string
+	timeout time.Duration
+	narrate io.Writer
+}
+
+type missionFireOutcome struct {
+	mission *missionservice.Mission
+	reports []*missionservice.Report
+}
+
+func fireMissionAndWait(cmd *cobra.Command, spec missionFireSpec) (*missionFireOutcome, error) {
+	out := spec.narrate
+	if out == nil {
+		out = io.Discard
+	}
+	agentName := spec.agent
+	intent := spec.intent
 
 	parentCtx := cmd.Context()
 	if parentCtx == nil {
@@ -223,15 +267,15 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 
 	contenoxDir, err := ResolveContenoxDir(cmd)
 	if err != nil {
-		return fmt.Errorf("failed to resolve .contenox dir: %w", err)
+		return nil, fmt.Errorf("failed to resolve .contenox dir: %w", err)
 	}
 	dbPath, err := resolveDBPath(cmd)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	db, err := OpenDBAt(ctx, dbPath)
 	if err != nil {
-		return fmt.Errorf("open database %q: %w", dbPath, err)
+		return nil, fmt.Errorf("open database %q: %w", dbPath, err)
 	}
 	defer db.Close()
 
@@ -240,13 +284,12 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 	}
 
 	store := runtimetypes.New(db.WithoutTransaction())
-	policy, _ := cmd.Flags().GetString("policy")
-	policy = strings.TrimSpace(policy)
+	policy := strings.TrimSpace(spec.policy)
 	if policy == "" {
 		policy = strings.TrimSpace(clikv.Read(ctx, store, "default-mission-policy"))
 	}
 	if policy == "" {
-		return fmt.Errorf("no mission envelope: pass --policy <policy>, or set a default with `contenox config set default-mission-policy <policy>` — a mission must name the HITL policy that bounds it")
+		return nil, fmt.Errorf("no mission envelope: pass --policy <policy>, or set a default with `contenox config set default-mission-policy <policy>` — a mission must name the HITL policy that bounds it")
 	}
 
 	var tracker libtracker.ActivityTracker = libtracker.NoopTracker{}
@@ -256,7 +299,7 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 
 	bus, err := substrate.OpenBus(ctx, db.WithoutTransaction())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer bus.Close()
 	workspaceID := ResolveWorkspaceID(contenoxDir)
@@ -276,7 +319,7 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 	if wantTriggers {
 		opts, optsErr := buildRunOpts(cmd, db, contenoxDir)
 		if optsErr != nil {
-			return optsErr
+			return nil, optsErr
 		}
 		opts.EffectiveDB = dbPath
 		if wantTriggers && !cmd.Root().Flags().Changed("shell") {
@@ -284,7 +327,7 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		}
 		engine, engErr := BuildEngine(ctx, db, opts)
 		if engErr != nil {
-			return fmt.Errorf("mission fire: build engine for in-process dispatch: %w", engErr)
+			return nil, fmt.Errorf("mission fire: build engine for in-process dispatch: %w", engErr)
 		}
 		defer engine.Stop()
 		trigHook.Set(buildInProcessTriggerHook(ctx, db, contenoxDir, workspaceID, engine, opts, cmd.ErrOrStderr()))
@@ -315,12 +358,12 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		Stderr:          os.Stderr,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Children die with the parent, on every exit path.
 	defer stopFleet()
 
-	timeout, _ := cmd.Flags().GetDuration("timeout")
+	timeout := spec.timeout
 	res, err := fleet.Dispatch(ctx, fleetservice.DispatchRequest{
 		AgentName:      agentName,
 		Intent:         intent,
@@ -328,9 +371,9 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 	})
 	if err != nil {
 		if hint := legacyChainPrefixHint(agentName); hint != "" && errors.Is(err, libdbexec.ErrNotFound) {
-			return fmt.Errorf("%w%s", err, hint)
+			return nil, fmt.Errorf("%w%s", err, hint)
 		}
-		return err
+		return nil, err
 	}
 	fmt.Fprintf(out, "Mission fired at agent %q under envelope %q.\nIntent: %s\nMission %s (instance %s, session %s).\nWaiting for a terminal status (timeout %s; the unit is a child of this process and is torn down when it exits)…\n",
 		agentName, policy, intent, res.MissionID, res.InstanceID, res.SessionID, timeout)
@@ -345,21 +388,16 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(out, "mission %s wait interrupted: the unit is torn down with this process. Its record and any reports so far survive — see 'contenox mission show %s'.\n",
 				res.MissionID, res.MissionID)
 		default:
-			return fmt.Errorf("waiting on mission %s: %w", res.MissionID, waitErr)
+			return nil, fmt.Errorf("waiting on mission %s: %w", res.MissionID, waitErr)
 		}
-		return &exitError{1}
+		return nil, &exitError{1}
 	}
 
-	fmt.Fprintln(out, missionOutcomeLine(m))
-	if reports, rerr := missions.ListReports(ctx, m.ID, missionReportsReadLimit); rerr == nil && len(reports) > 0 {
-		fmt.Fprintln(out, "Reports:")
-		renderReportSummaries(out, reports)
+	reports, rerr := missions.ListReports(ctx, m.ID, missionReportsReadLimit)
+	if rerr != nil {
+		reports = nil
 	}
-	fmt.Fprintf(out, "Full detail: contenox mission reports %s\n", m.ID)
-	if m.Status != missionservice.StatusLanded {
-		return &exitError{1}
-	}
-	return nil
+	return &missionFireOutcome{mission: m, reports: reports}, nil
 }
 
 func registerMissionFireFlags(beta bool) {

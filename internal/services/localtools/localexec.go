@@ -15,7 +15,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-const localExecToolsName = "local_shell"
+const LocalExecToolsName = "local_shell"
 
 // LocalExecResult is the structured result returned by the local_shell tools.
 type LocalExecResult struct {
@@ -101,7 +101,7 @@ func NewLocalExecToolsWith(runner CommandRunner, opts ...LocalExecOption) tasken
 }
 
 func (h *LocalExecTools) resolvePolicy(ctx context.Context) (allowedCommands []string, allowedDir string, deniedCommands []string) {
-	if args := taskengine.ToolsArgsFromContext(ctx, localExecToolsName); len(args) > 0 {
+	if args := taskengine.ToolsArgsFromContext(ctx, LocalExecToolsName); len(args) > 0 {
 		if v := args["_allowed_commands"]; v != "" {
 			allowedCommands = splitTrimmed(v)
 		}
@@ -150,7 +150,9 @@ func (h *LocalExecTools) Exec(ctx context.Context, startTime time.Time, input an
 	return result, taskengine.DataTypeJSON, nil
 }
 
-// Precheck applies the command policy (denylist, allowed dir, allowlist) and runs nothing, satisfying [Prechecker]; it is an early copy, never a replacement — [LocalExecTools.Exec] applies the same policy at execution time since this boundary must hold with nothing wrapping it.
+var _ taskengine.Prechecker = (*LocalExecTools)(nil)
+
+// Precheck applies the command policy (denylist, allowed dir, allowlist) and runs nothing, satisfying [taskengine.Prechecker]; it is an early copy, never a replacement — [LocalExecTools.Exec] applies the same policy at execution time since this boundary must hold with nothing wrapping it.
 func (h *LocalExecTools) Precheck(ctx context.Context, input any, tools *taskengine.ToolsCall) error {
 	if tools == nil {
 		return errors.New("local_shell: tools required")
@@ -196,7 +198,7 @@ func (h *LocalExecTools) parseArgs(tools *taskengine.ToolsCall, input any) (comm
 			}
 		}
 	case map[string]any:
-		if err := rejectUnknownArgs(localExecToolsName, v, "command", "args", "cwd", "timeout", "shell", "stdin"); err != nil {
+		if err := rejectUnknownArgs(LocalExecToolsName, v, "command", "args", "cwd", "timeout", "shell", "stdin"); err != nil {
 			return "", nil, "", 0, false, "", err
 		}
 		if cmd, ok := v["command"].(string); ok && command == "" {
@@ -211,7 +213,7 @@ func (h *LocalExecTools) parseArgs(tools *taskengine.ToolsCall, input any) (comm
 			useShell = strings.EqualFold(s, "true") || s == "1"
 		}
 		if a, ok := v["args"]; ok && len(argsSlice) == 0 {
-			parsed, err := stringSliceArg(localExecToolsName, "args", a)
+			parsed, err := stringSliceArg(LocalExecToolsName, "args", a)
 			if err != nil {
 				return "", nil, "", 0, false, "", err
 			}
@@ -463,7 +465,7 @@ func splitShellArgs(s string) []string {
 
 // Supports implements taskengine.ToolsRegistry.
 func (h *LocalExecTools) Supports(ctx context.Context) ([]string, error) {
-	return []string{localExecToolsName}, nil
+	return []string{LocalExecToolsName}, nil
 }
 
 // GetSchemasForSupportedTools implements taskengine.ToolsWithSchema.
@@ -471,7 +473,7 @@ func (h *LocalExecTools) GetSchemasForSupportedTools(ctx context.Context) (map[s
 	shellDesc := h.shell.ShellModeDescription()
 	schema := &openapi3.T{
 		OpenAPI: "3.1.0",
-		Info:    &openapi3.Info{Title: "Local Exec Tools", Description: "Run commands on the local host. " + shellDesc, Version: "1.0.0"},
+		Info:    &openapi3.Info{Title: "Local Exec Tools", Description: "Run commands on the local host. The executable goes in command alone and every flag and operand in args. " + shellDesc, Version: "1.0.0"},
 		Paths:   openapi3.NewPaths(),
 		Components: &openapi3.Components{
 			Schemas: map[string]*openapi3.SchemaRef{
@@ -479,13 +481,13 @@ func (h *LocalExecTools) GetSchemasForSupportedTools(ctx context.Context) (map[s
 					Value: &openapi3.Schema{
 						Type: &openapi3.Types{openapi3.TypeObject},
 						Properties: map[string]*openapi3.SchemaRef{
-							"command": {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}, Description: "Executable path or name"}},
+							"command": {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}, Description: "Executable path or name alone; flags and operands go in args, so {\"command\": \"ls\", \"args\": [\"-F\"]}, never {\"command\": \"ls -F\"}"}},
 							"args": {Value: &openapi3.Schema{
 								OneOf: []*openapi3.SchemaRef{
 									{Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}, Description: "Space-separated arguments string"}},
 									{Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeArray}, Items: &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}}}, Description: "Array of argument strings"}},
 								},
-								Description: "Arguments as space-separated string or array of strings",
+								Description: "Everything after the executable, as an array of strings or a space-separated string",
 							}},
 							"cwd":     {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}, Description: "Working directory"}},
 							"timeout": {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}, Description: "Duration e.g. 30s"}},
@@ -513,17 +515,17 @@ func (h *LocalExecTools) GetSchemasForSupportedTools(ctx context.Context) (map[s
 			},
 		},
 	}
-	return map[string]*openapi3.T{localExecToolsName: schema}, nil
+	return map[string]*openapi3.T{LocalExecToolsName: schema}, nil
 }
 
 // GetToolsForToolsByName implements taskengine.ToolsWithSchema; chain-level policy (allowed/denied commands, allowed dir) is read from ctx via ToolsArgsFromContext when present, falling back to the struct defaults.
 func (h *LocalExecTools) GetToolsForToolsByName(ctx context.Context, name string) ([]taskengine.Tool, error) {
-	if name != localExecToolsName {
+	if name != LocalExecToolsName {
 		return nil, fmt.Errorf("unknown tools: %s", name)
 	}
 	allowedCommands, allowedDir, deniedCommands := h.resolvePolicy(ctx)
 	shellDesc := h.shell.ShellModeDescription()
-	desc := "Run a terminal command on the local host. Returns {stdout, stderr, exitCode, success, durationSeconds}. Output is capped at the remaining context budget; when it exceeds the cap the FULL output is spooled to a file and stdout/stderr instead carry a 20%-head/80%-tail slice (errors cluster at the tail) with an inline pointer, while the error field names the spool concretely ('full output: <path> (N KiB)') so nothing is lost silently. Errors carry a severity marker you can key on: '(recoverable: adjust parameters and retry)' for anything a corrected call fixes (output too large, bad command, denied path), and '(fatal: <reason>)' only when the environment is broken (disk full, spool unwritable) and retrying will not help. For file operations prefer local_fs.* tools: read_file, write_file, sed, find_files. They enforce sandbox boundaries, size limits, and a read-before-write contract that local_shell does not. Use local_shell for operations with no dedicated tool: running tests, builds, git commands, environment inspection. " + shellDesc
+	desc := "Run a terminal command on the local host. The executable goes in command alone and every flag and operand in args: {\"command\": \"ls\", \"args\": [\"-F\"]}, never {\"command\": \"ls -F\"}, which is read as an executable of that name and refused. Pipes, redirection, &&, globs and $(...) are not interpreted unless shell is passed; without it the argv is executed directly, so run the steps of a pipeline as separate calls. A refusal against a command policy is machine configuration that no approval can widen, so answer it with a different command rather than an escalation. Returns {stdout, stderr, exitCode, success, durationSeconds}. Output is capped at the remaining context budget; when it exceeds the cap the FULL output is spooled to a file and stdout/stderr instead carry a 20%-head/80%-tail slice (errors cluster at the tail) with an inline pointer, while the error field names the spool concretely ('full output: <path> (N KiB)') so nothing is lost silently. Errors carry a severity marker you can key on: '(recoverable: adjust parameters and retry)' for anything a corrected call fixes (output too large, bad command, denied path), and '(fatal: <reason>)' only when the environment is broken (disk full, spool unwritable) and retrying will not help. For file operations prefer local_fs.* tools: read_file, read_file_range, write_file, edit_file, sed. They enforce sandbox boundaries, size limits, and a read-before-write contract that local_shell does not. Use local_shell for operations with no dedicated tool: running tests, builds, git commands, environment inspection. " + shellDesc
 	if len(allowedCommands) > 0 {
 		desc += " Allowed commands: " + strings.Join(allowedCommands, ", ") + "."
 	}
@@ -560,7 +562,7 @@ func (h *LocalExecTools) GetToolsForToolsByName(ctx context.Context, name string
 					"properties": map[string]interface{}{
 						"command": map[string]interface{}{
 							"type":        "string",
-							"description": "Executable path or name (required)",
+							"description": "Executable path or name alone (required); flags and operands go in args, so {\"command\": \"ls\", \"args\": [\"-F\"]}, never {\"command\": \"ls -F\"}",
 						},
 						"args": map[string]interface{}{
 							"oneOf": []interface{}{
@@ -574,7 +576,7 @@ func (h *LocalExecTools) GetToolsForToolsByName(ctx context.Context, name string
 									"description": "Array of argument strings",
 								},
 							},
-							"description": "Arguments as space-separated string or array of strings",
+							"description": "Everything after the executable, as an array of strings or a space-separated string",
 						},
 						"cwd": map[string]interface{}{
 							"type":        "string",

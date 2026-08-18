@@ -2,6 +2,7 @@ package contenoxcli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -13,7 +14,9 @@ import (
 	"github.com/contenox/contenox/internal/services/setupcheck"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/internal/substrate"
+	"github.com/contenox/contenox/internal/version"
 	libdb "github.com/contenox/contenox/libdbexec"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,7 +24,7 @@ import (
 // a single Ready line, and when not ready the highest-ranked blocking issue
 // plus exactly one command to run next.
 func TestUnit_DoctorVerdict(t *testing.T) {
-	t.Run("ready says yes and names how to chat", func(t *testing.T) {
+	t.Run("ready says yes and names the one command to run next", func(t *testing.T) {
 		res := setupcheck.Result{DefaultModel: "qwen3:8b", DefaultProvider: "ollama"}
 		ready, reason, next := doctorVerdict(res)
 		require.True(t, ready)
@@ -30,8 +33,8 @@ func TestUnit_DoctorVerdict(t *testing.T) {
 
 		var out strings.Builder
 		printDoctorVerdict(&out, res)
-		require.Contains(t, out.String(), "Ready: yes")
-		require.Contains(t, out.String(), `contenox acp`)
+		require.Contains(t, out.String(), "Ready: yes — run: contenox beam",
+			"a ready verdict must hand over a next step, not stop at the verdict")
 	})
 
 	t.Run("not ready names the ranked reason and its own fix", func(t *testing.T) {
@@ -226,4 +229,111 @@ State storage:
 	require.Error(t, err)
 	require.Contains(t, err.Error(), substrate.NATSURLEnv)
 	require.Contains(t, err.Error(), "no servers available for connection")
+}
+
+func unreachableStatuses() []substrate.Status {
+	return []substrate.Status{
+		{Substrate: substrate.BusSubstrate, Backend: "NATS", Setting: substrate.NATSURLEnv, Target: "nats://bus:4222", Err: errors.New("no servers available for connection")},
+	}
+}
+
+func doctorBundleCmd(t *testing.T) (*cobra.Command, *strings.Builder, *strings.Builder, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "bundle.zip")
+	cmd := &cobra.Command{Use: "doctor"}
+	cmd.Flags().Bool("bundle", true, "")
+	cmd.Flags().String("bundle-out", path, "")
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	cmd.SetOut(out)
+	cmd.SetErr(errOut)
+	return cmd, out, errOut, path
+}
+
+// An unreachable substrate is exactly when someone reaches for --json or
+// --bundle, so the early return must still emit what doctor holds instead of
+// withholding the diagnostics that were asked for.
+func TestUnit_Doctor_UnreachableSubstrateStillEmitsJSONAndBundle(t *testing.T) {
+	statuses := unreachableStatuses()
+	unreachable := firstUnreachableSubstrate(statuses)
+	require.Error(t, unreachable)
+
+	t.Run("json", func(t *testing.T) {
+		cmd, out, errOut, path := doctorBundleCmd(t)
+		err := reportUnreachableSubstrate(cmd, true, statuses, unreachable, t.TempDir(), "")
+		require.ErrorIs(t, err, unreachable, "the run still fails; it just stops failing silently")
+
+		var got setupcheck.Result
+		require.NoError(t, json.Unmarshal([]byte(out.String()), &got), "stdout must stay one parseable payload")
+		require.False(t, got.Ready())
+		require.Len(t, got.Issues, 1)
+		require.Equal(t, "substrate_unreachable", got.Issues[0].Code)
+		require.Contains(t, got.Issues[0].Message, substrate.NATSURLEnv)
+
+		require.FileExists(t, path)
+		require.Contains(t, errOut.String(), "Bundle:", "the bundle notice belongs on stderr, off the JSON payload")
+	})
+
+	t.Run("text", func(t *testing.T) {
+		cmd, out, _, path := doctorBundleCmd(t)
+		err := reportUnreachableSubstrate(cmd, false, statuses, unreachable, t.TempDir(), "")
+		require.ErrorIs(t, err, unreachable)
+		require.Contains(t, out.String(), "Status: unreachable", "the storage report is what names the server that did not answer")
+		require.Contains(t, out.String(), "Bundle:")
+		require.FileExists(t, path)
+	})
+}
+
+// TestUnit_PrintBuildProvenance pins I7's doctor half: a VCS-stamped build
+// names its revision, dirty flag, and build time; an unstamped one still names
+// its version.
+func TestUnit_PrintBuildProvenance(t *testing.T) {
+	var out strings.Builder
+	printBuildProvenance(&out, "v0.41.0", version.Provenance{})
+	require.Equal(t, "\nBuild: v0.41.0\n", out.String())
+
+	out.Reset()
+	printBuildProvenance(&out, "v0.41.0", version.Provenance{
+		Revision: "41b11dd6", Dirty: true, Time: "2026-08-18T06:57:00Z",
+	})
+	require.Equal(t, "\nBuild: v0.41.0 (revision 41b11dd6 (working tree modified), built 2026-08-18T06:57:00Z)\n", out.String())
+}
+
+// TestUnit_ToolRoster_NamesEveryToolAndItsBacking pins doctor's roster: each
+// tool of the composition `contenox acp` registers, with its origin — local,
+// the client capability it needs, or the MCP server that serves it. Doctor
+// holds no ACP client, so client-backed lines state requirements, never a
+// live verdict.
+func TestUnit_ToolRoster_NamesEveryToolAndItsBacking(t *testing.T) {
+	var out strings.Builder
+	printToolRoster(context.Background(), &out, acpRosterToolsets(true), []*runtimetypes.MCPServer{
+		{Name: "github", Transport: "http", URL: "http://localhost:3000/mcp"},
+		{Name: "acp-conn-1-fs", Transport: "stdio", Command: "npx"},
+	})
+	s := out.String()
+
+	require.Contains(t, s, "read_file — local_fs — needs client capability fs.readTextFile\n")
+	require.Contains(t, s, "read_file_range — local_fs — needs client capability fs.readTextFile\n")
+	require.Contains(t, s, "write_file — local_fs — needs client capability fs.readTextFile+fs.writeTextFile\n")
+	require.Contains(t, s, "edit_file — local_fs — needs client capability fs.readTextFile+fs.writeTextFile\n")
+	require.Contains(t, s, "sed — local_fs — needs client capability fs.readTextFile+fs.writeTextFile\n")
+	require.Contains(t, s, "local_shell — local_shell — needs client capability terminal\n")
+	require.Contains(t, s, "mission — local (in-process); tools advertised per session role\n")
+	require.Contains(t, s, "github — MCP server (http http://localhost:3000/mcp)")
+	require.Contains(t, s, "acp-conn-1-fs — MCP server (session-scoped, supplied by an attached client)\n")
+	require.NotContains(t, s, "granted", "doctor has no client; it states requirements, not verdicts")
+
+	// The roster is what `contenox acp` registers, so it would read as the truth
+	// for every shape unless it says where those two are absent.
+	require.Contains(t, s, "local_fs, local_shell — not mounted under `contenox serve`")
+	require.Contains(t, s, "every capability is an MCP server")
+}
+
+// TestUnit_ACPRosterToolsets_MatchesTheACPComposition pins that doctor's
+// roster is the acpToolset composition itself, not a second list that can
+// drift from it.
+func TestUnit_ACPRosterToolsets_MatchesTheACPComposition(t *testing.T) {
+	sets := acpRosterToolsets(true)
+	for _, name := range []string{"local_fs", "local_shell", "mission"} {
+		require.Contains(t, sets, name)
+	}
 }

@@ -602,20 +602,16 @@ func TestE2E_Wire_SessionWorkspaceCwd(t *testing.T) {
 	})
 	require.Nil(t, resp.Error)
 
-	// The empty chat learns the allowlist from the workspace config options _meta.
+	// The workspace is never a config option: the client owns the cwd, and a
+	// host resolves it against its one root. No picker, host root or not.
 	var initResp libacp.InitializeResponse
 	require.NoError(t, json.Unmarshal(resp.Result, &initResp))
 	var meta map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(initResp.Meta, &meta))
 	var wsOptions []libacp.SessionConfigOption
 	require.NoError(t, json.Unmarshal(meta[WorkspaceConfigOptionsMetaKey], &wsOptions))
-	rootOption := optionByID(t, wsOptions, configIDWorkspaceRoot)
-	assert.Equal(t, resolvedA, rootOption.CurrentValue, "default root is the current workspace value")
-	var rootValues []string
-	for _, v := range rootOption.Options.AllValues() {
-		rootValues = append(rootValues, v.Value)
-	}
-	assert.ElementsMatch(t, []string{resolvedA, resolvedB}, rootValues, "picker must list every allowlisted root")
+	require.False(t, hasOption(wsOptions, "workspace-root"),
+		"a workspace picker must never be advertised, even with a host root configured")
 
 	// 1. A non-allowlisted cwd is refused.
 	resp, _ = client.call(libacp.MethodSessionNew, libacp.NewSessionRequest{

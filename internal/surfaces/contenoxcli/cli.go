@@ -50,7 +50,7 @@ const (
 	defaultTimeout = 2 * time.Hour
 )
 
-var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "vet": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "inbox": true, "new": true, "resume": true, "index": true, "search": true, "events": true, "hitl": true, "login": true, "logout": true, "autocomplete": true, "beam": true, "pair": true, "unpair": true,
+var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "sandbox": true, "shell-env": true, "vet": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "inbox": true, "new": true, "resume": true, "index": true, "search": true, "events": true, "hitl": true, "login": true, "logout": true, "autocomplete": true, "beam": true, "pair": true, "unpair": true,
 	// cobra's shell-completion protocol: every TAB press invokes these.
 	"__complete": true, "__completeNoDesc": true}
 
@@ -106,6 +106,9 @@ func containsExperimentalACPFlag(args []string) bool {
 
 func dispatchSubcommand(args []string, onlyHelp bool) string {
 	switch {
+	// With no terminal to draw on, a bare invocation keeps printing help.
+	case len(args) == 0 && stdoutIsTerminal():
+		return "beam"
 	case containsExperimentalACPFlag(args) && !firstNonFlagIsReserved(args):
 		return "acp"
 	}
@@ -171,52 +174,49 @@ func firstNonFlagIsReserved(args []string) bool {
 
 var rootCmd = &cobra.Command{
 	Use:   "contenox",
-	Short: "Run AI work on your own computer, under rules you wrote — chat, chains, and missions from your terminal.",
+	Short: "Declare an agent in Markdown, run it under an envelope you wrote — from your terminal, your editor, a script, or a standing host.",
 	Long: `Contenox is a worker you program yourself, using the AI you already pay for.
-One file says what it may do, what needs your approval, and what sets it off —
-those are the guardrails, and you can read them.
+An agent is a Markdown file you can read: what it may do, what needs your
+approval, what sets it off. State lives on your machine. Hosted providers and
+Ollama work out of the box; for local inference run Ollama or vLLM.
 
-Chat and shell in your terminal, reach the same worker from any ACP editor, and
-package repeatable work into chains: prompts, model routing, tools, retries and
-approval gates in one versioned file. State lives on your machine. Hosted
-providers and Ollama work out of the box; for local inference run Ollama or
-vLLM.
+  One runtime, three shapes — they differ by who is accountable for the work:
 
-  Quickstart (in this order):
-    contenox setup                         # 1. start here: wizard — pick provider, model, API key
-    contenox doctor                        # 2. verdict: can I chat right now, yes or no
-    contenox init                          # 3. once per project: scaffold .contenox/ and its chains
-    contenox "list files in my home dir"   # 4. one-shot, session-backed chat
-    contenox acp                           #    speak Agent Client Protocol over stdio to any ACP client
+    a person, at this keyboard
+      contenox beam                # the terminal UI: your files, your shell, your approvals
+      contenox acp                 # the same agent inside an ACP editor (Zed, JetBrains,
+                                   #   AionUi), which the editor launches for you
+
+    a program
+      contenox run "<task>"        # one task, the report on stdout, an exit code to branch on
+
+    an organization
+      contenox serve               # a standing host reachable from the app, serving one
+                                   #   workspace fixed at launch, with NO terminal and NO
+                                   #   filesystem — every capability it has is an MCP server
+
+  Start here, in this order:
+    contenox setup                 # 1. wizard — pick provider, model, API key
+    contenox doctor                # 2. verdict: can I run right now, yes or no
+    contenox init                  # 3. once per project: scaffold .contenox/ and its agents
+    contenox beam                  # 4. work
+
+  Unattended work, and the humans it interrupts:
+    contenox mission fire <agent> "<intent>" --wait   dispatch a declared agent under an envelope
+    contenox approvals                                the live queue: answer a question or a gate
+    contenox inbox                                    reports left with no live session to read them
 
   Inspect models:
-    contenox model list                    # models exposed by registered live backends
+    contenox model list            # models exposed by registered live backends
 
-  Or register an LLM backend manually:
-    # Local Ollama daemon
+  Or register an LLM backend by hand:
     ollama serve && ollama pull qwen3:8b
     contenox backend add ollama --type ollama
     contenox config set default-provider ollama
     contenox config set default-model qwen3:8b
-
-    # Hosted Ollama Cloud
-    contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
-    contenox config set default-provider ollama
-
-    # Google Gemini (no GPU required)
-    contenox backend add gemini --type gemini --api-key-env GEMINI_API_KEY
-    contenox config set default-model gemini-flash-latest
-    contenox config set default-provider gemini
-
-    # OpenAI
-    contenox backend add openai --type openai --api-key-env OPENAI_API_KEY
-    contenox config set default-model gpt-5-mini
-    contenox config set default-provider openai
+    # Hosted providers are the same three commands — see 'contenox backend add --help'.
 
   Editor autocomplete (FIM, over ACP) can use a separate model from chat:
-    # Example: chat on OpenAI, ghost text on local Ollama.
-    contenox config set default-provider openai
-    contenox config set default-model gpt-5-mini
     contenox config set default-autocomplete-provider ollama
     contenox config set default-autocomplete-model qwen2.5-coder:7b
 
@@ -295,14 +295,23 @@ var versionCmd = &cobra.Command{
 This is the subcommand form of 'contenox --version' and exists so that typing
 'contenox version' is not mistaken for chat input by the default run command.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("%s version %s\n", cmd.Root().Name(), cmd.Root().Version)
+		printVersion(cmd.OutOrStdout(), cmd.Root().Name(), cmd.Root().Version, version.GetProvenance())
 	},
+}
+
+// printVersion keeps the one-line release format and appends the VCS line only
+// when the toolchain stamped one, so a dirty working-tree build is
+// distinguishable from the release its version.txt claims.
+func printVersion(w io.Writer, name, v string, p version.Provenance) {
+	fmt.Fprintf(w, "%s version %s\n", name, v)
+	if s := p.String(); s != "" {
+		fmt.Fprintln(w, s)
+	}
 }
 
 func init() {
 	v := cliVersion()
 	rootCmd.Version = v
-	rootCmd.Short = fmt.Sprintf("Agent server v%s: declare agents, run them under an envelope, supervise from anywhere.", v)
 	rootCmd.Long = fmt.Sprintf("Version: %s\n\n%s", v, rootCmd.Long)
 
 	f := rootCmd.PersistentFlags()
@@ -343,7 +352,6 @@ func init() {
 	rootCmd.AddCommand(acpxCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(updateCmd)
-	rootCmd.AddCommand(workspaceCmd)
 	rootCmd.AddCommand(sandboxCmd)
 	rootCmd.AddCommand(shellEnvCmd)
 	rootCmd.AddCommand(vetCmd)
@@ -360,21 +368,28 @@ func init() {
 
 }
 
-func setupTelemetryLogging(ctx context.Context, store runtimetypes.Store, contenoxDir string) (func(), error) {
-	enabledStr := clikv.Read(ctx, store, "telemetry-enabled")
-	if enabledStr != "true" {
-		return func() {}, nil
+// setupTelemetryLogging points the process default slog handler at dest, teed
+// to <data-dir>/telemetry.log while telemetry-enabled is set. A surface that
+// draws on the terminal passes its own log file as dest, so no handler can
+// write over the screen and telemetry still reaches its file.
+func setupTelemetryLogging(ctx context.Context, store runtimetypes.Store, contenoxDir string, dest io.Writer) (func(), error) {
+	if dest == nil {
+		dest = os.Stderr
+	}
+	closeLog := func() {}
+
+	if clikv.Read(ctx, store, "telemetry-enabled") == "true" {
+		logPath := filepath.Join(contenoxDir, "telemetry.log")
+		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			return func() {}, fmt.Errorf("failed to open telemetry log: %w", err)
+		}
+		dest = io.MultiWriter(dest, f)
+		closeLog = func() { f.Close() }
 	}
 
-	logPath := filepath.Join(contenoxDir, "telemetry.log")
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return func() {}, fmt.Errorf("failed to open telemetry log: %w", err)
-	}
-
-	mw := io.MultiWriter(os.Stderr, f)
-	slog.SetDefault(slog.New(slog.NewTextHandler(mw, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	return func() { f.Close() }, nil
+	slog.SetDefault(slog.New(slog.NewTextHandler(dest, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	return closeLog, nil
 }
 
 func warnTelemetryLoggingUnavailable(w io.Writer, err error) {
@@ -467,9 +482,7 @@ func runInitCmd(cmd *cobra.Command, args []string) error {
 		} else if err := RunInit(cmd.OutOrStdout(), cmd.ErrOrStderr(), force, update, provider, contenoxDir, projectName); err != nil {
 			return err
 		}
-		// Marking a project doesn't grant it as a workspace root.
-		fmt.Fprintf(cmd.OutOrStdout(),
-			"To let sessions open it (the beam picker): contenox workspace add %s\n", cwd)
+		fmt.Fprintf(cmd.OutOrStdout(), "Open it with: contenox beam %s\n", cwd)
 		return nil
 	}
 	contenoxDir, err = ResolveContenoxDir(cmd)

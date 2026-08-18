@@ -118,6 +118,14 @@ type ToolsRepo interface {
 	ToolsWithSchema
 }
 
+// Prechecker refuses a call from static configuration alone, running and
+// changing nothing; optional, a repo without it is gated unchanged. A repo that
+// wraps another must forward it, or the inner refusal arrives only after the
+// approval gate has already cost a human a decision.
+type Prechecker interface {
+	Precheck(ctx context.Context, input any, args *ToolsCall) error
+}
+
 type ToolsProvider interface {
 	ToolsRegistry
 	ToolsWithSchema

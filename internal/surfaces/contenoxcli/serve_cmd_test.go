@@ -104,7 +104,7 @@ func TestUnit_Host_ServedRootReachesTheWorkspaceAllowlist(t *testing.T) {
 	dir := t.TempDir()
 	root := hostRootFor(t, dir)
 
-	factory, err := buildWorkspaceFactory(nil, root, nil)
+	factory, err := buildWorkspaceFactory(root)
 	if err != nil {
 		t.Fatalf("buildWorkspaceFactory: %v", err)
 	}
@@ -276,14 +276,14 @@ func TestUnit_Host_RedirectedScreenHasNoEscapes(t *testing.T) {
 // The host log must not depend on the telemetry toggle: a host that is not
 // opted into telemetry still needs somewhere to write its own diagnostics.
 func TestUnit_Host_LogIsSeparateFromTelemetry(t *testing.T) {
-	if hostLogName == "telemetry" {
+	if acpProfileServe.name == "telemetry" {
 		t.Fatal("the host log must not share telemetry.log")
 	}
 	dir := t.TempDir()
 	cmd := &cobra.Command{Use: "serve"}
 	cmd.Flags().String("log-dir", dir, "")
 
-	w, err := openHostLog(cmd)
+	w, err := openHostLog(cmd, acpProfileServe.name)
 	if err != nil {
 		t.Fatalf("openHostLog: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestUnit_Host_LogIsSeparateFromTelemetry(t *testing.T) {
 		t.Fatalf("host log collided with telemetry.log: %q", w.Path())
 	}
 	// Dated, so "what happened on Tuesday" is a question about filenames.
-	if !strings.HasPrefix(filepath.Base(w.Path()), hostLogName+"-") {
+	if !strings.HasPrefix(filepath.Base(w.Path()), acpProfileServe.name+"-") {
 		t.Fatalf("host log is not dated: %q", w.Path())
 	}
 }
@@ -308,7 +308,7 @@ func TestUnit_Host_StoredSettingsReachTheLiveLog(t *testing.T) {
 	cmd := &cobra.Command{Use: "serve"}
 	cmd.Flags().String("log-dir", dir, "")
 
-	w, err := openHostLog(cmd)
+	w, err := openHostLog(cmd, acpProfileServe.name)
 	if err != nil {
 		t.Fatalf("openHostLog: %v", err)
 	}

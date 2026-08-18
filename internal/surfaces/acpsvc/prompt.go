@@ -55,9 +55,6 @@ func (d *nativeDriver) ConfigOptions(ctx context.Context, sess *sessionEntry) []
 		t.thinkConfigOption(sess),
 		t.tokenLimitConfigOption(ctx, sess),
 	}
-	if opt, ok := t.workspaceRootConfigOption(sess); ok {
-		opts = append(opts, opt)
-	}
 	if opt, ok := t.agentConfigOption(ctx, sess); ok {
 		opts = append(opts, opt)
 	}

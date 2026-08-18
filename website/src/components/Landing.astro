@@ -68,7 +68,7 @@ export interface LandingStrings {
   shapesEyebrow: string;
   shapesH2: string;
   shapesLede: string;
-  /** [title, body] — the two deployment shapes. */
+  /** [title, body] — the ways in, front door first. */
   shapes: [string, string][];
   guides: [string, string][];
 
@@ -150,48 +150,20 @@ const listing = 'mx-auto mt-8 max-w-2xl overflow-x-auto rounded-xl border border
 </section>
 
 <section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
-  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.apacheEyebrow}</p>
-  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.apacheH2}</h2>
-  <div class="mx-auto mt-6 max-w-2xl space-y-4 text-neutral-600 dark:text-neutral-400">
-    <p>{t.apacheP1}</p>
-    <p>{t.apacheP2}</p>
-  </div>
-  <div class="mx-auto mt-8 max-w-3xl overflow-hidden rounded-xl border border-neutral-200/60 bg-white/60 backdrop-blur-md dark:border-neutral-800/60 dark:bg-neutral-950/60">
-    <div class="grid sm:grid-cols-2">
-      <p class="px-5 pt-4 pb-1 text-xs font-semibold tracking-widest text-neutral-500 uppercase sm:border-r sm:border-neutral-200/60 sm:pb-4 dark:sm:border-neutral-800/60">{t.apacheThenLabel}</p>
-      <p class="px-5 pb-4 text-xs font-semibold tracking-widest text-neutral-500 uppercase sm:pt-4">{t.apacheNowLabel}</p>
-    </div>
-    {t.apacheRows.map(([then, now]) => (
-      <div class="grid border-t border-neutral-200/60 sm:grid-cols-2 dark:border-neutral-800/60">
-        <p class="px-5 pt-4 pb-1 text-sm text-neutral-500 sm:border-r sm:border-neutral-200/60 sm:pb-4 dark:sm:border-neutral-800/60">{then}</p>
-        <p class="px-5 pb-4 text-sm text-neutral-700 sm:pt-4 dark:text-neutral-300">{now}</p>
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.shapesEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.shapesH2}</h2>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.shapesLede}</p>
+  <div class="mx-auto mt-8 grid max-w-5xl gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    {t.shapes.map(([title, body]) => (
+      <div class={card}>
+        <h3 class="font-semibold">{title}</h3>
+        <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{body}</p>
       </div>
     ))}
   </div>
-  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.apacheOutro}</p>
-</section>
-
-<section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
-  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.treeEyebrow}</p>
-  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.treeH2}</h2>
-  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.treeLede}</p>
-  <div class={listing}>
-    {t.treeListing.map(([path, comment]) => (
-      <div class="whitespace-pre">
-        <span class="text-neutral-700 dark:text-neutral-300">{path}</span>
-        {comment && <span class="text-neutral-400 dark:text-neutral-500">{comment}</span>}
-      </div>
-    ))}
-  </div>
-  <p class="mx-auto mt-4 max-w-2xl text-center text-sm text-neutral-500">{t.treeOutro}</p>
-  <ul class="mx-auto mt-8 max-w-2xl space-y-2 text-sm text-neutral-600 dark:text-neutral-400">
-    {t.treePoints.map((line) => (
-      <li class="flex gap-3"><span class="text-neutral-400 dark:text-neutral-600">→</span><span>{line}</span></li>
-    ))}
-  </ul>
-  <div class="mt-6 flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm">
-    {t.treeCtas.map(([label, href]) => (
-      <a href={href} class={ctaLink}>{label} →</a>
+  <div class="mt-8 flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm">
+    {t.guides.map(([label, href]) => (
+      <a href={href} class="text-neutral-600 hover:text-black dark:text-neutral-400 dark:hover:text-white">{label} →</a>
     ))}
   </div>
 </section>
@@ -237,6 +209,31 @@ const listing = 'mx-auto mt-8 max-w-2xl overflow-x-auto rounded-xl border border
 </section>
 
 <section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.treeEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.treeH2}</h2>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.treeLede}</p>
+  <div class={listing}>
+    {t.treeListing.map(([path, comment]) => (
+      <div class="whitespace-pre">
+        <span class="text-neutral-700 dark:text-neutral-300">{path}</span>
+        {comment && <span class="text-neutral-400 dark:text-neutral-500">{comment}</span>}
+      </div>
+    ))}
+  </div>
+  <p class="mx-auto mt-4 max-w-2xl text-center text-sm text-neutral-500">{t.treeOutro}</p>
+  <ul class="mx-auto mt-8 max-w-2xl space-y-2 text-sm text-neutral-600 dark:text-neutral-400">
+    {t.treePoints.map((line) => (
+      <li class="flex gap-3"><span class="text-neutral-400 dark:text-neutral-600">→</span><span>{line}</span></li>
+    ))}
+  </ul>
+  <div class="mt-6 flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm">
+    {t.treeCtas.map(([label, href]) => (
+      <a href={href} class={ctaLink}>{label} →</a>
+    ))}
+  </div>
+</section>
+
+<section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
   <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.toolsEyebrow}</p>
   <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.toolsH2}</h2>
   <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.toolsLede}</p>
@@ -257,22 +254,25 @@ const listing = 'mx-auto mt-8 max-w-2xl overflow-x-auto rounded-xl border border
 </section>
 
 <section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
-  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.shapesEyebrow}</p>
-  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.shapesH2}</h2>
-  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.shapesLede}</p>
-  <div class="mx-auto mt-8 grid max-w-4xl gap-4 sm:grid-cols-2">
-    {t.shapes.map(([title, body]) => (
-      <div class={card}>
-        <h3 class="font-semibold">{title}</h3>
-        <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{body}</p>
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.apacheEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.apacheH2}</h2>
+  <div class="mx-auto mt-6 max-w-2xl space-y-4 text-neutral-600 dark:text-neutral-400">
+    <p>{t.apacheP1}</p>
+    <p>{t.apacheP2}</p>
+  </div>
+  <div class="mx-auto mt-8 max-w-3xl overflow-hidden rounded-xl border border-neutral-200/60 bg-white/60 backdrop-blur-md dark:border-neutral-800/60 dark:bg-neutral-950/60">
+    <div class="grid sm:grid-cols-2">
+      <p class="px-5 pt-4 pb-1 text-xs font-semibold tracking-widest text-neutral-500 uppercase sm:border-r sm:border-neutral-200/60 sm:pb-4 dark:sm:border-neutral-800/60">{t.apacheThenLabel}</p>
+      <p class="px-5 pb-4 text-xs font-semibold tracking-widest text-neutral-500 uppercase sm:pt-4">{t.apacheNowLabel}</p>
+    </div>
+    {t.apacheRows.map(([then, now]) => (
+      <div class="grid border-t border-neutral-200/60 sm:grid-cols-2 dark:border-neutral-800/60">
+        <p class="px-5 pt-4 pb-1 text-sm text-neutral-500 sm:border-r sm:border-neutral-200/60 sm:pb-4 dark:sm:border-neutral-800/60">{then}</p>
+        <p class="px-5 pb-4 text-sm text-neutral-700 sm:pt-4 dark:text-neutral-300">{now}</p>
       </div>
     ))}
   </div>
-  <div class="mt-8 flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm">
-    {t.guides.map(([label, href]) => (
-      <a href={href} class="text-neutral-600 hover:text-black dark:text-neutral-400 dark:hover:text-white">{label} →</a>
-    ))}
-  </div>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.apacheOutro}</p>
 </section>
 
 <section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">

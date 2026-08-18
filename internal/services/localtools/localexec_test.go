@@ -485,3 +485,37 @@ func TestUnit_LocalExecTools_Exec_NonZeroExit_WithPolicy_Rejected(t *testing.T) 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "strictly forbidden")
 }
+
+func TestUnit_LocalExecTools_DescriptionTeachesTheCallingConvention(t *testing.T) {
+	ctx := context.Background()
+	h := localtools.NewLocalExecToolsWith(localtools.NewTestHostRunner()).(*localtools.LocalExecTools)
+
+	tools, err := h.GetToolsForToolsByName(ctx, "local_shell")
+	require.NoError(t, err)
+	require.Len(t, tools, 1)
+
+	desc := tools[0].Function.Description
+	assert.Contains(t, desc, `{"command": "ls", "args": ["-F"]}`)
+	assert.Contains(t, desc, `never {"command": "ls -F"}`)
+	assert.Contains(t, desc, "not interpreted unless shell is passed")
+	assert.Contains(t, desc, "no approval can widen")
+
+	params, ok := tools[0].Function.Parameters.(map[string]interface{})
+	require.True(t, ok)
+	props, ok := params["properties"].(map[string]interface{})
+	require.True(t, ok)
+	commandProp, ok := props["command"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Contains(t, commandProp["description"], "flags and operands go in args")
+	assert.Contains(t, commandProp["description"], `never {"command": "ls -F"}`)
+
+	schemas, err := h.GetSchemasForSupportedTools(ctx)
+	require.NoError(t, err)
+	schema := schemas["local_shell"]
+	require.NotNil(t, schema)
+	assert.Contains(t, schema.Info.Description, "every flag and operand in args")
+	published := schema.Components.Schemas["LocalExecRequest"].Value.Properties["command"].Value
+	require.NotNil(t, published)
+	assert.Contains(t, published.Description, "flags and operands go in args")
+	assert.Contains(t, published.Description, `never {"command": "ls -F"}`)
+}

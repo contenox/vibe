@@ -31,10 +31,11 @@ widerrufbar.
 - **Der Agent sieht, was du gewährst — nicht, was du hast.** Jede
   agent-erreichbare Shell bekommt eine
   [bereinigte Least-Privilege-Umgebung](/docs/guide/confinement/environment/),
-  Tools sind pro Aufruf allowlistet, und Sessions laufen nur in den
-  Workspace-Roots, die du konfiguriert hast — dem Startverzeichnis, den per
-  `contenox workspace add` freigegebenen Roots und den für den jeweiligen Lauf
-  übergebenen — und nie in Config, Datenbank oder Policies der Runtime selbst.
+  Tools sind pro Aufruf allowlistet, und Sessions laufen nur in dem **einen**
+  Workspace, mit dem die Instanz gestartet wurde — dem Startverzeichnis bei
+  `beam` und `run`, dem angegebenen Pfad bei `serve`, dem vom Editor geöffneten
+  Projekt bei `acp` — und nie in Config, Datenbank oder Policies der Runtime
+  selbst.
 
 ## Self-hosted und lokale KI — oder EU-Region auf deinen Schlüsseln
 

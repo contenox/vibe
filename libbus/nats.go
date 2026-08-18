@@ -39,7 +39,7 @@ func NewPubSub(ctx context.Context, cfg *Config) (Messenger, error) {
 			log.Printf("NATS disconnected. Will autoreconnect: %v", err)
 		}),
 		nats.ReconnectHandler(func(nc *nats.Conn) {
-			log.Printf("NATS reconnected to %s", nc.ConnectedUrl())
+			log.Printf("NATS reconnected to %s", redactURL(nc.ConnectedUrl()))
 		}),
 		// Without this the client swallows async errors, above all
 		// nats.ErrSlowConsumer, making data loss invisible.
@@ -72,11 +72,11 @@ func NewPubSub(ctx context.Context, cfg *Config) (Messenger, error) {
 	}
 
 	if err != nil {
-		log.Printf("Failed to connect to NATS at %s: %v", cfg.NATSURL, err)
+		log.Printf("Failed to connect to NATS at %s: %v", redactURL(cfg.NATSURL), err)
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}
 
-	log.Printf("Successfully connected to NATS at %s", nc.ConnectedUrl())
+	log.Printf("Successfully connected to NATS at %s", redactURL(nc.ConnectedUrl()))
 	return &ps{nc: nc}, nil
 }
 

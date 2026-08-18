@@ -126,6 +126,21 @@ func (p *PersistentRepo) Exec(
 	return out, dt, execErr
 }
 
+var _ taskengine.Prechecker = (*PersistentRepo)(nil)
+
+// Precheck forwards to the local tools registered under args.Name; a remote
+// provider, or a local one without the seam, raises no static objection.
+func (p *PersistentRepo) Precheck(ctx context.Context, input any, args *taskengine.ToolsCall) error {
+	if args == nil {
+		return nil
+	}
+	pre, ok := p.localTools[args.Name].(taskengine.Prechecker)
+	if !ok {
+		return nil
+	}
+	return pre.Precheck(ctx, input, args)
+}
+
 func (p *PersistentRepo) requestWorker(ctx context.Context, subject string, payload []byte) ([]byte, error) {
 	deadline := time.Now().Add(mcpWorkerWait)
 	for {

@@ -182,6 +182,13 @@ func ResolveSessionCwd(f *Factory, cwd, fallback string) (string, error) {
 		if cwd == "" {
 			return fallback, nil
 		}
+		// With no host root configured, the client's cwd is authoritative and
+		// the "/" sentinel names nothing: refusing it keeps a session from
+		// being rooted at the filesystem root, which would contain the
+		// control plane.
+		if cwd == "/" {
+			return "", cwdRefusal("cwd %q names no workspace here: this runtime serves no host root, so the client must send the session's project directory", cwd)
+		}
 		// Control plane is never a session cwd, even with no allowlist configured.
 		if denied, ok := IsControlPlanePath(cwd); ok {
 			return "", cwdRefusal("workspace directory %q is inside the runtime's control plane (%s), which is never a session workspace", cwd, denied)

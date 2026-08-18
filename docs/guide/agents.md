@@ -69,11 +69,13 @@ fails.
 
 ## Using it
 
-Declared agents are ordinary agents. They appear in the roster, in an editor's
+Declared agents are ordinary agents. They appear in the roster, in a session's
 `/mission` list, and to the planner:
 
 ```bash
 contenox agent list
+contenox beam                                                    # talk to one
+contenox run reviewer "review the payment retry change"          # or script it
 contenox mission fire reviewer "review the payment retry change" --wait
 ```
 
@@ -232,8 +234,10 @@ you do not control.
 
 ## Tools you connect
 
-contenox hosts `local_fs` and `local_shell`, both forwarded to your ACP
-client's `fs/*` and `terminal/*` capabilities. Everything else you connect as
+contenox hosts `local_fs` and `local_shell`, both forwarded to the connected
+client's `fs/*` and `terminal/*` capabilities — beam carries them natively, an
+editor carries them in the project you have open, and `contenox serve` has
+neither. Everything else you connect as
 an [MCP server](/docs/integrations/tools/mcp/), an OpenAPI spec, or a shell command
 (`local_shell` reaches `git`, search tools, and anything else your shell can
 run).

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/kernel/tools"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/stretchr/testify/assert"
@@ -67,6 +68,30 @@ func TestUnit_HITLWrapper_RunnableCommandIsStillAsked(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, asked, "an allowed command must still be gated by the human")
+}
+
+// TestUnit_HITLWrapper_UnrunnableCommandIsNeverAskedThroughTheRealRepo is the
+// same pin taken through the composition the engine actually builds — the gate
+// wraps the top-level repo, not the shell tool — so the precheck cannot go dead
+// again behind a wrapper that forgets to forward it.
+func TestUnit_HITLWrapper_UnrunnableCommandIsNeverAskedThroughTheRealRepo(t *testing.T) {
+	shell := localtools.NewLocalExecToolsWith(refusingRunner{t: t})
+	repo := tools.NewPersistentRepo(
+		map[string]taskengine.ToolsRepo{localtools.LocalExecToolsName: shell}, nil, nil, nil, nil)
+
+	asked := 0
+	ask := func(context.Context, hitlservice.ApprovalRequest) (bool, error) {
+		asked++
+		return true, nil
+	}
+	w := localtools.NewHITLWrapper(repo, ask, approvePolicy(), nil)
+
+	ctx := withAllowedCommands(context.Background(), "git,go")
+	_, _, err := w.Exec(ctx, time.Now(), nil, false, shellCall("kubectl"))
+
+	require.Error(t, err, "a command outside the allowlist must be refused")
+	assert.Zero(t, asked, "the human was asked to approve a command that cannot run")
+	assert.Contains(t, err.Error(), "kubectl")
 }
 
 // TestUnit_HITLWrapper_PrecheckIsOptional pins that an inner repo without the precheck seam is gated exactly as it was.

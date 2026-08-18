@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -52,9 +53,10 @@ type fakeAskInbox struct {
 	err     error
 	pending []*runtimetypes.HITLApproval
 
-	mu   sync.Mutex
-	seen []recordedVerdict
-	done chan struct{}
+	mu    sync.Mutex
+	seen  []recordedVerdict
+	pages int
+	done  chan struct{}
 }
 
 func (i *fakeAskInbox) AnswerFrom(_ context.Context, askID, text, by string) error {
@@ -68,14 +70,32 @@ func (i *fakeAskInbox) RespondWithGuidance(_ context.Context, askID string, appr
 	})
 }
 
-func (i *fakeAskInbox) ListPending(_ context.Context, limit int) ([]*runtimetypes.HITLApproval, error) {
+// ListPendingBefore pages the rows newest first, exactly as the durable store
+// does: created_at strictly before the cursor, capped at limit.
+func (i *fakeAskInbox) ListPendingBefore(_ context.Context, createdBefore *time.Time, limit int) ([]*runtimetypes.HITLApproval, error) {
+	i.mu.Lock()
+	i.pages++
+	i.mu.Unlock()
 	if i.err != nil {
 		return nil, i.err
 	}
-	if limit > 0 && len(i.pending) > limit {
-		return i.pending[:limit], nil
+	page := make([]*runtimetypes.HITLApproval, 0, len(i.pending))
+	for _, row := range i.pending {
+		if createdBefore != nil && !row.CreatedAt.Before(*createdBefore) {
+			continue
+		}
+		page = append(page, row)
 	}
-	return i.pending, nil
+	if limit > 0 && len(page) > limit {
+		page = page[:limit]
+	}
+	return page, nil
+}
+
+func (i *fakeAskInbox) pageCount() int {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.pages
 }
 
 func (i *fakeAskInbox) record(v recordedVerdict) error {
@@ -607,6 +627,61 @@ func TestUnit_RelayAskBridge_RepublishNeedsALinkAndNeverFails(t *testing.T) {
 	noInbox.detach()
 	if frames := noInboxSent.all(); len(frames) != 0 {
 		t.Fatalf("a bridge with no inbox re-published %+v", frames)
+	}
+}
+
+func TestUnit_RelayAskBridge_RepublishesPastTheFirstPage(t *testing.T) {
+	t.Parallel()
+	const total = republishAskLimit + 7
+	newest := time.Now().UTC()
+	rows := make([]*runtimetypes.HITLApproval, 0, total)
+	for i := range total {
+		row := openAskRow(fmt.Sprintf("ask-%03d", i))
+		row.CreatedAt = newest.Add(-time.Duration(i) * time.Second)
+		rows = append(rows, row)
+	}
+
+	inbox := &fakeAskInbox{pending: rows}
+	b, sent := attachedBridge(inbox)
+	b.republish(t.Context())
+	waitFrames(t, sent, total)
+	b.detach()
+
+	frames := sent.all()
+	if len(frames) != total {
+		t.Fatalf("re-published %d asks, want every one of %d", len(frames), total)
+	}
+	if pages := inbox.pageCount(); pages < 2 {
+		t.Fatalf("read %d page(s); a host with more pending than one batch must be paged", pages)
+	}
+	for i, f := range frames {
+		var published librelay.AskPublished
+		if err := f.DecodePayload(&published); err != nil {
+			t.Fatalf("DecodePayload: %v", err)
+		}
+		if want := rows[i].ID; published.AskID != want {
+			t.Fatalf("frame %d re-published %q, want %q: paging must keep the newest-first order", i, published.AskID, want)
+		}
+	}
+}
+
+func TestUnit_RelayAskBridge_ADetachedBridgeAdmitsNoVerdict(t *testing.T) {
+	t.Parallel()
+	inbox := &fakeAskInbox{}
+	b, _ := attachedBridge(inbox)
+	b.detach()
+
+	f, err := librelay.Frame{Type: librelay.TypeAskVerdict, Instance: "inst-1"}.
+		WithPayload(librelay.AskVerdict{AskID: "ask-1", Decision: librelay.AskDecisionAllow})
+	if err != nil {
+		t.Fatalf("WithPayload: %v", err)
+	}
+	b.handleVerdict(t.Context(), f)
+	// The second detach joins whatever the first one could still have admitted.
+	b.detach()
+
+	if seen := inbox.all(); len(seen) != 0 {
+		t.Fatalf("a verdict was admitted after detach released its waiter: %+v", seen)
 	}
 }
 

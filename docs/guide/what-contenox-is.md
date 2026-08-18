@@ -6,9 +6,9 @@ order: 2
 
 # What contenox is
 
-**An agent server.** An agent is one file you declare — `.contenox/agents/reviewer.md`,
-Markdown with a YAML frontmatter header. This is the other file, the one that
-says what it may do:
+**You declare an agent in one Markdown file and run it in your terminal.** The
+declaration is `.contenox/agents/reviewer.md` — Markdown with a YAML frontmatter
+header. This is the other file, the one that says what it may do:
 
 ```json
 {
@@ -41,9 +41,9 @@ product:
 - **What starts work.** A schedule, a signed message from another system, a
   form on your own site — declared by you, not discovered at runtime.
 
-Everything you can see is a wrapper around that. The terminal UI, the CLI, the
-browser app: all of them are example implementations, and they change. The
-three things above are what stays.
+Everything you can see is a client of that. `contenox beam` in your terminal,
+your editor, the browser app: each renders the same decisions, none of them
+makes one, and any of them can change. The three things above are what stays.
 
 ## Why I built it
 
@@ -68,6 +68,8 @@ preference.
 
 ## What it is typically used for
 
+- A session at your own keyboard — `contenox beam`, a declared agent, and an
+  approval card in front of anything that changes the world.
 - An overnight mission under a strict envelope — review a diff, run the tests,
   draft the patch — that stops and asks before it touches the branch.
 - Work that fires from something else: a webhook, a schedule, a form on your

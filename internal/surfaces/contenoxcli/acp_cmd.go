@@ -25,6 +25,7 @@ import (
 	"github.com/contenox/contenox/internal/services/oracletools"
 	"github.com/contenox/contenox/internal/services/presence"
 	"github.com/contenox/contenox/internal/services/updatecheck"
+	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/internal/substrate"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
@@ -40,6 +41,12 @@ var acpCmd = &cobra.Command{
 	Use:   "acp",
 	Short: "Run the Contenox ACP server over stdio.",
 	Long: `Speak Agent Client Protocol over stdio so editors like Zed can run local Contenox chains.
+
+The editor owns the working directory: per the protocol, the cwd it sends on
+session/new is that session's workspace, so this command configures no workspace
+root of its own. Filesystem and terminal tools are proxied back to the editor
+over the client capabilities it declared, which is why a client that grants
+neither is served neither.
 
 The chain executed for each session/prompt is compiled from its agents/ declaration into
 ~/.contenox/.generated/chain-agent-acp.json (an operator copy at ~/.contenox/chain-agent-acp.json
@@ -81,7 +88,6 @@ func init() {
 		c.Flags().Bool("setup", false, "Run interactive setup wizard to configure provider and model, then exit.")
 		c.Flags().String("workspace-id", "", "Workspace ID for new ACP sessions (default: the stable workspace from ~/.contenox/workspace.id, same as the CLI). Existing sessions are always located by their session ID regardless of workspace.")
 		registerOracleFlags(c)
-		addWorkspaceRootFlag(c)
 	}
 	acpCmd.Flags().Bool("experimental-acp", false, "Accepted for compatibility with ACP clients that hardcode this launch flag (e.g. AionUi); no effect.")
 	_ = acpCmd.Flags().MarkHidden("experimental-acp")
@@ -101,6 +107,7 @@ type acpProfile struct {
 	seedFIMChain func(contenoxDir string) error
 	// host runs a long-lived host instead of an ACP connection over stdio.
 	host bool
+	beam bool
 	name string
 }
 
@@ -122,6 +129,15 @@ var acpProfileServe = acpProfile{
 	seedFIMChain: seedFIMChainIfMissing,
 	host:         true,
 	name:         "serve",
+}
+
+var acpProfileBeam = acpProfile{
+	hitlPolicy: "hitl-policy-acp.json",
+	chainFile:  chainAgentACPFilename,
+	chainEnv:   "CONTENOX_ACP_CHAIN_PATH",
+	embedFleet: true,
+	beam:       true,
+	name:       "beam",
 }
 
 var acpProfileACPX = acpProfile{
@@ -177,18 +193,25 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 
 	workspaceFlag, _ := cmd.Flags().GetString("workspace-id")
 
-	// A host draws a status screen on the terminal, so its logs go to a file.
 	logDest := io.Writer(os.Stderr)
-	var serveLog *liblog.Writer
-	if profile.host {
-		rot, logErr := openHostLog(cmd)
-		if logErr != nil {
-			fmt.Fprintf(os.Stderr, "contenox serve: logging to a file is unavailable, using stderr: %v\n", logErr)
-		} else {
-			serveLog = rot
+	var surfaceLog *liblog.Writer
+	if profile.host || profile.beam {
+		rot, logErr := openHostLog(cmd, profile.name)
+		switch {
+		case logErr == nil:
+			surfaceLog = rot
 			logDest = rot
 			defer rot.Close()
+		case profile.beam:
+			fmt.Fprintf(os.Stderr, "contenox beam: logging is unavailable, running without logs: %v\n", logErr)
+			logDest = io.Discard
+		default:
+			fmt.Fprintf(os.Stderr, "contenox %s: logging to a file is unavailable, using stderr: %v\n", profile.name, logErr)
 		}
+	}
+	noticeOut := io.Writer(os.Stderr)
+	if profile.beam {
+		noticeOut = logDest
 	}
 	var tracker libtracker.ActivityTracker = libtracker.NewTextActivityTracker(logDest)
 
@@ -212,8 +235,8 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	reportChange("phase", "open_db")
 
 	// The host log booted on defaults before the database was readable.
-	if serveLog != nil {
-		applyStoredLogSettings(ctx, runtimetypes.New(db.WithoutTransaction()), serveLog)
+	if surfaceLog != nil {
+		applyStoredLogSettings(ctx, runtimetypes.New(db.WithoutTransaction()), surfaceLog)
 		reportChange("phase", "apply_log_settings")
 	}
 
@@ -236,7 +259,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	seedOptionalFIMChain(profile, contenoxDir)
 	reportChange("phase", "seed_fim_chain")
 
-	closeLogs, err := setupTelemetryLogging(ctx, runtimetypes.New(db.WithoutTransaction()), contenoxDir)
+	closeLogs, err := setupTelemetryLogging(ctx, runtimetypes.New(db.WithoutTransaction()), contenoxDir, logDest)
 	if err != nil {
 		reportErr(err)
 		return fmt.Errorf("setup telemetry logging: %w", err)
@@ -255,9 +278,9 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	if acpsvc.ReadConfigValue(ctx, db, "default-model") == "" &&
 		(os.Getenv(envDefaultProvider) != "" || os.Getenv(envDefaultModel) != "") {
 		if err := completeEnvSetup(ctx, db); err != nil {
-			fmt.Fprintf(os.Stderr, "contenox acp: environment-based setup incomplete: %v\n", err)
+			fmt.Fprintf(noticeOut, "contenox acp: environment-based setup incomplete: %v\n", err)
 		} else {
-			fmt.Fprintln(os.Stderr, "contenox acp: configured provider/model from environment.")
+			fmt.Fprintln(noticeOut, "contenox acp: configured provider/model from environment.")
 		}
 	}
 
@@ -279,6 +302,12 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		}
 		defaultThink = level
 	}
+
+	if err := ensureProfileChain(ctx, contenoxDir, profile.chainFile, profile.chainEnv, tracker); err != nil {
+		reportErr(err)
+		return err
+	}
+	reportChange("phase", "ensure_profile_chain")
 
 	chains, err := acpsvc.LoadChainRegistryFrom(profile.chainFile, profile.chainEnv)
 	if err != nil {
@@ -315,10 +344,11 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	// Assigned once the fleet is built below; the toolset resolves it per call.
 	var inProcessFleet fleetservice.Service
 
-	tools := acpToolset(db, tracker, workspaceID,
+	tools := acpToolset(profile, db, tracker, workspaceID,
 		routedTransport(sessionRouter, func() *acpsvc.Transport { return transport }),
 		missions, acpHITL, missionPub, optInBeta,
 		func() fleetservice.Service { return inProcessFleet })
+	printUnservedToolsets(noticeOut, unservedToolsets(chains.Default(), tools))
 
 	oracleStore := runtimetypes.New(db.WithoutTransaction())
 	oracleCfg := resolveOracleConfig(ctx, oracleStore, cmd)
@@ -329,7 +359,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	}
 	if oracleCfg.enabled() {
 		tools[oracletools.ToolsProviderName] = oracletools.New(oracleResolver{
-			hitl: acpHITL, missions: missions, store: oracleStore, out: os.Stderr,
+			hitl: acpHITL, missions: missions, store: oracleStore, out: noticeOut,
 		})
 	}
 
@@ -357,7 +387,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		return fmt.Errorf("cleanup stale ACP MCP servers: %w", err)
 	}
 	if defaultModel == "" {
-		fmt.Fprintln(os.Stderr, "contenox acp: no default-model configured; serving setup-only. Run the \"Setup Contenox\" auth method or `contenox acp --setup` to configure a provider and model.")
+		fmt.Fprintln(noticeOut, "contenox acp: no default-model configured; serving setup-only. Run the \"Setup Contenox\" auth method or `contenox acp --setup` to configure a provider and model.")
 	} else {
 		cfg := enginesvc.Config{
 			DefaultModel:       defaultModel,
@@ -405,11 +435,11 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 				contextLength: triggerOpts.EffectiveContext,
 				approves:      oracleCfg.approves,
 				missions:      missions,
-				out:           os.Stderr,
+				out:           noticeOut,
 			})
-			fmt.Fprintln(os.Stderr, oracleMountedLine(oracleCfg))
+			fmt.Fprintln(noticeOut, oracleMountedLine(oracleCfg))
 		}
-		trigHook.Set(buildInProcessTriggerHook(ctx, db, contenoxDir, workspaceID, engine, triggerOpts, os.Stderr))
+		trigHook.Set(buildInProcessTriggerHook(ctx, db, contenoxDir, workspaceID, engine, triggerOpts, noticeOut))
 		// Deferred AFTER engine.Stop so LIFO drains in-flight firings before teardown.
 		defer trigHook.Drain(eventlog.DefaultDrainTimeout)
 	}
@@ -461,15 +491,25 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		return fmt.Errorf("resolve working directory: %w", err)
 	}
 	// A host serves where it was told to, not where it happened to be started
-	// from. This root is both what the screen names and the first allowlist entry.
+	// from, and it serves exactly one workspace, fixed here for its lifetime.
+	// Editor-driven profiles (acp, beam) build no factory: the client's cwd on
+	// session/new is the workspace, per the protocol.
 	defaultRoot := launchDir
-	if profile.host {
+	var workspaceRoots *vfs.Factory
+	switch {
+	case profile.host:
 		defaultRoot = defaultHostRoot(cmd, launchDir)
-	}
-	workspaceRoots, err := buildWorkspaceFactory(cmd, defaultRoot, runtimetypes.New(db.WithoutTransaction()))
-	if err != nil {
-		reportErr(err)
-		return err
+		workspaceRoots, err = buildWorkspaceFactory(defaultRoot)
+		if err != nil {
+			reportErr(err)
+			return err
+		}
+	case profile.beam:
+		defaultRoot, err = beamRoot(cmd, launchDir)
+		if err != nil {
+			reportErr(err)
+			return err
+		}
 	}
 
 	transportFactory := acpsvc.New(acpsvc.Deps{
@@ -504,7 +544,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	})
 
 	stopRelay := serveRemoteAttachments(ctx, contenoxDir, transportFactory,
-		buildRelayChainTriggers(db, contenoxDir, workspaceID, engine, triggerOpts, resumeBridge), askBridge, tracker, os.Stderr)
+		buildRelayChainTriggers(db, contenoxDir, workspaceID, engine, triggerOpts, resumeBridge), askBridge, tracker, noticeOut)
 	defer stopRelay()
 
 	acpCwd, _ := os.Getwd()
@@ -518,6 +558,20 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	})
 	defer presenceReporter.Stop()
 
+	if profile.beam {
+		return runBeamSurface(ctx, cmd, beamSurface{
+			factory:       transportFactory,
+			bindTransport: func(t *acpsvc.Transport) { transport = t },
+			reporter:      presenceReporter,
+			bus:           bus,
+			root:          defaultRoot,
+			model:         defaultModel,
+			provider:      defaultProvider,
+			engineReady:   engine != nil,
+			logPath:       surfaceLogPath(surfaceLog),
+		})
+	}
+
 	// A host has no stdin to serve ACP over; the relay tunnel is its only
 	// inbound path.
 	if profile.host {
@@ -529,7 +583,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			provider:     defaultProvider,
 			engineReady:  engine != nil,
 			setupCheck:   hostSetupCheck(ctx, engine),
-			log:          serveLog,
+			log:          surfaceLog,
 			relayEnabled: relayIsConfigured(contenoxDir),
 		})
 	}

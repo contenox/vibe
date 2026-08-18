@@ -192,6 +192,12 @@ func TestUnit_Schema_Parity_CatchesEveryKindOfDrift(t *testing.T) {
 			to:      "idx_messages_added_at ON message_indices (added_at)",
 			expect:  "idx_messages_added_at",
 		},
+		"changed_index_method": {
+			dialect: "postgres",
+			from:    "CREATE INDEX IF NOT EXISTS idx_agents_kind ON agents(kind);",
+			to:      "CREATE INDEX IF NOT EXISTS idx_agents_kind ON agents USING GIN(kind);",
+			expect:  "idx_agents_kind",
+		},
 		"index_became_unique": {
 			dialect: "postgres",
 			from:    "CREATE INDEX IF NOT EXISTS idx_agents_kind",
@@ -398,6 +404,10 @@ func compareIndexes(sqlite, postgres *schemaShape) []string {
 		if lite.Unique != pgIndex.Unique {
 			problems = append(problems, fmt.Sprintf("index %q uniqueness differs: schema_sqlite.sql %t, schema_postgres.sql %t",
 				name, lite.Unique, pgIndex.Unique))
+		}
+		if lite.Method != pgIndex.Method {
+			problems = append(problems, fmt.Sprintf("index %q method differs: schema_sqlite.sql %s, schema_postgres.sql %s",
+				name, quoteOrNone(lite.Method), quoteOrNone(pgIndex.Method)))
 		}
 		if lite.Body != pgIndex.Body {
 			problems = append(problems, fmt.Sprintf("index %q covers (%s) in schema_sqlite.sql and (%s) in schema_postgres.sql",

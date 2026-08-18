@@ -37,27 +37,30 @@ are walking to the machine, mint another — they cost nothing.
 
 ### From a session instead
 
-If you are already in a contenox session in an editor, `/pair K7M-3PQ` does the
-same thing without leaving it. A pairing describes the **machine**, not the
+If you are already in a session — `contenox beam`, or an editor — `/pair
+K7M-3PQ` does the same thing without leaving it. A pairing describes the **machine**, not the
 process that redeemed the key or the directory it was standing in, so both
 entry points write the same credential and every later process finds it.
 
 ## Being reachable
 
 Pairing attaches the machine. Something then has to be running for the app to
-attach *to*:
+attach *to*. Any session will do — a `contenox beam` at your desk, an editor
+session — and for a machine that should stay reachable with nobody at it, a
+host:
 
 ```bash
 contenox serve
 ```
 
-That is the host — the full runtime, no editor involved. It prints what it is
-attached to and stays up until you stop it. See
-[Reaching a machine from the app](/docs/guide/serve/).
+That is the standing host: one workspace, fixed at launch, no editor and no
+person in front of it. It prints what it is attached to and stays up until you
+stop it. See [contenox serve: the standing host](/docs/guide/serve/).
 
-An editor session works as well as a host, and `/link` typed into a session
-prints the direct link that opens that same session in the app, so picking it up
-on a phone does not start with hunting through the list.
+`/link` typed into a session prints the direct link that opens that same session
+in the app, so picking it up on a phone does not start with hunting through the
+list. The app does not choose a directory to work in: it discovers the instances
+this machine is running and the sessions they already hold.
 
 ## Choosing a relay
 
@@ -149,6 +152,6 @@ reaching your machine from elsewhere works the same.
 
 ## See also
 
-- [Reaching a machine from the app](serve.md) — running the host the app attaches to
+- [contenox serve: the standing host](serve.md) — the host the app attaches to when nobody is at the machine
 - [Human gates and envelopes](hitl.md) — what parks a run and waits for you
 - [Sovereignty](sovereignty.md) — what stays on your machine, and why

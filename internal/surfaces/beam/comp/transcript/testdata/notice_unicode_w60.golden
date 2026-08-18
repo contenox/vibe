@@ -1,0 +1,13 @@
+── scrollback ──
+[assistant]answering as far as the budget allows[/]
+
+[muted]— max tokens[/]
+
+[assistant]second attempt[/]
+
+[error]✗ turn failed: transport closed[/]
+
+[skipped]·[/] [tool]Search the workspace[/]
+
+[muted]— cancelled[/]
+── live (cursor 0,0) ──

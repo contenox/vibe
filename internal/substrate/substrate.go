@@ -122,7 +122,7 @@ func checkPostgresDSN(raw string) error {
 	if strings.HasPrefix(lower, "postgres://") || strings.HasPrefix(lower, "postgresql://") {
 		u, err := url.Parse(raw)
 		if err != nil {
-			return fmt.Errorf("not a parseable URL: %w", err)
+			return fmt.Errorf("not a parseable URL (%s)", redact(raw))
 		}
 		if u.Host == "" {
 			return fmt.Errorf("names no host")
@@ -143,7 +143,7 @@ func checkNATSURL(raw string) error {
 		}
 		u, err := url.Parse(part)
 		if err != nil {
-			return fmt.Errorf("not a parseable URL: %w", err)
+			return fmt.Errorf("not a parseable URL (%s)", redact(part))
 		}
 		switch strings.ToLower(u.Scheme) {
 		case "nats", "tls", "ws", "wss":
@@ -176,7 +176,7 @@ func parseValkeyURL(raw string) (valkeyTarget, error) {
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return valkeyTarget{}, fmt.Errorf("not a parseable URL: %w", err)
+		return valkeyTarget{}, fmt.Errorf("not a parseable URL (%s)", redact(raw))
 	}
 	switch strings.ToLower(u.Scheme) {
 	case "valkey", "redis":
@@ -284,33 +284,34 @@ func redactURL(raw string) string {
 	return u.String()
 }
 
+// maskUserinfo finds '@' scanning from the end, since a password may itself contain '/', '?' or '#'.
 func maskUserinfo(raw string) string {
 	sep := strings.Index(raw, "://")
 	if sep < 0 {
 		return raw
 	}
 	rest := raw[sep+len("://"):]
-	authority := rest
-	if cut := strings.IndexAny(rest, "/?#"); cut >= 0 {
-		authority = rest[:cut]
-	}
-	at := strings.LastIndex(authority, "@")
+	at := strings.LastIndex(rest, "@")
 	if at < 0 {
 		return raw
 	}
 	masked := maskedCredential
-	if colon := strings.Index(authority[:at], ":"); colon >= 0 {
-		masked = authority[:colon] + ":" + maskedCredential
+	if colon := strings.Index(rest[:at], ":"); colon >= 0 {
+		masked = rest[:colon] + ":" + maskedCredential
 	}
 	return raw[:sep+len("://")] + masked + rest[at:]
 }
 
-func OpenDB(ctx context.Context, sqlitePath string) (libdb.DBManager, error) {
+// dbPathExplicit must be true only when sqlitePath was named by the caller rather than defaulted.
+func OpenDB(ctx context.Context, sqlitePath string, dbPathExplicit bool) (libdb.DBManager, error) {
 	sel, err := Resolve()
 	if err != nil {
 		return nil, err
 	}
 	if sel.UsesPostgres() {
+		if dbPathExplicit {
+			return nil, fmt.Errorf("%s selects Postgres, but %q was also given explicitly as the SQLite database path; use one or the other", PostgresURLEnv, sqlitePath)
+		}
 		db, err := libdb.NewPostgresDBManager(ctx, sel.PostgresDSN, runtimetypes.SchemaPostgres)
 		if err != nil {
 			return nil, fmt.Errorf("%s: cannot use the Postgres database it names: %w", PostgresURLEnv, err)

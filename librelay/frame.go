@@ -94,24 +94,37 @@ type ChainTriggerResult struct {
 	Error string `json:"error,omitempty"`
 }
 
+// Ask types carry a durable approval outward and its verdict back; all three are notifications.
 const (
+	// TypeAskPublished announces a durable ask the machine has recorded; payload is [AskPublished].
 	TypeAskPublished = "ask.published"
-	TypeAskResolved  = "ask.resolved"
-	TypeAskVerdict   = "ask.verdict"
+	// TypeAskResolved announces that an ask is no longer open; payload is [AskResolved].
+	TypeAskResolved = "ask.resolved"
+	// TypeAskVerdict delivers one settled verdict to the machine; payload is [AskVerdict].
+	TypeAskVerdict = "ask.verdict"
 )
 
+// Reasons carried by [AskResolved.Reason].
 const (
-	AskResolvedAnswered   = "answered"
-	AskResolvedExpired    = "expired"
+	// AskResolvedAnswered reports a verdict was recorded against the row.
+	AskResolvedAnswered = "answered"
+	// AskResolvedExpired reports the row reached its deadline and its on-timeout action applied.
+	AskResolvedExpired = "expired"
+	// AskResolvedSuperseded reports the row was closed without a verdict, its run having gone.
 	AskResolvedSuperseded = "superseded"
 )
 
+// Decisions carried by [AskVerdict.Decision].
 const (
-	AskDecisionAllow  = "allow"
-	AskDecisionDeny   = "deny"
+	// AskDecisionAllow permits the gated call.
+	AskDecisionAllow = "allow"
+	// AskDecisionDeny refuses the gated call.
+	AskDecisionDeny = "deny"
+	// AskDecisionAnswer carries text answering a question rather than gating a call.
 	AskDecisionAnswer = "answer"
 )
 
+// AskPublished is the [TypeAskPublished] payload: what a human needs to decide, and never the call's arguments.
 type AskPublished struct {
 	AskID       string    `json:"ask_id"`
 	SessionID   string    `json:"session_id,omitempty"`
@@ -125,11 +138,13 @@ type AskPublished struct {
 	ExpiresAt   time.Time `json:"expires_at,omitzero"`
 }
 
+// AskResolved is the [TypeAskResolved] payload: an ask that is no longer open, and why.
 type AskResolved struct {
 	AskID  string `json:"ask_id"`
 	Reason string `json:"reason"`
 }
 
+// AskVerdict is the [TypeAskVerdict] payload: one settled decision for an ask id, carrying no notion of who was entitled to make it.
 type AskVerdict struct {
 	AskID     string    `json:"ask_id"`
 	Decision  string    `json:"decision"`

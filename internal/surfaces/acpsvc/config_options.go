@@ -9,24 +9,21 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/reasoning"
 	"github.com/contenox/contenox/internal/models/runtimestate"
-	"github.com/contenox/contenox/internal/services/project"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	libacp "github.com/contenox/contenox/libacp"
 )
 
 const (
-	configIDModel         = "model"
-	configIDHITLPolicy    = "hitl-policy"
-	configIDThink         = "think"
-	configIDTokenLimit    = "token-limit"
-	configIDWorkspaceRoot = "workspace-root"
-	configIDAgent         = "agent"
+	configIDModel      = "model"
+	configIDHITLPolicy = "hitl-policy"
+	configIDThink      = "think"
+	configIDTokenLimit = "token-limit"
+	configIDAgent      = "agent"
 
-	configCategoryModel         = "model"
-	configCategoryHITLPolicy    = "_hitl_policy"
-	configCategoryThink         = "thought_level"
-	configCategoryWorkspaceRoot = "workspace"
-	configCategoryAgent         = "agent"
+	configCategoryModel      = "model"
+	configCategoryHITLPolicy = "_hitl_policy"
+	configCategoryThink      = "thought_level"
+	configCategoryAgent      = "agent"
 
 	configTypeSelect = "select"
 
@@ -67,51 +64,8 @@ func (t *Transport) sessionConfigOptions(ctx context.Context, sess *sessionEntry
 	return sess.driver.ConfigOptions(ctx, sess)
 }
 
-// workspaceRootConfigOption advertises the allowlisted workspace roots a client
-// may choose for a session, present only when an allowlist is configured. The
-// chosen root is fixed at session/new.
-func (t *Transport) workspaceRootConfigOption(sess *sessionEntry) (libacp.SessionConfigOption, bool) {
-	f := t.deps.WorkspaceRoots
-	if f == nil {
-		return libacp.SessionConfigOption{}, false
-	}
-	roots := f.Roots()
-	if len(roots) == 0 {
-		return libacp.SessionConfigOption{}, false
-	}
-	current := f.Default()
-	if sess != nil {
-		sess.mu.Lock()
-		if sess.Cwd != "" {
-			current = sess.Cwd
-		}
-		sess.mu.Unlock()
-	}
-	values := make([]libacp.SessionConfigValue, 0, len(roots))
-	for _, r := range roots {
-		values = append(values, libacp.SessionConfigValue{
-			Value:       r,
-			Name:        workspaceRootDisplayName(r),
-			Description: r,
-		})
-	}
-	return libacp.SessionConfigOption{
-		ID:           configIDWorkspaceRoot,
-		Name:         "Workspace",
-		Description:  "Directory the agent and file explorer operate in for this session.",
-		Category:     configCategoryWorkspaceRoot,
-		Type:         configTypeSelect,
-		CurrentValue: current,
-		Options:      libacp.NewSessionConfigValues(values),
-	}, true
-}
-
-func workspaceRootDisplayName(root string) string {
-	return project.DisplayName(root)
-}
-
 // agentConfigOption advertises the machine's registered agents a client may bind a
-// session to. Like workspaceRootConfigOption it is present only when there is
+// session to. It is present only when there is
 // something to choose and is fixed at session/new. Only enabled agents are
 // offered, plus the session's own bound agent so a session disabled underneath it
 // still renders what it is running as.
@@ -572,9 +526,6 @@ func (t *Transport) setSessionConfigOption(ctx context.Context, sess *sessionEnt
 		}
 		sess.setEffectiveTokenLimit(eff)
 		return nil
-
-	case configIDWorkspaceRoot:
-		return libacp.NewErrorf(libacp.ErrInvalidParams, "the workspace cannot be changed after the session starts")
 
 	case configIDAgent:
 		// Fixed at session/new, like the workspace root.

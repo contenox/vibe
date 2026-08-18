@@ -226,6 +226,7 @@ func Build(ctx context.Context, db libdbexec.DBManager, cfg Config) (*Engine, er
 	engine.TaskEventSink = eventSink
 	engine.MCPManager = mgr
 	engine.LocalTools = localToolNames
+	engine.Tools = toolsRepo
 
 	oldStop := engine.Stop
 	engine.Stop = func() {

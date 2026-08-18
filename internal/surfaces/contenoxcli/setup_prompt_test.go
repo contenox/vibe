@@ -80,9 +80,11 @@ func TestUnit_PromptOllamaModelMenu(t *testing.T) {
 // TestUnit_PrintSetupNextCommand asserts the wizard ends by naming a command
 // the operator can actually run next.
 func TestUnit_PrintSetupNextCommand(t *testing.T) {
+	// At a terminal that command is beam; `contenox acp` is the editor's to
+	// launch, so naming it would end the wizard on something to read, not run.
 	var tty bytes.Buffer
 	printSetupNextCommand(&tty, true)
-	require.Contains(t, tty.String(), `contenox acp`)
+	require.Contains(t, tty.String(), `contenox beam`)
 	require.NotContains(t, tty.String(), "Close this tab")
 
 	var piped bytes.Buffer

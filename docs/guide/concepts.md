@@ -20,7 +20,7 @@ tools: Read, Glob, Grep
 You are a code reviewer.
 ```
 
-Drop it in `.contenox/agents/` and the next run picks it up. What a declaration cannot say — context budgets, retries, loop bounds, shell allowlists — lives in [`agents.toml`](/docs/reference/agents-config/) beside it. Between them, that is the whole authoring surface for most agents. See [Declaring agents](/docs/guide/agents/).
+Drop it in `.contenox/agents/` and the next run picks it up — `contenox beam` to talk to it, `contenox run` to script it. What a declaration cannot say — context budgets, retries, loop bounds, shell allowlists — lives in [`agents.toml`](/docs/reference/agents-config/) beside it. Between them, that is the whole authoring surface for most agents. See [Declaring agents](/docs/guide/agents/).
 
 ## Task Chains
 
@@ -75,8 +75,8 @@ The `handler` determines what the task does. See [Handlers](/docs/specification/
 
 A **tool** is a capability the model can call — a local shell command, the local filesystem, or a remote HTTP service.
 
-- **`local_shell`** — run shell commands, forwarded to the ACP client's `terminal/*` capability and governed by HITL policy
-- **`local_fs`** — read, write, and edit local files (`read_file`, `write_file`, `edit_file`, `sed`, `read_file_range`), forwarded to the ACP client's `fs/*` capability
+- **`local_shell`** — run shell commands, forwarded to the connected client's `terminal/*` capability and governed by HITL policy
+- **`local_fs`** — read, write, and edit local files (`read_file`, `write_file`, `edit_file`, `sed`, `read_file_range`), forwarded to the connected client's `fs/*` capability
 - **Remote tools** — any service exposing an OpenAPI v3 spec; by default discovered at `<url>/openapi.json`, overridable with `--spec` at registration time
 - **MCP servers** — any Model Context Protocol server (added via `contenox mcp add`)
 
@@ -95,7 +95,7 @@ Tools are listed by name in `execute_config.tools`. Use `["*"]` to expose all re
 > What happens when a call is actually made (allow, approve, or deny) is a separate layer: the [HITL policy](/docs/guide/hitl/).
 > See [Tools reference](/docs/integrations/tools/) for access control patterns.
 
-Chains are started by you — a session prompt, a fired mission — or, with the opt-in, by the runtime's own internal events: [Events & triggers (beta)](/docs/guide/events/) fires a chain when a matching event lands in the durable log.
+Chains are started by you — a prompt in beam or your editor, a `contenox run`, a fired mission — or, with the opt-in, by the runtime's own internal events: [Events & triggers (beta)](/docs/guide/events/) fires a chain when a matching event lands in the durable log.
 
 ## Transitions
 

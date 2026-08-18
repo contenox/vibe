@@ -336,7 +336,7 @@ func (m *MacroEnv) renderToolsAndToolsJSON(ctx context.Context, names []string) 
 	result := make(map[string][]string, len(names))
 	for _, name := range names {
 		tools, err := m.toolsProvider.GetToolsForToolsByName(ctx, name)
-		if err != nil {
+		if err != nil || len(tools) == 0 {
 			continue
 		}
 		fnNames := make([]string, 0, len(tools))

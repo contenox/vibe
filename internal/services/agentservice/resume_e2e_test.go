@@ -79,6 +79,28 @@ func (p approveAllPolicy) Respond(ctx context.Context, approvalID string, approv
 	return p.Service.Respond(ctx, approvalID, approved)
 }
 
+// envelopePolicy is approveAllPolicy that reports which envelope each evaluation
+// ran under, the way the real evaluator resolves the context override first.
+type envelopePolicy struct {
+	approveAllPolicy
+	mu    sync.Mutex
+	names []string
+}
+
+func (p *envelopePolicy) Evaluate(ctx context.Context, _, _ string, _ map[string]any) (hitlservice.EvaluationResult, error) {
+	name := hitlservice.PolicyNameFromContext(ctx)
+	p.mu.Lock()
+	p.names = append(p.names, name)
+	p.mu.Unlock()
+	return hitlservice.EvaluationResult{Action: hitlservice.ActionApprove, PolicyName: name}, nil
+}
+
+func (p *envelopePolicy) seen() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.names...)
+}
+
 type recordingSink struct {
 	mu     sync.Mutex
 	events []taskengine.TaskEvent
@@ -119,6 +141,13 @@ func awayAsk(ctx context.Context, _ hitlservice.ApprovalRequest) (bool, error) {
 
 func newE2EInstance(t *testing.T, dbPath string, ask localtools.AskApproval) *e2eInstance {
 	t.Helper()
+	return newE2EInstanceWith(t, dbPath, ask, nil)
+}
+
+// policyFor, when set, replaces the approve-everything evaluator; it is handed
+// the instance's own service so the replacement can still record and respond.
+func newE2EInstanceWith(t *testing.T, dbPath string, ask localtools.AskApproval, policyFor func(hitlservice.Service) hitlservice.PolicyEvaluator) *e2eInstance {
+	t.Helper()
 	ctx := context.Background()
 	db, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
 	require.NoError(t, err)
@@ -130,7 +159,11 @@ func newE2EInstance(t *testing.T, dbPath string, ask localtools.AskApproval) *e2
 
 	sink := &recordingSink{}
 	inner := &e2eInnerTools{}
-	wrapper := localtools.NewHITLWrapper(inner, ask, approveAllPolicy{ApprovalRecorder: recorder, Service: hitl}, libtracker.NoopTracker{}, sink)
+	var policy hitlservice.PolicyEvaluator = approveAllPolicy{ApprovalRecorder: recorder, Service: hitl}
+	if policyFor != nil {
+		policy = policyFor(hitl)
+	}
+	wrapper := localtools.NewHITLWrapper(inner, ask, policy, libtracker.NoopTracker{}, sink)
 
 	cctx := taskengine.WithTaskEventSink(ctx, sink)
 	exec, err := taskengine.NewExec(cctx, stubModelRepo{}, wrapper, libtracker.NoopTracker{})
@@ -305,4 +338,44 @@ func TestSystem_S6Gate_DenyAfterRestart_CompletesWithDenySemantics(t *testing.T)
 
 	_, err = b.store.GetChainCheckpoint(ctx, "call-w1")
 	require.ErrorIs(t, err, libdb.ErrNotFound)
+}
+
+// TestSystem_S6Gate_ResumeEvaluatesUnderTheAskPolicyNotTheAmbientOne pins that a
+// run started under one envelope — a webhook trigger naming its policy — keeps
+// being gated by that envelope after a verdict resumes it, whatever policy this
+// machine happens to be on when the verdict lands.
+func TestSystem_S6Gate_ResumeEvaluatesUnderTheAskPolicyNotTheAmbientOne(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "s6-gate-policy.db")
+	ctx := context.Background()
+	const sessionID = "sess-policy"
+	const envelope = "webhook-envelope.json"
+
+	policy := &envelopePolicy{}
+	inst := newE2EInstanceWith(t, dbPath, awayAsk, func(h hitlservice.Service) hitlservice.PolicyEvaluator {
+		recorder, ok := h.(hitlservice.ApprovalRecorder)
+		require.True(t, ok)
+		policy.approveAllPolicy = approveAllPolicy{ApprovalRecorder: recorder, Service: h}
+		return policy
+	})
+	defer inst.close()
+	createSession(t, inst.db, sessionID)
+
+	resp, err := inst.agent.Prompt(hitlservice.WithPolicyName(ctx, envelope), agentservice.PromptRequest{
+		SessionID:  sessionID,
+		InputValue: e2eInput(),
+		InputType:  taskengine.DataTypeChatHistory,
+		Chain:      e2eChain(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, agentservice.StopSuspended, resp.StopReason)
+
+	row, err := inst.store.GetHITLApproval(ctx, "call-w1")
+	require.NoError(t, err)
+	require.Equal(t, envelope, row.PolicyName, "the ask must record the envelope that gated it")
+
+	// The verdict arrives on a bare context: this machine's ambient policy.
+	require.NoError(t, inst.hitl.Respond(ctx, "call-w1", true))
+	require.Equal(t, []string{"write"}, inst.inner.execs)
+	require.Equal(t, []string{envelope, envelope}, policy.seen(),
+		"the resumed run re-evaluated its gated call under the ambient policy, not the one it was suspended under")
 }

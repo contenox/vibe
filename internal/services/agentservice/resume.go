@@ -209,6 +209,9 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 	if row.MissionID != nil && *row.MissionID != "" {
 		ctx = missiontools.WithMissionID(ctx, *row.MissionID)
 	}
+	// Without it the resumed run's remaining gated calls are evaluated under
+	// whichever envelope this machine happens to be on, not the one that gated it.
+	ctx = hitlservice.WithPolicyName(ctx, row.PolicyName)
 	ctx = hitlservice.WithAgentName(ctx, row.AgentName)
 	if isAttention {
 		ans := taskengine.AttentionAnswer{}

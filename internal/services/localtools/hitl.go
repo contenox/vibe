@@ -36,12 +36,6 @@ func IsApprovalPending() bool {
 // approves, (false, nil) denies, an error propagates to the chain.
 type AskApproval func(ctx context.Context, req hitlservice.ApprovalRequest) (bool, error)
 
-// Prechecker refuses a call from static configuration alone, running and
-// changing nothing; optional, an inner repo without it is gated unchanged.
-type Prechecker interface {
-	Precheck(ctx context.Context, input any, tools *taskengine.ToolsCall) error
-}
-
 // HITLWrapper decorates a ToolsRepo, gating configured tool calls on
 // ActionAllow/ActionDeny/ActionApprove before delegating to the inner tools.
 type HITLWrapper struct {
@@ -175,7 +169,7 @@ func (h *HITLWrapper) Exec(
 	// whether the analyzer runs at all.
 	ctx = hitlservice.WithShellKind(ctx, string(h.shellKind))
 
-	if pre, ok := h.inner.(Prechecker); ok {
+	if pre, ok := h.inner.(taskengine.Prechecker); ok {
 		if err := pre.Precheck(ctx, input, tools); err != nil {
 			reportErr(err)
 			return nil, taskengine.DataTypeAny, err
@@ -420,10 +414,15 @@ func (h *HITLWrapper) denyMessage(ctx context.Context, approvalID string) string
 	if by == "" {
 		return DenyMessage
 	}
-	if strings.TrimSpace(guidance) == "" {
-		return fmt.Sprintf("Denied by %s per the mission envelope. Do not retry this call; take a different approach.", by)
+	// A run outside a mission has no envelope to cite; the reviewer is what refused it.
+	denier := fmt.Sprintf("Denied by %s", by)
+	if missiontools.MissionIDFromContext(ctx) != "" {
+		denier += " per the mission envelope"
 	}
-	return fmt.Sprintf("Denied by %s per the mission envelope: %s Do not retry this call.", by, guidance)
+	if strings.TrimSpace(guidance) == "" {
+		return denier + ". Do not retry this call; take a different approach."
+	}
+	return fmt.Sprintf("%s: %s Do not retry this call.", denier, guidance)
 }
 
 func (h *HITLWrapper) deliverVerdict(approvalID, toolName string, approved bool, askErr error) {

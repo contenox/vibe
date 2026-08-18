@@ -16,7 +16,7 @@ Two things run work in contenox, and they are not interchangeable.
 
 | | What it is | Who drives it | What survives |
 |---|---|---|---|
-| **Session** (`contenox acp`, `contenox serve`) | An attended conversation: you prompt, you approve each gated call | You, turn by turn | The session history |
+| **Session** (`contenox beam`, an editor over `contenox acp`, a host's app session) | An attended conversation: you prompt, you approve each gated call | You, turn by turn | The session history |
 | **Mission** (`mission fire`, `/mission`) | An unattended work order: one intent, one agent, one envelope | The runtime's drive loop, unattended | The mission record, its reports, its plan, and its asks |
 
 Either one leaves a captured execution state you can read back with `contenox state show <reqID>`.
@@ -76,7 +76,9 @@ The unit's lifetime is its host's lifetime. To fire a mission and keep working, 
 
 | Host | How you fire | Notes |
 |---|---|---|
-| `contenox acp` (editor session) | `/mission <intent>` | Reports stream back into the firing session as they land |
+| `contenox beam` (a terminal session) | `/mission <intent>` | Reports stream back into the firing session as they land |
+| `contenox acp` (an editor session) | `/mission <intent>` | Same, routed through the editor |
+| `contenox serve` (a standing host) | from the app | The host outlives every session attached to it |
 | `contenox mission fire --wait` | the CLI | Blocking; the unit dies when the command returns |
 
 There is no daemon and no background mission service. This is stated plainly rather than worked around: process supervision is the host's job, and the durable record is what makes a dead host survivable.

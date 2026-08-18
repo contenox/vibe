@@ -7,6 +7,7 @@ import (
 
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/substrate"
 	"github.com/contenox/contenox/libtracker"
 )
 
@@ -49,9 +50,15 @@ func betaEnabledGlobal() bool {
 	if err != nil {
 		return false
 	}
-	if _, err := os.Stat(dbPath); err != nil {
-		// Never create the DB just to answer a visibility question.
+	sel, err := substrate.Resolve()
+	if err != nil {
 		return false
+	}
+	if !sel.UsesPostgres() {
+		if _, err := os.Stat(dbPath); err != nil {
+			// Never create the DB just to answer a visibility question.
+			return false
+		}
 	}
 	ctx := libtracker.WithNewRequestID(context.Background())
 	db, err := OpenDBAt(ctx, dbPath)

@@ -21,9 +21,9 @@ const rulesCode = `{
 }`;
 
 const t: LandingStrings = {
-  h1a: "Ein Agenten-Server.",
-  h1b: "Jedes KI-Produkt betreibt einen. Ausgeliefert bekommst du keinen.",
-  lede: "Vor Apache hieß „eine Website ausliefern“: schreib dir deinen eigenen Server. Wer heute einen Agenten baut, schreibt sich sein eigenes Harness. contenox macht dieses Harness zur Infrastruktur: Du installierst es, und der Agent wird das, was du schreibst.",
+  h1a: "Deklariere einen Agenten in einer Markdown-Datei.",
+  h1b: "Führ ihn in deinem Terminal aus.",
+  lede: "Jede Aktion, die er ausführt, wird gegen die Policy geprüft, die du geschrieben hast — und wenn er dich braucht, wartet er, dauerhaft: Antworte aus deinem Terminal oder vom Handy, Tage später, und der Lauf setzt genau einmal fort.",
   declareH2: "Du baust keinen Agenten. Du deklarierst einen.",
   declareTree: [
     [".contenox/", ""],
@@ -42,7 +42,7 @@ const t: LandingStrings = {
   installTabWindows: "Windows",
   ctaGithub: "Auf GitHub ansehen",
   installNote:
-    'Installiert <code class="font-mono">contenox</code>. Mit <code class="font-mono">contenox init</code> richtest du einen Workspace ein.',
+    'Installiert <code class="font-mono">contenox</code>. Dann <code class="font-mono">contenox setup</code> für Provider und Modell — und <code class="font-mono">contenox beam</code>, um loszulegen.',
   trustChips: [
     "jedes Modell",
     "eine Binärdatei",
@@ -78,7 +78,7 @@ const t: LandingStrings = {
     ],
   ],
   apacheOutro:
-    "Fünf Agenten liegen bei. Sie sind die Standardseite, nicht das Produkt — ein Beispiel für das Artefakt, dazu da, durch deines ersetzt zu werden.",
+    "Fünf Agenten liegen bei. Sie sind die Standardseite, nicht das Produkt — ein Beispiel für das Artefakt, dazu da, durch deines ersetzt zu werden. Und da hört die Analogie auf: Apache lieferte keinen Browser mit, contenox liefert einen. contenox beam ist er — erste Hand, im selben Repository, damit die Vordertür nie das Produkt von jemand anderem ist. Ein Client bleibt er trotzdem: Die Policy, die er anzeigt, wird unter ihm durchgesetzt, nicht von ihm.",
 
   treeEyebrow: "Das Artefakt",
   treeH2: "Ein Agent ist eine Datei. Ein Workflow ist ein Verzeichnis.",
@@ -160,11 +160,11 @@ const t: LandingStrings = {
   toolsEyebrow: "Tools",
   toolsH2: "Bring die Tools mit, die du brauchst. Sonst nichts.",
   toolsLede:
-    "Apache lieferte Module, keine Websites. contenox besitzt die Tool-Grenze — was auf der anderen Seite steht, entscheidest du. Jedes Tool, das du nicht brauchst, sind Tokens auf jedem Turn und eine Sache mehr zu regeln. Tools überqueren diese Grenze auf zwei Wegen — und beide wählst du.",
+    "contenox liefert keine eigenen Tools mit. Es besitzt die Tool-Grenze — was auf der anderen Seite steht, entscheidest du. Jedes Tool, das du nicht brauchst, sind Tokens auf jedem Turn und eine Sache mehr zu regeln. Tools überqueren diese Grenze auf zwei Wegen — und beide wählst du.",
   toolsWays: [
     [
       "Vom Client",
-      "Ein ACP-Client — dein Editor — handelt fs/* und terminal/* als Capabilities aus. contenox reicht den Aufruf weiter, der Client führt ihn aus, in dem Workspace, den du ohnehin offen hast. local_fs sind fünf Tools: read_file, write_file, edit_file, sed, read_file_range. Auflisten und Suchen laufen über die Shell — auf der Client-Seite der Grenze.",
+      "beam und jeder Editor führen fs/* und terminal/* als Capabilities. contenox reicht den Aufruf weiter, der Client führt ihn aus, in dem Workspace, der ohnehin offen ist. local_fs sind fünf Tools: read_file, write_file, edit_file, sed, read_file_range. Auflisten und Suchen laufen über die Shell — auf der Client-Seite der Grenze. Und contenox serve hat keinen solchen Client, also auch keines dieser beiden Toolsets.",
     ],
     [
       "Vom Operator",
@@ -179,21 +179,27 @@ const t: LandingStrings = {
     ["Agent Client Protocol", "https://agentclientprotocol.com"],
   ],
 
-  shapesEyebrow: "Zwei Formen",
-  shapesH2: "Ein Subprozess in deinem Editor — oder ein Host auf einer Maschine.",
+  shapesEyebrow: "Wege hinein",
+  shapesH2: "Zuerst dein Terminal. Dein Editor, wenn dir das lieber ist. Ein Host, wenn niemand an der Maschine sitzt.",
   shapesLede:
-    "Dieselbe Runtime, dieselben Deklarationen, derselbe Envelope, derselbe Sitzungszustand. Was du im Editor freigegeben hast, ist das, was aus dem Cron läuft.",
+    "Dieselbe Runtime, dieselben Deklarationen, derselbe Envelope, derselbe Sitzungszustand. Unterschiedlich ist nur, wer für die Maschine geradesteht, auf der es läuft.",
   shapes: [
     [
-      "Vom Editor gestartet",
-      "Zed, JetBrains, AionUi oder OpenClaw startet contenox als ACP-Subprozess über stdio — kein Plugin-Lock-in, und Freigaben laufen über die Oberfläche des Editors. Mit /pair wird diese Session aus der App erreichbar: Ein Ask, der eintrifft, nachdem du den Deckel zugeklappt hast, bekommt trotzdem eine Antwort.",
+      "contenox beam",
+      "Die Vordertür: du, an der Tastatur, auf deinem eigenen Gerät. Das Transkript steht in deinem normalen Terminal-Scrollback, der Composer nimmt / für Kommandos und @, um dem Agenten eine Datei vorzulegen, und ein gegateter Aufruf öffnet eine Freigabekarte, die ein Tastendruck beantwortet. Dateisystem und Terminal laufen nativ. Ein blankes contenox im Terminal öffnet beam.",
     ],
     [
-      "contenox serve",
-      "Ein Host: dieselbe Runtime, ohne Editor davor. Er hält die Relay-Verbindung offen und bleibt oben, bis du ihn stoppst — eine Maschine ohne Bildschirm, die Missionen annimmt und die MCP-Server erreicht, die du angehängt hast. Eine headless acpx-Session bekommt das gehärtete Profil: Writes und Netzwerk werden verweigert statt zur Freigabe angeboten.",
+      "Dein Editor",
+      "Zed, JetBrains, AionUi oder OpenClaw startet contenox als ACP-Subprozess über stdio — kein Plugin-Lock-in, und Freigaben laufen über die Oberfläche des Editors. Laut Protokoll gehört der Workspace dem Editor: Die Session arbeitet in dem Projekt, das du ohnehin offen hast.",
+    ],
+    [
+      "contenox serve, und die App",
+      "Die Form für Organisationen: ein stehender Host mit genau einem Workspace, festgelegt beim Start, ganz ohne Dateisystem- und Terminal-Tools — jede Fähigkeit ist ein MCP-Server, den du angehängt hast. Angetrieben wird er von Konnektoren und Event-Triggern, und die App erreicht ihn über das Relay. Eine Workspace-Auswahl gibt es nirgends: Ein Client entdeckt Instanzen und die Sessions, die sie schon halten.",
     ],
   ],
   guides: [
+    ["Im Terminal anfangen", "/docs/guide/quickstart/"],
+    ["Einen stehenden Host betreiben", "/docs/guide/serve/"],
     ["Zed-Anleitung lesen", "/docs/integrations/editors/zed/"],
     ["JetBrains-Anleitung lesen", "/docs/integrations/editors/jetbrains/"],
     ["AionUi-Anleitung lesen", "/docs/integrations/editors/aionui/"],
@@ -243,8 +249,8 @@ const t: LandingStrings = {
 ---
 
 <Base
-  title="Contenox — Ein Agenten-Server. Jedes KI-Produkt betreibt einen. Ausgeliefert bekommst du keinen."
-  description="Ein Agenten-Server. Apache machte Ausliefern zu etwas, das man installiert, und HTML zu etwas, das man schreibt — contenox tut das für Agenten. Deklariere einen Agenten als eine Markdown-Datei; jede Aktion wird vor der Ausführung gegen deine Regeln geprüft. Quelloffen, auf deiner Maschine, mit jedem Modell."
+  title="Contenox — Deklariere einen Agenten in einer Markdown-Datei. Führ ihn in deinem Terminal aus."
+  description="Deklariere einen Agenten in einer Markdown-Datei und führ ihn mit contenox beam im Terminal aus. Jede Aktion wird gegen die Policy geprüft, die du geschrieben hast — und wenn er dich braucht, wartet er dauerhaft: Antworte aus deinem Terminal oder vom Handy, Tage später, und der Lauf setzt genau einmal fort. Quelloffen, auf deiner Maschine, mit jedem Modell."
   lang="de"
   alternates={{ en: "/", de: "/de/" }}
 >

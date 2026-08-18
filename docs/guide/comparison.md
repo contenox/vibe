@@ -10,7 +10,9 @@ Before Apache, serving a website meant writing your own server. Everyone hand-ro
 
 Coding agents are the hand-rolled servers. Aider, OpenCode, Kilo Code and Claude Code each carry their own loop, their own tool gate, their own approval flow, their own session store — welded to their own product. They are good at what they are for.
 
-contenox is the layer underneath. It runs agents you declare, under envelopes you write, and it does not care which of those tools you also use — an ACP client is an ACP client. The question is not which agent writes a better patch. It is what your agents are allowed to do while nobody is watching, and who can answer for it afterwards.
+contenox is the layer underneath. It runs agents you declare, under envelopes you write, and it does not care which of those tools you also use — an ACP client is an ACP client. Where the analogy stops: Apache shipped no browser, and contenox ships one. `contenox beam` is the terminal client in this tree, and it is still a client — the policy it renders is enforced under it rather than by it, which is exactly what the rest of this page is about.
+
+The question is not which agent writes a better patch. It is what your agents are allowed to do while nobody is watching, and who can answer for it afterwards.
 
 Three things follow from being that layer rather than a tool.
 
@@ -55,7 +57,7 @@ contenox approvals respond <ask-id> --approve
 contenox approvals respond <ask-id> --answer "use the staging database"
 ```
 
-A different terminal, a different day, a machine that has rebooted since. This is not mission-only plumbing: `chat` and `run` install the same checkpoint saver, so an ordinary interactive turn parks and releases too.
+A different terminal, a different day, a machine that has rebooted since. This is not mission-only plumbing: a `beam` session and a `contenox run` install the same checkpoint saver, so an ordinary interactive turn parks and releases too — and an unanswered approval card in beam is the same durable row you can answer from your phone.
 
 The verdict is recorded once, by a SQL compare-and-swap against the pending row — a second responder is told the ask is already resolved. The checkpoint is then claimed under a lease before the run is rebuilt, and deleted when the run completes, so a second process does not replay it. An expiry can never silently pass a call either: `on_timeout` accepts only `approve` or `deny`, and `allow` is rejected when the policy loads.
 
@@ -96,7 +98,7 @@ Supporting differences — less load-bearing than the three above, still rare:
 
 Reach for contenox when the work is **governed, unattended, or repeatable**. When a run has to stop for a named human at a named point and survive the wait. When the person who owns the permissions is not the person who wrote the workflow. When the same thing must run identically in CI, in a cron job, and on your laptop. When you need to say afterwards, from a file rather than from memory, exactly what an agent was permitted to do last Tuesday.
 
-A coding session is one workload on that harness. Run whichever coding agent you like on the same repository — they are a layer, not an opponent.
+A coding session is one workload on that harness — the one `contenox beam` puts in front of you. Run whichever coding agent you like on the same repository; they are a layer, not an opponent.
 
 ## Next
 

@@ -39,9 +39,9 @@ func TestUnit_Init_StopsWhenTheStoreItWasToldToUseIsUnreachable(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	unsetSubstrateEnv(t)
-	t.Setenv(substrate.PostgresURLEnv, "postgres://contenox:topsecret@127.0.0.1:15432/contenox?sslmode=disable")
-	t.Setenv(substrate.NATSURLEnv, "nats://127.0.0.1:14222")
-	t.Setenv(substrate.ValkeyURLEnv, "valkey://127.0.0.1:16379")
+	t.Setenv(substrate.PostgresURLEnv, "postgres://contenox:topsecret@"+closedLoopbackAddr(t)+"/contenox?sslmode=disable")
+	t.Setenv(substrate.NATSURLEnv, "nats://"+closedLoopbackAddr(t))
+	t.Setenv(substrate.ValkeyURLEnv, "valkey://"+closedLoopbackAddr(t))
 
 	var out, errOut bytes.Buffer
 	err := RunInit(&out, &errOut, false, false, "openai", filepath.Join(home, "ws", ".contenox"), "")

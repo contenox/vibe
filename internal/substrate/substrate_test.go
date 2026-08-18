@@ -284,6 +284,41 @@ func TestUnit_Redact_MasksAURLItCannotParse(t *testing.T) {
 	}
 }
 
+func TestUnit_Redact_MasksAPasswordContainingURLDelimiters(t *testing.T) {
+	for name, tc := range map[string]struct {
+		raw     string
+		leaked  string
+		surface string
+	}{
+		"slash": {"nats://contenox:top/secret@bus:4222", "top/secret", "bus:4222"},
+		"query": {"postgres://contenox:top?secret@db:5432/contenox", "top?secret", "db:5432"},
+		"hash":  {"valkey://contenox:top#secret@cache:6379", "top#secret", "cache:6379"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out := redact(tc.raw)
+			require.NotContains(t, out, tc.leaked)
+			require.Contains(t, out, maskedCredential)
+			require.Contains(t, out, tc.surface, "the server it names stays readable")
+		})
+	}
+}
+
+func TestUnit_Resolve_ErrorFromAnUnparseableURLDoesNotEchoThePassword(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"nats":     {NATSURLEnv: "nats://contenox:top/secret@bus:4222"},
+		"postgres": {PostgresURLEnv: "postgres://contenox:top?secret@db:5432/contenox"},
+		"valkey":   {ValkeyURLEnv: "valkey://contenox:top#secret@cache:6379"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := resolveFrom(envOf(env))
+			require.Error(t, err)
+			require.NotContains(t, err.Error(), "top/secret")
+			require.NotContains(t, err.Error(), "top?secret")
+			require.NotContains(t, err.Error(), "top#secret")
+		})
+	}
+}
+
 func TestUnit_Redact_LeavesAURLWithoutUserinfoAlone(t *testing.T) {
 	for _, raw := range []string{
 		"nats://bus:4222",
@@ -325,7 +360,7 @@ func TestUnit_OpenDB_UnsetOpensTheSQLiteFile(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "nested", "local.db")
 
-	db, err := OpenDB(ctx, path)
+	db, err := OpenDB(ctx, path, false)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
@@ -340,7 +375,7 @@ func TestUnit_OpenBus_UnsetUsesTheDatabaseBackedBus(t *testing.T) {
 	clearSubstrateEnv(t)
 	ctx := context.Background()
 
-	db, err := OpenDB(ctx, filepath.Join(t.TempDir(), "local.db"))
+	db, err := OpenDB(ctx, filepath.Join(t.TempDir(), "local.db"), false)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
@@ -355,7 +390,7 @@ func TestUnit_OpenKV_UnsetUsesTheDatabaseAndNeverClosesIt(t *testing.T) {
 	clearSubstrateEnv(t)
 	ctx := context.Background()
 
-	db, err := OpenDB(ctx, filepath.Join(t.TempDir(), "local.db"))
+	db, err := OpenDB(ctx, filepath.Join(t.TempDir(), "local.db"), false)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
@@ -378,7 +413,7 @@ func TestUnit_OpenHelpers_RefuseAnUnusableSetting(t *testing.T) {
 	t.Setenv(PostgresURLEnv, "db:5432/contenox")
 	ctx := context.Background()
 
-	_, err := OpenDB(ctx, filepath.Join(t.TempDir(), "local.db"))
+	_, err := OpenDB(ctx, filepath.Join(t.TempDir(), "local.db"), false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), PostgresURLEnv)
 
@@ -389,4 +424,19 @@ func TestUnit_OpenHelpers_RefuseAnUnusableSetting(t *testing.T) {
 	_, _, err = OpenKV(ctx, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), PostgresURLEnv)
+}
+
+func TestUnit_OpenDB_ExplicitPathWithPostgresRefusesInsteadOfDropping(t *testing.T) {
+	clearSubstrateEnv(t)
+	t.Setenv(PostgresURLEnv, "postgres://contenox@db:5432/contenox")
+	t.Setenv(NATSURLEnv, "nats://bus:4222")
+	t.Setenv(ValkeyURLEnv, "valkey://cache:6379")
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "local.db")
+
+	_, err := OpenDB(ctx, path, true)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), PostgresURLEnv)
+	require.Contains(t, err.Error(), path)
+	require.NoFileExists(t, path)
 }

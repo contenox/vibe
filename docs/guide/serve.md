@@ -1,25 +1,96 @@
 ---
-title: "Reaching a machine from the app"
-description: Running contenox as a host with contenox serve — what the status screen reports, how the workspace root is chosen, and how its logs are organised and bounded.
+title: "contenox serve: the standing host"
+description: The organization's shape — a standing host serving one workspace fixed at launch, with no filesystem and no terminal tools, driven by connectors and event triggers through the relay.
 order: 13
 ---
 
-# Reaching a machine from the app
+# contenox serve: the standing host
 
-A paired machine is reachable only while something on it is running. An editor
-session counts, but tying a machine's availability to an editor is a poor
-bargain: close the editor and the machine goes quiet, and a headless box has no
-editor to open in the first place.
+The three shapes contenox runs in are partitioned by one question: who is
+accountable for the machine.
 
-`contenox serve` is that something — a host. It builds the same runtime an
-editor session does, holds the relay connection open, and stays up until you
-stop it.
+In [`contenox beam`](/docs/reference/contenox-cli/#contenox-beam) that is you,
+at the keyboard, on a device you own. In `contenox run` it is whoever wrote the
+script. `contenox serve` is the third answer: **an organization is accountable**
+for a host that nobody is sitting at.
 
 ```bash
 contenox serve
 ```
 
-`contenox beam` is an alias for the same host.
+That difference is not administrative. It decides what the host is allowed to
+be, and the rest of this page follows from it.
+
+## One workspace, fixed at launch
+
+A host serves exactly **one** workspace, chosen when you start it and immutable
+until you stop it:
+
+```bash
+contenox serve              # your home directory
+contenox serve .            # the directory you are standing in
+contenox serve ~/src/api    # one project
+```
+
+With no path the host serves your **home directory**, not the directory you
+started it from. A host outlives the shell that launched it and is reached from
+a device that knows nothing about where that shell was standing, so scoping it
+to the launch directory would make its scope depend on an invisible detail.
+`contenox serve .` is how you ask for the narrow scope, and it says so where the
+next person can read it.
+
+There is no workspace selection anywhere in the system — no picker in beam, in
+an editor, or in the app. A client does not choose where a session runs; it
+discovers instances and the sessions they are already holding, and the workspace
+is whatever the instance was launched with. Serving a second workspace means
+starting a second instance, which is also how you say, in the process list,
+that it is a different thing.
+
+## No filesystem. No terminal. Ever.
+
+A host has **no `local_fs` and no `local_shell`**, under any policy, on any
+run. This is not a strict preset — those tools are absent from the shape.
+
+They are absent because the client that would carry them is absent. `local_fs`
+and `local_shell` are forwarded to a connected client's `fs/*` and `terminal/*`
+capabilities: beam performs them on your machine, an editor performs them in the
+project you have open. A standing host has no such client, and a host that
+performed them itself would be an agent with a shell on a shared box that
+nobody is watching.
+
+So every capability a host has is an **MCP server** you attached, or an HTTP
+service wrapped from an OpenAPI spec:
+
+```bash
+contenox mcp add notion https://mcp.notion.com/mcp --auth-type oauth
+contenox tools add erp_billing --url https://erp.internal.example.com --spec ./billing-subset.yaml
+```
+
+That constraint is what makes the host reviewable. The set of things it can
+touch is a list you wrote and can read back, each entry a named service with its
+own credentials, rather than "whatever is on that disk". Everything else is
+unchanged: the same declarations, the same envelope, the same durable asks.
+
+- [MCP integration](/docs/integrations/tools/mcp/) — attaching a server
+- [Remote tools](/docs/integrations/tools/remote/) — an OpenAPI subset as a tool
+
+## What drives it
+
+Nobody types into a host. Work reaches it two ways.
+
+**Through the relay.** A paired machine holds a connection open, and the
+[contenox app](https://app.contenox.com) attaches over it — reading a
+transcript, answering an ask, starting a session against the workspace the host
+was launched with. See [Pairing a machine with a relay](/docs/guide/pairing/).
+
+**Through triggers.** Internal domain events land in a durable log, and
+operator-authored `trigger-*.json` files fire chains from them — a mission
+report, a status change, an ask that has been waiting too long. Opt-in and beta;
+see [Events & triggers](/docs/guide/events/).
+
+Either way the envelope is what bounds it. A host is the shape where that
+matters most, because there is no human in the loop by default — only the ones
+your policy stops for.
 
 ## What it prints
 
@@ -47,32 +118,18 @@ no model configured says so and still serves, because being reachable is worth
 something even when nothing can run yet.
 
 An unpaired host prints the steps to pair it and keeps running — it is simply
-reachable on that machine only. See
-[Pairing a machine with a relay](/docs/guide/pairing/).
+reachable on that machine only.
 
 The instance token is never printed.
 
-## Which directory it serves
+## When one host is not enough
 
-The optional path is the default workspace root for sessions the app opens, and
-the first entry in the [workspace roots](/docs/reference/contenox-cli/#workspace-roots)
-allowlist that bounds every attachment:
-
-```bash
-contenox serve              # your home directory
-contenox serve .            # the current directory
-contenox serve ~/src/api    # one workspace
-```
-
-With no path the host serves your **home directory**, not the directory you
-started it from. A host outlives the shell that launched it and is reached from
-a device that knows nothing about where that shell was standing, so scoping it
-to the launch directory would make what the app can open depend on an invisible
-detail. `contenox serve .` is how you ask for the narrow scope, and it says so
-where the next person can read it.
-
-Additional roots are granted the usual way, with `contenox workspace add` or
-`--workspace-root`; the served path is simply the default among them.
+State lives in a local SQLite file by default, which is the right answer for one
+host. Three environment variables move the store, the message bus and the
+key-value cache onto infrastructure you already run — Postgres, NATS and Valkey
+— so several hosts share one control plane. Unset, they are absent and the file
+is all there is. See
+[External backends for state](/docs/reference/config/#external-backends-for-state-opt-in).
 
 ## Logs
 
@@ -118,13 +175,18 @@ never changes whether a host has somewhere to write its diagnostics.
 ## Stopping it
 
 `Ctrl-C`. The host stops dialling, in-flight work is torn down, and the machine
-becomes unreachable from the app until a host or an editor session runs again.
-Stopping a host does not unpair it — the machine stays attached to the relay and
-is reachable again the moment something starts. To detach the machine entirely,
+becomes unreachable from the app until a host or a session runs again. Stopping
+a host does not unpair it — the machine stays attached to the relay and is
+reachable again the moment something starts. To detach the machine entirely,
 use `contenox unpair`.
+
+A run that was parked on an ask when you stopped the host is not lost. The ask
+is a durable row and the run is a checkpoint; both outlive the process, and the
+next host to start can resume it.
 
 ## See also
 
+- [CLI reference: `contenox serve`](/docs/reference/contenox-cli/#contenox-serve-path)
 - [Pairing a machine with a relay](pairing.md) — attaching the machine in the first place
-- [CLI reference: `contenox serve`](/docs/reference/contenox-cli/#contenox-serve-path--contenox-beam-path)
+- [Missions](missions.md) — the unattended work order a host mostly runs
 - [Sovereignty](sovereignty.md) — what stays on your machine, and why

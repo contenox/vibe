@@ -7,6 +7,7 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,6 +55,28 @@ func TestUnit_DenyMessage_CarriesTheAdjudicatorsRedirect(t *testing.T) {
 	t.Run("a human verdict is not attributed to an agent", func(t *testing.T) {
 		h := &HITLWrapper{recorder: stubGuidance{}}
 		require.Equal(t, DenyMessage, h.denyMessage(ctx, "ask-4"))
+	})
+
+	t.Run("a run under a mission cites the envelope", func(t *testing.T) {
+		h := &HITLWrapper{recorder: stubGuidance{by: "oracle", guidance: "Ask for the intent first."}}
+		missionCtx := missiontools.WithMissionID(ctx, "m-1")
+		require.Contains(t, h.denyMessage(missionCtx, "ask-5"), "per the mission envelope")
+	})
+
+	t.Run("a run with no mission cites who refused it, not an envelope it has none of", func(t *testing.T) {
+		for name, rec := range map[string]stubGuidance{
+			"with a note":    {by: "u_9", guidance: "Refund only up to 40 EUR."},
+			"without a note": {by: "u_9"},
+		} {
+			t.Run(name, func(t *testing.T) {
+				h := &HITLWrapper{recorder: rec}
+				got := h.denyMessage(ctx, "ask-6")
+				require.Contains(t, got, "Denied by u_9")
+				require.NotContains(t, got, "mission envelope",
+					"a webhook run belongs to no mission and has no envelope to cite")
+				require.Contains(t, got, "Do not retry")
+			})
+		}
 	})
 }
 

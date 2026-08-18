@@ -73,3 +73,57 @@ func TestUnit_AnswerFrom_RecordsTheActorThatAnswered(t *testing.T) {
 	require.Equal(t, "use the 2019 table", hitlservice.AnswerOf(row))
 	require.Equal(t, "u_9", hitlservice.AnsweredByOf(row))
 }
+
+// TestUnit_RelayedHumanVerdict_SpendsNoAgentBound pins the accounting split: a
+// person answering over the relay is attributed like anyone else, but the
+// mission's agent quota exists to bound what an agent may decide unattended, and
+// a human decision is not that.
+func TestUnit_RelayedHumanVerdict_SpendsNoAgentBound(t *testing.T) {
+	ctx, store, _ := setupHITLDB(t)
+	svc := newDurableService(t, store)
+	recorder := svc.(hitlservice.ApprovalRecorder)
+	const missionID = "m-relayed"
+
+	require.NoError(t, recorder.RecordPendingApproval(ctx, "ask-relayed", hitlservice.ApprovalRequest{
+		ToolsName: "billing",
+		ToolName:  "issue_refund",
+		MissionID: missionID,
+	}))
+	require.NoError(t, svc.RespondWithGuidance(ctx, "ask-relayed", false, "u_9", "Refund only up to 40 EUR."))
+
+	_, err := svc.RequestAttention(ctx, hitlservice.AttentionRequest{
+		Summary:   "Which price table applies?",
+		MissionID: missionID,
+		AskID:     "ask-relayed-question",
+	}, nil)
+	var pending *hitlservice.AttentionPendingError
+	require.ErrorAs(t, err, &pending)
+	require.NoError(t, svc.AnswerFrom(ctx, "ask-relayed-question", "the 2019 table", "u_9"))
+
+	approvals, err := svc.AgentApprovalCount(ctx, missionID)
+	require.NoError(t, err)
+	require.Zero(t, approvals, "a relayed human verdict must not spend the mission's agent-approval bound")
+
+	answers, err := svc.AgentAnswerCount(ctx, missionID)
+	require.NoError(t, err)
+	require.Zero(t, answers, "a relayed human answer must not spend the mission's agent-answer bound")
+
+	// The bound still holds against the actor it was written for.
+	require.NoError(t, recorder.RecordPendingApproval(ctx, "ask-adjudicated", hitlservice.ApprovalRequest{
+		ToolsName: "billing",
+		ToolName:  "issue_refund",
+		MissionID: missionID,
+	}))
+	require.NoError(t, svc.RespondAsAgentBounded(ctx, "ask-adjudicated", "oracle", false, "not in the intent", 1))
+	approvals, err = svc.AgentApprovalCount(ctx, missionID)
+	require.NoError(t, err)
+	require.Equal(t, 1, approvals)
+
+	require.NoError(t, recorder.RecordPendingApproval(ctx, "ask-adjudicated-2", hitlservice.ApprovalRequest{
+		ToolsName: "billing",
+		ToolName:  "issue_refund",
+		MissionID: missionID,
+	}))
+	require.ErrorIs(t, svc.RespondAsAgentBounded(ctx, "ask-adjudicated-2", "oracle", false, "", 1),
+		hitlservice.ErrAgentApprovalBoundSpent)
+}

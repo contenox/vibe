@@ -8,7 +8,7 @@ system prompt.
 ---
 name: reviewer
 description: Reviews a file for correctness problems
-tools: Read, Glob, Grep
+tools: Read, Bash
 ---
 
 You are a code reviewer. Read the file you are asked about, then list the
@@ -24,7 +24,7 @@ nothing to compile.
 |---|---|
 | `name` | required; the agent's identity |
 | `description` | required; when to reach for it |
-| `tools` | tools it may call — `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `WebFetch`. Omitted means none |
+| `tools` | tools it may call — `Read`, `Write`, `Edit`, `Bash`. A name with a dot is an MCP tool and reaches whatever server you attached. Omitted means none |
 | `model` | optional; routing stays on your configured default unless you pin it |
 | `permissionMode` | optional; `acceptEdits` auto-accepts file writes, otherwise writes and shell ask you first |
 

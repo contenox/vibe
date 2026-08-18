@@ -15,7 +15,7 @@ This surface gives every spawned shell — the `local_shell` tool, forwarded to 
 
 > **What the scrub is, and is not.** It removes the credentials from the shell's *own* environment, so a task that reads `env`, echoes `$STRIPE_SECRET_KEY`, or hands its environment to a subprocess finds nothing. It is not a kernel boundary. These shells are ordinary child processes of the runtime, running as you, and on Linux a shell that can read files can read `/proc/<contenox-pid>/environ` — the runtime's own pre-scrub environment, which it still needs in order to reach your providers. Closing that would take the [sandbox](/docs/guide/confinement/sandbox/), which confines foreign agents, not contenox's own chains. The scrub is the environment slice of least privilege against accident and casual reach; a shell you have allowed to run arbitrary read commands is trusted with what it can read.
 
-This is the environment slice of least privilege: deny by default, grant what the job needs. It is live today across every agent-reachable shell this CLI spawns — `contenox acp` / `contenox acpx` (the ACP session's shell and its terminal passthrough), and a `contenox serve` session's `local_shell`.
+This is the environment slice of least privilege: deny by default, grant what the job needs. It is live today across every agent-reachable shell this CLI spawns — a `contenox beam` session's `local_shell`, and `contenox acp` / `contenox acpx` (the ACP session's shell and its terminal passthrough).
 
 ## How it works
 

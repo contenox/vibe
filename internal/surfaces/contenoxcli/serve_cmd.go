@@ -21,18 +21,25 @@ import (
 	"golang.org/x/term"
 )
 
-// serve keeps a contenox runtime up so the hosted app can attach to this
-// machine. beam is the same host under the name the terminal UI used.
 var serveCmd = &cobra.Command{
 	Use:   "serve [path]",
 	Short: "Keep contenox running so the app can reach this machine.",
 	Long: `Run contenox as a host: the full runtime, reachable from the contenox app
-through the relay, with no editor involved.
+through the relay, with no editor and nobody at a keyboard.
 
-With a path, that directory is the default workspace root for sessions the app
-opens. With no path the host serves your home directory, because a host is a
-property of the machine rather than of the shell it was started from — use
-'contenox serve .' to scope it to the current directory instead.
+A host is an organization's shape, so it holds no capability of its own:
+local_fs and local_shell are not mounted at all, and every tool it can reach is
+an MCP server you registered ('contenox mcp list'). A declaration that asks for
+a file read or a shell line is refused here by shape, not by policy — give it an
+MCP tool instead. For an agent that needs your files and your shell, run
+'contenox beam' or attach an ACP editor.
+
+One instance serves exactly ONE workspace, fixed when it launches; a client that
+needs a different one attaches to a different instance. With a path, that
+directory is the workspace for sessions the app opens. With no path the host
+serves your home directory, because a host is a property of the machine rather
+than of the shell it was started from — use 'contenox serve .' to scope it to
+the current directory instead.
 
 The host checks its own setup before it starts serving, prints what it is
 attached to, and then stays up until interrupted.
@@ -55,35 +62,14 @@ Examples:
 	},
 }
 
-var beamCmd = &cobra.Command{
-	Use:    "beam [path]",
-	Short:  "Alias for 'contenox serve'.",
-	Long:   "Alias for 'contenox serve': keeps contenox running so the app can reach this machine.",
-	Args:   cobra.MaximumNArgs(1),
-	Hidden: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runACPProfile(cmd, acpProfileServe)
-	},
-}
-
-// hostLogName is the base name of the host's own logs, kept separate from
-// telemetry.log. Files land as serve-<date>.log inside hostLogDirName.
-const (
-	hostLogName    = "serve"
-	hostLogDirName = "logs"
-)
+const hostLogDirName = "logs"
 
 func init() {
-	for _, c := range []*cobra.Command{serveCmd, beamCmd} {
-		c.Flags().String("log-dir", "", "Write host logs here (default: <data-dir>/"+hostLogDirName+")")
-		rootCmd.AddCommand(c)
-	}
+	serveCmd.Flags().String("log-dir", "", "Write host logs here (default: <data-dir>/"+hostLogDirName+")")
+	rootCmd.AddCommand(serveCmd)
 }
 
-// openHostLog opens the host's log directory. It runs before the database is
-// readable, so it starts on defaults; [applyStoredLogSettings] moves it onto the
-// stored `log-*` settings once the database is open.
-func openHostLog(cmd *cobra.Command) (*liblog.Writer, error) {
+func openHostLog(cmd *cobra.Command, name string) (*liblog.Writer, error) {
 	dir, _ := cmd.Flags().GetString("log-dir")
 	if strings.TrimSpace(dir) == "" {
 		base, err := globalContenoxDir()
@@ -92,7 +78,7 @@ func openHostLog(cmd *cobra.Command) (*liblog.Writer, error) {
 		}
 		dir = filepath.Join(base, hostLogDirName)
 	}
-	return liblog.Open(liblog.Config{Dir: dir, Name: hostLogName})
+	return liblog.Open(liblog.Config{Dir: dir, Name: name})
 }
 
 // applyStoredLogSettings moves a live host log onto the operator's configured

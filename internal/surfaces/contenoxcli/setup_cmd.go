@@ -313,15 +313,14 @@ func reportSetupReadiness(ctx context.Context, cmd *cobra.Command, db libdb.DBMa
 
 func printSetupNextCommand(out io.Writer, tty bool) {
 	if tty {
-		fmt.Fprintln(out, "  Next: point an ACP client at `contenox acp`, or fire an agent with `contenox mission fire`.")
+		fmt.Fprintln(out, "  Next: run `contenox beam`, or fire an agent with `contenox mission fire`.")
 		return
 	}
 	fmt.Fprintln(out, "  Next: point an ACP client at `contenox acp`.")
 }
 
-func stdoutIsTerminal() bool {
-	return term.IsTerminal(int(os.Stdout.Fd()))
-}
+// stdoutIsTerminal is a variable so a test can pin the answer without a pty.
+var stdoutIsTerminal = func() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
 
 func registerSetupBackend(ctx context.Context, db libdb.DBManager, providerType, apiKey, baseURL string) error {
 	svc := backendservice.New(db)

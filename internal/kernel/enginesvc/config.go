@@ -79,12 +79,17 @@ type Engine struct {
 	Models llmrepo.ModelRepo
 	// AudioModel is the model/provider role preferred for audio-bearing
 	// requests, already resolved through config keys; zero-valued when unset.
-	AudioModel    llmrepo.ModelConfig
-	Tracker       libtracker.ActivityTracker
-	Bus           libbus.Messenger
-	State         *runtimestate.State
-	MCPManager    *mcpworker.Manager
-	LocalTools    []string
+	AudioModel llmrepo.ModelConfig
+	Tracker    libtracker.ActivityTracker
+	Bus        libbus.Messenger
+	State      *runtimestate.State
+	MCPManager *mcpworker.Manager
+	LocalTools []string
+	// Tools is the aggregate repo every turn resolves tools through: the
+	// LocalTools sets plus store-registered MCP servers and remote providers,
+	// wraps included. Read-only surfaces (/doctor) must enumerate here so
+	// their report cannot drift from what a turn advertises.
+	Tools         taskengine.ToolsRepo
 	SetupCheck    setupcheck.Result
 	TaskEventSink taskengine.TaskEventSink
 	Stop          func()

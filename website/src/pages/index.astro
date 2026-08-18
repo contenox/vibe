@@ -21,9 +21,9 @@ const rulesCode = `{
 }`;
 
 const t: LandingStrings = {
-  h1a: "An agent server.",
-  h1b: "Every AI product runs one. Nobody ships you one.",
-  lede: "Before Apache, serving a website meant writing your own server. Everyone building an agent today writes their own harness. contenox is the harness as infrastructure: you install it, and the agent becomes the thing you author.",
+  h1a: "Declare an agent in one Markdown file.",
+  h1b: "Run it in your terminal.",
+  lede: "Every action it takes is checked against policy you wrote — and when it needs you, it waits, durably: answer from your terminal or your phone, days later, and the run resumes exactly once.",
   declareH2: "You don't build an agent. You declare one.",
   declareTree: [
     [".contenox/", ""],
@@ -42,7 +42,7 @@ const t: LandingStrings = {
   installTabWindows: "Windows",
   ctaGithub: "View on GitHub",
   installNote:
-    'Installs <code class="font-mono">contenox</code>. Run <code class="font-mono">contenox init</code> to scaffold a workspace.',
+    'Installs <code class="font-mono">contenox</code>. Then <code class="font-mono">contenox setup</code> to pick a model, and <code class="font-mono">contenox beam</code> to start working.',
   trustChips: [
     "any model",
     "one binary",
@@ -78,7 +78,7 @@ const t: LandingStrings = {
     ],
   ],
   apacheOutro:
-    "Five agents ship in the box. They are the default page, not the product — an example of the artifact, there to be replaced by yours.",
+    "Five agents ship in the box. They are the default page, not the product — an example of the artifact, there to be replaced by yours. And where the analogy stops: Apache shipped no browser, and contenox ships one. contenox beam is it, first-party and in-tree, so the front door is never somebody else's product. It is still a client — the policy it renders is enforced underneath it rather than by it.",
 
   treeEyebrow: "The artifact",
   treeH2: "An agent is a file. A workflow is a directory.",
@@ -114,7 +114,7 @@ const t: LandingStrings = {
     "Every run is bounded by an envelope: a JSON policy naming what passes silently, what pauses for a human, and what is denied outright — plus hard ceilings on tool calls and tokens, and a pin on which models and backends the run may use. No hidden prompt decides for you. The file lives in your repo and gets reviewed like any other change.",
   rulesCode,
   rulesOutro:
-    "Trimmed from the shipped default preset. Anything no rule matches fails closed — it asks a human. Six presets ship with contenox init, and contenox vet checks your policy before anything runs under it.",
+    "Trimmed from the shipped default preset. Anything no rule matches fails closed — it asks a human: the approval card in beam, your editor's own permission prompt, or your phone. Six presets ship with contenox init, and contenox vet checks your policy before anything runs under it.",
   rulesCta: ["The full policy format", "/docs/guide/hitl/"],
   hitlDemoAlt:
     "Terminal demo: a destructive rm command stops at a human approval gate before it runs",
@@ -124,34 +124,29 @@ const t: LandingStrings = {
   missionLede:
     "Any harness can pause for a human while it holds the connection open. Holding a connection is not the hard part — surviving the wait is. A run under contenox checkpoints where it stopped, releases the process, and picks up from that exact point when someone answers, from anywhere.",
   missionLines: [
-    ["note", "# fire a declared agent under a strict envelope"],
-    [
-      "cmd",
-      'contenox mission fire billing "reconcile the vendor invoices flagged this week"',
-    ],
-    ["out", "mission fired · envelope hitl-policy-strict.json"],
+    ["note", "# at your desk, in beam — the agent reaches a gated call"],
+    ["cmd", "contenox beam"],
     [
       "out",
-      "the agent pulls the ledger and the invoices — allowed rules pass silently",
+      "the agent reads the ledger and the flagged invoices — allowed rules pass silently",
     ],
     [
       "out",
-      "⏸ the agent asks: three invoices disputed, credit notes drafted — send them?",
+      "⏸ approve · three invoices disputed, credit notes drafted — send them?",
     ],
-    ["out", "no answer: run checkpointed, ask saved, process released"],
-    ["note", "# close the laptop. restart the box. days pass. then, from anywhere:"],
+    ["note", "# you don't answer. you close the laptop."],
+    ["out", "run checkpointed · ask saved · process released"],
+    [
+      "note",
+      "# days later — from another terminal, or the app on your phone:",
+    ],
     ["cmd", "contenox approvals list"],
-    ["out", "ask 8f3c · send the drafted credit notes? · mission 01jm…"],
+    ["out", "ask 8f3c · send the drafted credit notes? · session billing"],
     ["cmd", 'contenox approvals respond 8f3c --answer "yes, send them"'],
-    ["out", "checkpoint resumed — exactly once. mission landed."],
-    ["cmd", "contenox inbox list"],
-    [
-      "out",
-      "report · billing: three disputes, credit notes sent — waiting for you",
-    ],
+    ["out", "checkpoint resumed — exactly once. the turn finished."],
   ],
   missionOutro:
-    "No babysitting a terminal, no approval that expires because you were asleep, no silent change while you were away. The envelope decided what could run unattended, the declaration decided nothing beyond it, and one answer resumed the run exactly once.",
+    "No babysitting a terminal, no approval that expires because you were asleep, no silent change while you were away. The same mechanism is what makes unattended work safe to start: contenox run puts a program in the caller's seat — CI, cron, another agent — and prints the report to stdout with an exit code to branch on, while a mission fires a one-line intent under a named envelope and leaves a durable record behind it. Neither needs you watching, because neither can pass a gate you did not write.",
   missionCta: [
     "How missions, approvals, and the inbox work",
     "/docs/guide/missions/",
@@ -160,11 +155,11 @@ const t: LandingStrings = {
   toolsEyebrow: "Tools",
   toolsH2: "Bring the tools you need. Nothing else.",
   toolsLede:
-    "Apache shipped modules, not websites. contenox owns the tool boundary and you decide what stands on the other side of it. Every tool you do not need is tokens burned on every turn, and one more thing to govern. Tools cross that boundary two ways, and both of them are yours to choose.",
+    "contenox ships no tools of its own. It owns the tool boundary, and you decide what stands on the other side of it. Every tool you do not need is tokens burned on every turn, and one more thing to govern. Tools cross that boundary two ways, and both of them are yours to choose.",
   toolsWays: [
     [
       "From the client",
-      "An ACP client — your editor — negotiates fs/* and terminal/* as capabilities. contenox forwards the call and the client performs it, in the workspace you already have open. local_fs is five tools: read_file, write_file, edit_file, sed, read_file_range. Listing and search go through the shell, on the client's side of the line.",
+      "beam and every editor carry fs/* and terminal/* as capabilities. contenox forwards the call and the client performs it, in the workspace already open. local_fs is five tools: read_file, write_file, edit_file, sed, read_file_range. Listing and search go through the shell, on the client's side of the line — and contenox serve, having no such client, has neither toolset at all.",
     ],
     [
       "From the operator",
@@ -179,21 +174,27 @@ const t: LandingStrings = {
     ["Agent Client Protocol", "https://agentclientprotocol.com"],
   ],
 
-  shapesEyebrow: "Two shapes",
-  shapesH2: "A subprocess in your editor, or a host on a box.",
+  shapesEyebrow: "Ways in",
+  shapesH2: "Your terminal first. Your editor if you'd rather. A host when nobody is at the machine.",
   shapesLede:
-    "Same runtime, same declarations, same envelope, same session state. What you approved in the editor is what runs from cron.",
+    "Same runtime, same declarations, same envelope, same session state. What changes between them is only who is accountable for the machine it runs on.",
   shapes: [
     [
-      "Launched by your editor",
-      "Zed, JetBrains, AionUi or OpenClaw starts contenox as an ACP subprocess over stdio — no plugin lock-in, and approvals route through the editor's own permission UI. /pair makes that session reachable from the app, so an ask that lands after you shut the lid still gets an answer.",
+      "contenox beam",
+      "The front door: you, at the keyboard, on your own device. The transcript is your native terminal scrollback, the composer takes / for commands and @ to put a file in front of the agent, and a gated call raises an approval card you answer with one keystroke. Filesystem and terminal work natively. Bare contenox on a terminal opens it.",
     ],
     [
-      "contenox serve",
-      "A host: the same runtime with no editor in front of it. It holds the relay connection open and stays up until you stop it — a headless box that takes missions and reaches the MCP servers you attached. A headless acpx session gets the hardened profile, where writes and network are denied outright rather than offered for approval.",
+      "Your editor",
+      "Zed, JetBrains, AionUi or OpenClaw spawn contenox as an ACP subprocess over stdio — no plugin lock-in, and approvals route through the editor's own permission UI. Per the protocol the editor owns the workspace, so the session works in the project you already have open.",
+    ],
+    [
+      "contenox serve, and the app",
+      "The organization's shape: a standing host serving one workspace, fixed at launch, with no filesystem and no terminal tools at all — every capability it has is an MCP server you attached. Connectors and event triggers drive it, and the app reaches it through the relay. There is no workspace picker anywhere: a client discovers instances and the sessions they already hold.",
     ],
   ],
   guides: [
+    ["Start in the terminal", "/docs/guide/quickstart/"],
+    ["Run a standing host", "/docs/guide/serve/"],
     ["Read the Zed guide", "/docs/integrations/editors/zed/"],
     ["Read the JetBrains guide", "/docs/integrations/editors/jetbrains/"],
     ["Read the AionUi guide", "/docs/integrations/editors/aionui/"],
@@ -223,7 +224,7 @@ const t: LandingStrings = {
   },
 
   bottomEyebrow: "Get started",
-  bottomH2: "Declare an agent. Fire your first mission.",
+  bottomH2: "Declare an agent. Then open beam.",
   bottomCta: "Read the Quickstart",
   bottomContact:
     'Questions? <a href="mailto:hello@contenox.com" class="underline hover:text-black dark:hover:text-white">hello@contenox.com</a> · Issues and PRs on <a href="https://github.com/contenox/contenox" class="underline hover:text-black dark:hover:text-white">GitHub</a>',
@@ -240,8 +241,8 @@ const t: LandingStrings = {
 ---
 
 <Base
-  title="Contenox — An agent server. Every AI product runs one. Nobody ships you one."
-  description="An agent server. Apache made serving a website something you install and HTML something you author; contenox does that for agents. Declare an agent as one Markdown file, and every action it takes is checked against your policy before it runs. Open source, on your machine, any model."
+  title="Contenox — Declare an agent in one Markdown file. Run it in your terminal."
+  description="Declare an agent in one Markdown file and run it in your terminal with contenox beam. Every action it takes is checked against policy you wrote — and when it needs you, it waits durably: answer from your terminal or your phone, days later, and the run resumes exactly once. Open source, on your machine, any model."
   alternates={{ en: "/", de: "/de/" }}
 >
   <Landing t={t} />

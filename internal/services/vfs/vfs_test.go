@@ -249,9 +249,9 @@ func TestUnit_ResolveSessionCwd(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, anywhere, got, "the editor owns the filesystem on the stdio path")
 
-		got, err = vfs.ResolveSessionCwd(nil, "/", "/fallback")
-		require.NoError(t, err)
-		assert.Equal(t, "/", got)
+		_, err = vfs.ResolveSessionCwd(nil, "/", "/fallback")
+		require.Error(t, err, `"/" names no workspace with no host root: adopting it would root a session at the filesystem root, control plane included`)
+		require.ErrorContains(t, err, "names no workspace here")
 
 		got, err = vfs.ResolveSessionCwd(nil, "", "/fallback")
 		require.NoError(t, err)

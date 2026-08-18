@@ -13,7 +13,7 @@ interface Props {
 }
 const {
   title,
-  description = 'Contenox — an agent server. Agents, tools and models declared in files, every action checked against your policy before it runs. Open source, on your own machine, any model.',
+  description = 'Contenox — declare an agent in one Markdown file and run it in your terminal. Every action it takes is checked against policy you wrote before it runs. Open source, on your own machine, any model.',
   lang = 'en',
   ogType = 'website',
   alternates,
@@ -24,8 +24,8 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
 const ogImage = new URL('/opengraph-image.png', Astro.site);
 
 const t = lang === 'de'
-  ? { start: 'Loslegen', theme: 'Farbschema umschalten', tagline: 'Ein Agenten-Server — jedes Modell, jeder Editor.' }
-  : { start: 'Get Started', theme: 'Toggle theme', tagline: 'An agent server — any model, any editor.' };
+  ? { start: 'Loslegen', theme: 'Farbschema umschalten', tagline: 'Agenten deklarieren, im Terminal ausführen — jedes Modell.' }
+  : { start: 'Get Started', theme: 'Toggle theme', tagline: 'Declare an agent, run it in your terminal — any model.' };
 
 const navSections = await buildNavSections();
 ---

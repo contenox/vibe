@@ -11,7 +11,7 @@ import (
 )
 
 // workspaceRootTransport builds a transport whose only interesting dependency
-// is the allowlist, plus a session entry driven natively so the option builders
+// is the host root, plus a session entry driven natively so the option builders
 // are reached through the same dispatch a live session uses.
 func workspaceRootTransport(t *testing.T, roots ...string) (*Transport, *sessionEntry) {
 	t.Helper()
@@ -35,113 +35,99 @@ func hasOption(options []libacp.SessionConfigOption, id string) bool {
 	return false
 }
 
-// TestUnit_WorkspaceRootOptionAbsentWithoutAllowlist pins the "absent, not
-// empty" half of the contract: with no allowlist configured the option is not
-// advertised at all, so a client hides its workspace picker rather than
-// rendering an empty one or erroring on a selection it cannot make.
-func TestUnit_WorkspaceRootOptionAbsentWithoutAllowlist(t *testing.T) {
+// TestUnit_WorkspaceIsNeverAConfigOption pins the ownership rule: the workspace
+// is the client's cwd (editor shape) or the host's one root (serve shape), fixed
+// at session/new, and no shape ever advertises a picker — not in the session
+// options and not in the initialize _meta snapshot.
+func TestUnit_WorkspaceIsNeverAConfigOption(t *testing.T) {
 	ctx := context.Background()
+
 	tr, sess := workspaceRootTransport(t)
+	require.False(t, hasOption(tr.sessionConfigOptions(ctx, sess), "workspace-root"),
+		"the editor shape must not advertise a workspace picker")
+	require.False(t, hasOption(tr.workspaceConfigOptions(ctx), "workspace-root"),
+		"the initialize _meta snapshot must not either")
 
-	_, ok := tr.workspaceRootConfigOption(sess)
-	require.False(t, ok, "no allowlist configured must yield no workspace-root option")
-
-	require.False(t, hasOption(tr.sessionConfigOptions(ctx, sess), configIDWorkspaceRoot),
-		"session/new must not advertise a workspace picker on the stdio path")
-	require.False(t, hasOption(tr.workspaceConfigOptions(ctx), configIDWorkspaceRoot),
-		"the initialize _meta snapshot must not advertise one either")
+	hosted, hostedSess := workspaceRootTransport(t, t.TempDir())
+	require.False(t, hasOption(hosted.sessionConfigOptions(ctx, hostedSess), "workspace-root"),
+		"a configured host root must not resurrect the picker")
+	require.False(t, hasOption(hosted.workspaceConfigOptions(ctx), "workspace-root"),
+		"nor in the _meta snapshot")
 }
 
-// TestUnit_WorkspaceRootOptionAdvertisesAllowlist pins the other half: with an
-// allowlist configured the option lists every root and defaults to the launch
-// directory, which is the value a client passes back as the new session's cwd.
-func TestUnit_WorkspaceRootOptionAdvertisesAllowlist(t *testing.T) {
-	ctx := context.Background()
-	launchDir := t.TempDir()
-	extraDir := t.TempDir()
-	tr, sess := workspaceRootTransport(t, launchDir, extraDir)
-
-	resolvedLaunch := tr.deps.WorkspaceRoots.Default()
-	resolvedExtra, ok := tr.deps.WorkspaceRoots.Allows(extraDir)
-	require.True(t, ok)
-
-	option, ok := tr.workspaceRootConfigOption(sess)
-	require.True(t, ok, "a configured allowlist must advertise the option")
-	require.Equal(t, configCategoryWorkspaceRoot, option.Category)
-	require.Equal(t, configTypeSelect, option.Type)
-	require.Equal(t, resolvedLaunch, option.CurrentValue,
-		"the launch directory is the default root a session with no chosen workspace gets")
-
-	var values []string
-	for _, v := range option.Options.AllValues() {
-		values = append(values, v.Value)
-	}
-	require.ElementsMatch(t, []string{resolvedLaunch, resolvedExtra}, values,
-		"the picker must list every allowlisted root")
-
-	require.True(t, hasOption(tr.sessionConfigOptions(ctx, sess), configIDWorkspaceRoot))
-	require.True(t, hasOption(tr.workspaceConfigOptions(ctx), configIDWorkspaceRoot),
-		"the empty chat reads the allowlist from the initialize _meta snapshot")
-
-	// A session that already chose a root reports that root, not the default.
-	sess.Cwd = resolvedExtra
-	chosen, ok := tr.workspaceRootConfigOption(sess)
-	require.True(t, ok)
-	require.Equal(t, resolvedExtra, chosen.CurrentValue)
-}
-
-// TestUnit_SessionCwdOutsideAllowlistRefused pins the security boundary. A
-// client-supplied cwd is untrusted input: with an allowlist configured, a
+// TestUnit_SessionCwdOutsideHostRootRefused pins the host shape's boundary. A
+// client-supplied cwd is untrusted input: with a host root configured, a
 // directory outside it is refused rather than adopted, and the unspecified
-// forms fall back to the launch directory instead of the filesystem root.
-func TestUnit_SessionCwdOutsideAllowlistRefused(t *testing.T) {
-	launchDir := t.TempDir()
+// forms fall back to the host's root instead of the filesystem root.
+func TestUnit_SessionCwdOutsideHostRootRefused(t *testing.T) {
+	hostRoot := t.TempDir()
 	outside := t.TempDir()
-	tr, _ := workspaceRootTransport(t, launchDir)
-	resolvedLaunch := tr.deps.WorkspaceRoots.Default()
+	tr, _ := workspaceRootTransport(t, hostRoot)
+	resolvedRoot := tr.deps.WorkspaceRoots.Default()
 
 	_, err := tr.resolveWorkspaceCwd(outside)
-	require.Error(t, err, "a cwd outside the allowlist must be refused")
+	require.Error(t, err, "a cwd outside the host root must be refused")
 	require.ErrorContains(t, err, "not under any configured workspace root")
 
 	_, err = tr.resolveWorkspaceCwd(filepath.Join(outside, "nested", "deeper"))
-	require.Error(t, err, "a path under a non-allowlisted directory must be refused too")
+	require.Error(t, err, "a path under a foreign directory must be refused too")
 
-	// The two "unspecified" spellings both mean the machine's default root.
+	// The two "unspecified" spellings both mean the host's one root.
 	for _, unspecified := range []string{"", "/"} {
 		resolved, err := tr.resolveWorkspaceCwd(unspecified)
 		require.NoError(t, err, "the %q sentinel must resolve, not error", unspecified)
-		require.Equal(t, resolvedLaunch, resolved,
-			"an unspecified workspace must land in the launch directory, never at the filesystem root")
+		require.Equal(t, resolvedRoot, resolved,
+			"an unspecified workspace must land in the host root, never at the filesystem root")
 	}
 
-	// A root on the allowlist, and a subpath of one, are both accepted.
-	resolved, err := tr.resolveWorkspaceCwd(launchDir)
+	// The root itself, and a subpath of it, are both accepted.
+	resolved, err := tr.resolveWorkspaceCwd(hostRoot)
 	require.NoError(t, err)
-	require.Equal(t, resolvedLaunch, resolved)
+	require.Equal(t, resolvedRoot, resolved)
 
 	// session/new still requires a cwd: absent is a client bug, not a workspace.
 	require.Error(t, requireSessionCwd(""))
 	require.NoError(t, requireSessionCwd("/"))
 }
 
-// TestUnit_SetWorkspaceRootConfigOptionRefused pins the immutability half of
-// the contract: the root is fixed at session/new, so a live change is refused
-// rather than silently ignored — including a set to the value the session
-// already has, which would otherwise read as support for re-rooting.
-func TestUnit_SetWorkspaceRootConfigOptionRefused(t *testing.T) {
-	ctx := context.Background()
-	launchDir := t.TempDir()
-	extraDir := t.TempDir()
-	tr, sess := workspaceRootTransport(t, launchDir, extraDir)
-	resolvedLaunch := tr.deps.WorkspaceRoots.Default()
-	sess.Cwd = resolvedLaunch
+// TestUnit_SessionCwdClientAuthoritativeWithoutHostRoot pins the editor shape:
+// with no host root the client's cwd is adopted as sent, the "/" sentinel names
+// nothing and is refused (a session rooted at the filesystem root would contain
+// the control plane), and the control plane itself stays refused.
+func TestUnit_SessionCwdClientAuthoritativeWithoutHostRoot(t *testing.T) {
+	tr, _ := workspaceRootTransport(t)
 
-	for _, value := range []string{extraDir, resolvedLaunch, "/nowhere"} {
-		err := tr.setSessionConfigOption(ctx, sess, configIDWorkspaceRoot, value)
-		require.Error(t, err, "set_config_option %q on the workspace root must be refused", value)
-		require.ErrorContains(t, err, "cannot be changed after the session starts")
+	project := t.TempDir()
+	resolved, err := tr.resolveWorkspaceCwd(project)
+	require.NoError(t, err, "the client's cwd is authoritative on the editor path")
+	require.Equal(t, project, resolved)
+
+	_, err = tr.resolveWorkspaceCwd("/")
+	require.Error(t, err, `"/" names no workspace when no host root is configured`)
+	require.ErrorContains(t, err, "names no workspace here")
+
+	controlPlane := t.TempDir()
+	require.NoError(t, vfs.SetControlPlaneDenied(controlPlane))
+	t.Cleanup(func() { require.NoError(t, vfs.SetControlPlaneDenied()) })
+	_, err = tr.resolveWorkspaceCwd(filepath.Join(controlPlane, "nested"))
+	require.Error(t, err, "the control plane is never a workspace, host root or not")
+}
+
+// TestUnit_SetWorkspaceRootConfigOptionUnknown pins that the retired picker's
+// id is a stranger to the config surface: a client that still sends it gets the
+// unknown-option refusal, and the session does not move.
+func TestUnit_SetWorkspaceRootConfigOptionUnknown(t *testing.T) {
+	ctx := context.Background()
+	hostRoot := t.TempDir()
+	tr, sess := workspaceRootTransport(t, hostRoot)
+	resolvedRoot := tr.deps.WorkspaceRoots.Default()
+	sess.Cwd = resolvedRoot
+
+	for _, value := range []string{t.TempDir(), resolvedRoot, "/nowhere"} {
+		err := tr.setSessionConfigOption(ctx, sess, "workspace-root", value)
+		require.Error(t, err, "set_config_option %q on the retired picker must be refused", value)
+		require.ErrorContains(t, err, "unknown config option")
 	}
 
-	require.Equal(t, resolvedLaunch, sess.Cwd, "a refused set must not move the session")
+	require.Equal(t, resolvedRoot, sess.Cwd, "a refused set must not move the session")
 }

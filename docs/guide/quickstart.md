@@ -1,10 +1,13 @@
 ---
 title: Quickstart
-description: Install Contenox and connect a model.
+description: Install contenox, connect a model, declare an agent, and start working in the terminal with contenox beam.
 order: 1
 ---
 
 # Quickstart
+
+Install, connect a model, declare an agent, and talk to it. Five steps, and the
+last one is the one that pays.
 
 ## 1. Install
 
@@ -37,10 +40,10 @@ Then confirm the model is ready:
 contenox doctor
 ```
 
-Its first line is the verdict:
+Its first line is the verdict, and it names what to run next:
 
 ```
-Ready: yes
+Ready: yes — run: contenox beam
 ```
 
 If it says `Ready: no`, the line under it names the one command that fixes it.
@@ -77,16 +80,58 @@ No build step — the next run picks it up:
 
 ```bash
 contenox agent list
-contenox mission fire reviewer "review payments.go" --wait
 ```
 
 The frontmatter says how to run it, the body becomes its system prompt. Budgets, retries and shell allowlists go in [`agents.toml`](/docs/reference/agents-config/) beside it. See [Declaring agents](/docs/guide/agents/).
 
 ---
 
-## 5. Optional editor use
+## 5. Start working
 
-Contenox can also run inside editor or desktop clients that speak ACP. The same agents, model config, tools, and HITL policy are used either way:
+```bash
+contenox beam
+```
+
+That is the front door. `contenox` on its own opens the same thing.
+
+The transcript is your native terminal scrollback, so it scrolls, copies and searches the way everything else in that window does. The composer takes `/` for commands and `@` to put a file in front of the agent. The status line carries the live model, the session, and how much context is left.
+
+The first thirty seconds look like this:
+
+1. Type what you want — `@payments.go what breaks if the retry budget is exhausted mid-write?` — and read the answer as it lands. Reads run silently; the shipped envelope allows them.
+2. Ask for something that changes the world — a file written, a command run. The call stops in front of you as an **approval card**: the tool, the exact arguments, and the rule that gated it.
+3. Answer it with one keystroke. Approve and the call runs and the turn continues; deny and the agent is told so and works around it.
+
+Nothing about that card is beam being careful. The envelope decided it before the surface saw it, so the same call gates the same way in an editor, in a mission, or on your phone. That is the whole idea: see [Human gates and envelopes](/docs/guide/hitl/).
+
+If nobody answers the card, the turn does not sit there burning a connection — it checkpoints, releases the process, and waits as a durable ask you can answer later from anywhere. See [the durable ask](/docs/guide/hitl/#what-a-parked-approval-looks-like).
+
+---
+
+## 6. Scripted and background work
+
+Once the agent does what you want at the keyboard, the same declaration runs without you.
+
+**A program is the caller** — CI, cron, a Makefile. `contenox run` takes the task, prints the report to stdout, and exits 0 when the work landed:
+
+```bash
+contenox run reviewer "review payments.go"
+contenox run "summarise what changed under ./internal since Friday"
+```
+
+With no agent named it runs the preseeded `run` declaration.
+
+**Or fire it and walk away.** A [mission](/docs/guide/missions/) is a one-line intent at a declared agent under a named envelope, with a durable record — reports, plan, and questions that survive the terminal you closed:
+
+```bash
+contenox mission fire reviewer "review the payment retry change" --wait
+```
+
+---
+
+## 7. Optional editor use
+
+Contenox also runs inside editor or desktop clients that speak ACP. The same agents, model config, tools, and HITL policy are used either way; per the protocol the editor owns the workspace, so a session works in the project you already have open:
 
 - [Use from Zed](/docs/integrations/editors/zed/)
 - [Use from JetBrains](/docs/integrations/editors/jetbrains/)
@@ -116,6 +161,8 @@ If you're not sure, start with [Ollama](/docs/integrations/providers/ollama/) fo
 ## Next steps
 
 - [**Your first agent**](/docs/guide/tutorials/first-agent/) — one file, what contenox builds behind it, and where the knobs are
+- [CLI reference](/docs/reference/contenox-cli/) — `beam`, `run`, `serve`, and every flag
+- [Missions](/docs/guide/missions/) — unattended runs, their envelopes, and the durable record they leave
 - [Declaring agents](/docs/guide/agents/) — the full frontmatter, skills, and the tools an agent brings with it
 - [Core concepts](/docs/guide/concepts/) — how agents, chains, tasks, and tools fit together
 - [Writing a chain by hand](/docs/guide/chains/writing-a-chain/) — for the agent that has outgrown a declaration

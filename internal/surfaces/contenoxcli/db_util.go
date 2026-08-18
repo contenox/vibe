@@ -9,7 +9,16 @@ import (
 )
 
 func OpenDBAt(ctx context.Context, dbPath string) (libdb.DBManager, error) {
-	return substrate.OpenDB(ctx, dbPath)
+	return substrate.OpenDB(ctx, dbPath, dbPathIsExplicit(dbPath))
+}
+
+// dbPathIsExplicit reports whether dbPath is something other than the default global path.
+func dbPathIsExplicit(dbPath string) bool {
+	def, err := globalDBPath()
+	if err != nil {
+		return false
+	}
+	return dbPath != def
 }
 
 func openOptionalDB(ctx context.Context, dbPath string) (libdb.DBManager, error) {
@@ -17,7 +26,8 @@ func openOptionalDB(ctx context.Context, dbPath string) (libdb.DBManager, error)
 	if err == nil {
 		return db, nil
 	}
-	if substrate.Configured() {
+	sel, resolveErr := substrate.Resolve()
+	if resolveErr != nil || sel.UsesPostgres() {
 		return nil, err
 	}
 	return nil, nil

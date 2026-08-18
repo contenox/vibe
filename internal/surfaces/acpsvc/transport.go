@@ -39,9 +39,10 @@ type Deps struct {
 	// (e.g. chain-compact-default.json for /compact).
 	ContenoxDir string
 
-	// WorkspaceRoots is the machine's allowlist of directories a client may root a
-	// session in. Nil means no allowlist is configured and any absolute cwd is
-	// accepted; enforced in Transport.resolveWorkspaceCwd.
+	// WorkspaceRoots is the one workspace a host serves, fixed at launch; set
+	// only by the host profile. Nil is the editor-driven shape: the client's
+	// cwd on session/new is authoritative and only control-plane paths are
+	// refused. Enforced in Transport.resolveWorkspaceCwd.
 	WorkspaceRoots *vfs.Factory
 
 	// KnownPolicies are the HITL policy preset names /policy lists. Display only.

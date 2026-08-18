@@ -184,14 +184,14 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 const attentionPollInterval = time.Second
 
 func (s *service) Answer(ctx context.Context, askID, text string) error {
-	return s.answerAttention(ctx, askID, text, "", nil)
+	return s.answerAttention(ctx, askID, text, "", false, nil)
 }
 
 func (s *service) AnswerFrom(ctx context.Context, askID, text, by string) error {
-	return s.answerAttention(ctx, askID, text, strings.TrimSpace(by), nil)
+	return s.answerAttention(ctx, askID, text, strings.TrimSpace(by), false, nil)
 }
 
-func (s *service) answerAttention(ctx context.Context, askID, text, by string, bound *int) error {
+func (s *service) answerAttention(ctx context.Context, askID, text, by string, byAgent bool, bound *int) error {
 	if s.approvals == nil {
 		return fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
 	}
@@ -215,7 +215,7 @@ func (s *service) answerAttention(ctx context.Context, askID, text, by string, b
 	}
 
 	now := time.Now().UTC()
-	resolution := marshalAttentionResolution(text, by)
+	resolution := marshalAttentionResolution(text, by, byAgent)
 	var resolveErr error
 	if bound == nil {
 		resolveErr = s.approvals.ResolveHITLApproval(ctx, askID, runtimetypes.HITLApprovalApproved, resolution, now)
@@ -278,15 +278,15 @@ const answeredByAgent = "agent"
 const agentResolutionLike = `%"answeredBy":%`
 
 func (s *service) AnswerAsAgent(ctx context.Context, askID, text string) error {
-	return s.answerAttention(ctx, askID, text, answeredByAgent, nil)
+	return s.answerAttention(ctx, askID, text, answeredByAgent, true, nil)
 }
 
 func (s *service) AnswerAsAgentNamed(ctx context.Context, askID, agentName, text string) error {
-	return s.answerAttention(ctx, askID, text, agentActor(agentName), nil)
+	return s.answerAttention(ctx, askID, text, agentActor(agentName), true, nil)
 }
 
 func (s *service) AnswerAsAgentBounded(ctx context.Context, askID, agentName, text string, max int) error {
-	return s.answerAttention(ctx, askID, text, agentActor(agentName), &max)
+	return s.answerAttention(ctx, askID, text, agentActor(agentName), true, &max)
 }
 
 func agentActor(agentName string) string {
@@ -297,18 +297,27 @@ func agentActor(agentName string) string {
 	return name
 }
 
-// AnsweredByOf returns the recorded non-human actor of a resolved attention
-// ask — "agent" or an agent's name — and "" for a human answer, a pending
-// row, or a permission ask.
+// AnsweredByOf returns the recorded actor of a resolved attention ask — "agent",
+// an agent's name, or the person a relayed answer named — and "" for an
+// unattributed answer, a pending row, or a permission ask.
 func AnsweredByOf(row *runtimetypes.HITLApproval) string {
-	if row == nil || len(row.Resolution) == 0 {
+	res, ok := resolutionOf(row)
+	if !ok {
 		return ""
 	}
-	var res approvalResolution
-	if err := json.Unmarshal(row.Resolution, &res); err != nil || res.AnsweredBy == nil {
-		return ""
+	if res.AnsweredBy != nil {
+		return strings.TrimSpace(*res.AnsweredBy)
 	}
-	return strings.TrimSpace(*res.AnsweredBy)
+	if res.AnsweredByHuman != nil {
+		return strings.TrimSpace(*res.AnsweredByHuman)
+	}
+	return ""
+}
+
+// answeredByAgentActor reports an agent-attributed answer, the only kind a mission's agent-answer bound counts.
+func answeredByAgentActor(row *runtimetypes.HITLApproval) bool {
+	res, ok := resolutionOf(row)
+	return ok && res.AnsweredBy != nil && strings.TrimSpace(*res.AnsweredBy) != ""
 }
 
 func (s *service) PendingAttentionAsks(ctx context.Context, missionID string) ([]*runtimetypes.HITLApproval, error) {
@@ -341,7 +350,7 @@ func (s *service) AgentAnswerCount(ctx context.Context, missionID string) (int, 
 		if !IsAttentionAsk(row) {
 			continue
 		}
-		if AnsweredByOf(row) != "" {
+		if answeredByAgentActor(row) {
 			count++
 		}
 	}

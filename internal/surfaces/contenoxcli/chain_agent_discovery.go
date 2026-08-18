@@ -6,8 +6,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/surfaces/acpsvc"
 	"github.com/contenox/contenox/libbus"
 
 	"github.com/contenox/contenox/internal/services/agentdecl"
@@ -79,6 +81,46 @@ func discoverChainAgentsReporting(ctx context.Context, agents agentregistryservi
 		})
 	}
 	return notable
+}
+
+// ensureProfileChain makes chainFile resolvable under contenoxDir before a
+// surface loads it. Only `contenox init` preseeds the declarations and only the
+// fleet's discovery pass compiles them, and both run after the load, so a fresh
+// contenox directory could never boot a surface. Preseed writes just the missing
+// files and Sync is idempotent, so a populated directory is left as it is. A set
+// chainEnv is honoured untouched: the operator named that exact file, and a
+// missing one stays the hard error they asked for.
+func ensureProfileChain(ctx context.Context, contenoxDir, chainFile, chainEnv string, tracker libtracker.ActivityTracker) error {
+	if tracker == nil {
+		tracker = libtracker.NoopTracker{}
+	}
+	if strings.TrimSpace(os.Getenv(chainEnv)) != "" {
+		return nil
+	}
+	if acpsvc.ChainFileResolves(contenoxDir, chainFile) {
+		return nil
+	}
+	reportErr, reportChange, end := tracker.Start(ctx, "ensure", "profile_chain", "file", chainFile)
+	defer end()
+
+	created, err := agentdecl.Preseed(contenoxDir)
+	if err != nil {
+		reportErr(err)
+		return fmt.Errorf("seed agent declarations: %w", err)
+	}
+	homeDir, err := globalContenoxDir()
+	if err != nil {
+		reportErr(err)
+		return err
+	}
+	syncDeclaredAgents(ctx, contenoxDir, homeDir, tracker)
+	if !acpsvc.ChainFileResolves(contenoxDir, chainFile) {
+		err := fmt.Errorf("seeded %s but no chain %q was compiled", contenoxDir, chainFile)
+		reportErr(err)
+		return err
+	}
+	reportChange(contenoxDir, map[string]any{"seeded": len(created)})
+	return nil
 }
 
 // printSyncProblems shows what a discovery pass could not act on, on stderr.

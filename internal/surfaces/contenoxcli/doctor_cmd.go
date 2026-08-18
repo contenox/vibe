@@ -10,7 +10,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/models/runtimestate"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/services/fleetservice"
@@ -18,6 +20,8 @@ import (
 	"github.com/contenox/contenox/internal/services/setupcheck"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/internal/substrate"
+	"github.com/contenox/contenox/internal/surfaces/acpsvc"
+	"github.com/contenox/contenox/internal/version"
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
@@ -84,10 +88,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if unreachable := firstUnreachableSubstrate(stateStorage); unreachable != nil {
-		if !jsonOut {
-			printStateStorage(cmd.OutOrStdout(), stateStorage)
-		}
-		return unreachable
+		return reportUnreachableSubstrate(cmd, jsonOut, stateStorage, unreachable, contenoxDir, dbPath)
 	}
 
 	// Built directly rather than via ComputeReadiness so the synced runtime state
@@ -107,9 +108,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	if jsonOut {
 		// No sweep on the JSON path: the payload has no field to report it in.
-		enc := json.NewEncoder(cmd.OutOrStdout())
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(res); err != nil {
+		if err := encodeDoctorJSON(cmd.OutOrStdout(), res); err != nil {
 			return err
 		}
 		return writeDoctorBundleIfAsked(cmd, cmd.ErrOrStderr(), res, contenoxDir, dbPath)
@@ -122,6 +121,12 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	printMissionSweepFailure(cmd.OutOrStdout(), reclaimErr)
 	printWorkspaceShadowNote(cmd.OutOrStdout(), contenoxDir, triggerShadowNames(o.EffectiveOptInBeta, contenoxDir))
 	printVisionSummary(cmd.OutOrStdout(), vision)
+	printBuildProvenance(cmd.OutOrStdout(), cliVersion(), version.GetProvenance())
+	mcpServers, mcpErr := listAllMCPServers(ctx, runtimetypes.New(db.WithoutTransaction()))
+	if mcpErr != nil {
+		fmt.Fprintf(cmd.OutOrStdout(), "MCP servers: unreadable (%v)\n", mcpErr)
+	}
+	printToolRoster(ctx, cmd.OutOrStdout(), acpRosterToolsets(o.EffectiveOptInBeta), mcpServers)
 	if o.EffectiveOptInBeta {
 		fmt.Fprintln(cmd.OutOrStdout(), "Beta features enabled (opt-in-beta): agent roster, event triggers")
 		printLoadedTriggers(ctx, cmd.OutOrStdout(), contenoxDir)
@@ -170,6 +175,39 @@ func firstUnreachableSubstrate(statuses []substrate.Status) error {
 		}
 	}
 	return nil
+}
+
+func substrateUnreachableResult(err error) setupcheck.Result {
+	return setupcheck.Result{Issues: []setupcheck.Issue{{
+		Code:     "substrate_unreachable",
+		Severity: "error",
+		Category: "substrate",
+		Message:  err.Error(),
+	}}}
+}
+
+// reportUnreachableSubstrate emits what doctor already holds before returning the error that stopped it.
+func reportUnreachableSubstrate(cmd *cobra.Command, jsonOut bool, statuses []substrate.Status, unreachable error, contenoxDir, dbPath string) error {
+	res := substrateUnreachableResult(unreachable)
+	bundleW := cmd.OutOrStdout()
+	if jsonOut {
+		if err := encodeDoctorJSON(cmd.OutOrStdout(), res); err != nil {
+			return err
+		}
+		bundleW = cmd.ErrOrStderr()
+	} else {
+		printStateStorage(cmd.OutOrStdout(), statuses)
+	}
+	if err := writeDoctorBundleIfAsked(cmd, bundleW, res, contenoxDir, dbPath); err != nil {
+		return err
+	}
+	return unreachable
+}
+
+func encodeDoctorJSON(w io.Writer, res setupcheck.Result) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(res)
 }
 
 func printStateStorage(w io.Writer, statuses []substrate.Status) {
@@ -322,7 +360,7 @@ func doctorVerdict(res setupcheck.Result) (ready bool, reason, next string) {
 func printDoctorVerdict(w io.Writer, res setupcheck.Result) {
 	ready, reason, next := doctorVerdict(res)
 	if ready {
-		fmt.Fprintln(w, "Ready: yes — point an ACP client at `contenox acp`, or fire an agent with `contenox mission fire`.")
+		fmt.Fprintln(w, "Ready: yes — run: contenox beam")
 		fmt.Fprintln(w, "")
 		return
 	}
@@ -333,6 +371,100 @@ func printDoctorVerdict(w io.Writer, res setupcheck.Result) {
 	}
 	fmt.Fprintf(w, "Next:  %s\n", next)
 	fmt.Fprintln(w, "")
+}
+
+// printBuildProvenance names the running build so a dirty working-tree build
+// is distinguishable from the release its version.txt claims.
+func printBuildProvenance(w io.Writer, v string, p version.Provenance) {
+	if s := p.String(); s != "" {
+		fmt.Fprintf(w, "\nBuild: %s (%s)\n", v, s)
+		return
+	}
+	fmt.Fprintf(w, "\nBuild: %s\n", v)
+}
+
+// acpRosterToolsets is acpToolset composed with inert dependencies: the roster
+// is enumerated here, never executed, so nothing may reach a DB, a fleet, or a
+// live transport.
+func acpRosterToolsets(optInBeta bool) map[string]taskengine.ToolsRepo {
+	return acpToolset(acpProfileACP, nil, libtracker.NoopTracker{}, "",
+		func(context.Context) *acpsvc.Transport { return nil },
+		missionservice.New(nil), nil, nil, optInBeta,
+		func() fleetservice.Service { return nil })
+}
+
+// listAllMCPServers pages through every registered MCP server, session-scoped
+// ACP registrations included.
+func listAllMCPServers(ctx context.Context, store runtimetypes.Store) ([]*runtimetypes.MCPServer, error) {
+	var all []*runtimetypes.MCPServer
+	var cursor *time.Time
+	for {
+		page, err := store.ListMCPServers(ctx, cursor, 100)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		if len(page) < 100 {
+			return all, nil
+		}
+		cursor = &page[len(page)-1].CreatedAt
+	}
+}
+
+// printToolRoster names every tool `contenox acp` registers and what backs it.
+// Doctor holds no ACP client, so a client-backed entry states the capability
+// the editor must grant rather than a live verdict; an MCP server serves its
+// own tools and is named per server.
+func printToolRoster(ctx context.Context, w io.Writer, sets map[string]taskengine.ToolsRepo, servers []*runtimetypes.MCPServer) {
+	fmt.Fprintln(w, "\nTool roster (tool — toolset — origin; what `contenox acp` registers):")
+	names := make([]string, 0, len(sets))
+	for name := range sets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		repo := sets[name]
+		tools, err := acpsvc.PotentialClientTools(ctx, repo, name)
+		if err != nil {
+			fmt.Fprintf(w, "  %s — unavailable: %v\n", name, err)
+			continue
+		}
+		if len(tools) == 0 {
+			// missiontools advertises by session role (mission unit vs supervisor).
+			fmt.Fprintf(w, "  %s — local (in-process); tools advertised per session role\n", name)
+			continue
+		}
+		clientBacked := acpsvc.IsClientBacked(repo)
+		for _, tool := range tools {
+			origin := "local (in-process)"
+			if clientBacked {
+				origin = "needs client capability " + acpsvc.RequiredClientCapability(name, tool.Function.Name)
+			}
+			fmt.Fprintf(w, "  %s — %s — %s\n", tool.Function.Name, name, origin)
+		}
+	}
+	for _, srv := range servers {
+		if runtimetypes.IsACPManagedMCPServerName(srv.Name) {
+			fmt.Fprintf(w, "  %s — MCP server (session-scoped, supplied by an attached client)\n", srv.Name)
+			continue
+		}
+		fmt.Fprintf(w, "  %s — MCP server (%s); its tools are served live per session\n", srv.Name, mcpServerTarget(srv))
+	}
+	fmt.Fprintf(w, "  %s — not mounted under `contenox serve`: %s\n",
+		strings.Join(hostUnservedToolsets, ", "), hostUnservedToolsetRefusal)
+}
+
+// mcpServerTarget is the transport plus whichever endpoint the server has: a
+// URL for sse/http, a command for stdio.
+func mcpServerTarget(srv *runtimetypes.MCPServer) string {
+	switch {
+	case srv.URL != "":
+		return srv.Transport + " " + srv.URL
+	case srv.Command != "":
+		return srv.Transport + " " + srv.Command
+	default:
+		return srv.Transport
+	}
 }
 
 func printDoctorText(w io.Writer, res setupcheck.Result) {

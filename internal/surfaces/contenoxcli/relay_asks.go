@@ -18,7 +18,7 @@ import (
 type askInbox interface {
 	AnswerFrom(ctx context.Context, askID, text, by string) error
 	RespondWithGuidance(ctx context.Context, approvalID string, approved bool, decidedBy, guidance string) error
-	ListPending(ctx context.Context, limit int) ([]*runtimetypes.HITLApproval, error)
+	ListPendingBefore(ctx context.Context, createdBefore *time.Time, limit int) ([]*runtimetypes.HITLApproval, error)
 }
 
 const republishAskLimit = 200
@@ -90,19 +90,31 @@ func (b *relayAskBridge) republish(ctx context.Context) {
 	}
 	go func() {
 		defer b.wg.Done()
-		rows, err := b.inbox.ListPending(ctx, republishAskLimit)
-		if err != nil {
-			reportErr, _, end := b.tracker.Start(ctx, "republish", librelay.TypeAskPublished)
-			reportErr(err)
-			end()
-			return
-		}
 		now := time.Now().UTC()
-		for _, row := range rows {
-			if !publishableAsk(row, now) {
-				continue
+		var cursor *time.Time
+		for {
+			rows, err := b.inbox.ListPendingBefore(ctx, cursor, republishAskLimit)
+			if err != nil {
+				reportErr, _, end := b.tracker.Start(ctx, "republish", librelay.TypeAskPublished)
+				reportErr(err)
+				end()
+				return
 			}
-			b.AskRecorded(ctx, row)
+			for _, row := range rows {
+				if !publishableAsk(row, now) {
+					continue
+				}
+				b.AskRecorded(ctx, row)
+			}
+			if len(rows) < republishAskLimit {
+				return
+			}
+			// The pages run newest first; the oldest row of this one opens the next.
+			oldest := rows[len(rows)-1].CreatedAt
+			if cursor != nil && !oldest.Before(*cursor) {
+				return
+			}
+			cursor = &oldest
 		}
 	}()
 }
@@ -200,7 +212,11 @@ func (b *relayAskBridge) handleVerdict(ctx context.Context, f librelay.Frame) {
 		}
 		return
 	}
-	b.wg.Add(1)
+	// Admission under the same lock detach releases: once detach has cleared the
+	// link, no further verdict goroutine can start behind its Wait.
+	if !b.begin() {
+		return
+	}
 	go func() {
 		defer b.wg.Done()
 		b.applyVerdict(ctx, verdict)

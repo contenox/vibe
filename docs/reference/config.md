@@ -114,7 +114,7 @@ contenox config list   # review current settings and their scope
 | `default-mission-agent` | global | Declared agent the ACP `/mission <intent>` slash command falls back to when none is named. `contenox mission fire` always takes the agent as a required argument, so this key does not affect it |
 | `default-mission-policy` | global | Envelope (HITL policy) both `/mission` and `contenox mission fire --policy` fall back to when none is named |
 | `fleet-max-parallel` | global | Max concurrently open mission units across the fleet (integer; `0` = unlimited; default 8) |
-| `log-max-size` | global | Size at which a host log starts a new part, written as a number with an optional unit (`10MB`, `512KB`, `1GB`, or bytes). Applies to [`contenox serve`](/docs/reference/contenox-cli/#contenox-serve-path--contenox-beam-path); default 10MB |
+| `log-max-size` | global | Size at which a host log starts a new part, written as a number with an optional unit (`10MB`, `512KB`, `1GB`, or bytes). Applies to [`contenox serve`](/docs/reference/contenox-cli/#contenox-serve-path); default 10MB |
 | `log-max-files` | global | How many host log files to keep, counted across every date and part (integer; `0` = unlimited; default 14) |
 | `log-max-age-days` | global | Delete host logs whose date is older than this many days (integer; `0` = no age limit; default 14) |
 | `default-chain` | workspace | Chain file used in this workspace; falls back to the global value when unset |

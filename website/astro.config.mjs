@@ -93,8 +93,9 @@ export default defineConfig({
     "/docs/tools": "/docs/integrations/tools/",
     "/docs/tools/local": "/docs/integrations/tools/local/",
     "/docs/tools/remote": "/docs/integrations/tools/remote/",
-    // 2026-08 agent-server reshape: contenox chat/run/index/search and the
-    // one-shot CLI-filter use-cases built on `contenox run` are retired.
+    // 2026-08 reshape: contenox chat/index/search are retired, and so are the
+    // one-shot CLI-filter use-cases that were written around them. `contenox
+    // run` itself came back as the scripting shape; these pages did not.
     "/docs/guide/search": "/docs/integrations/tools/mcp/",
     "/docs/use-cases/codebase-docs": "/docs/use-cases/",
     "/docs/use-cases/git-devops": "/docs/use-cases/",

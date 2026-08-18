@@ -416,14 +416,21 @@ func requireSessionCwd(cwd string) error {
 	if strings.TrimSpace(cwd) == "" {
 		return libacp.NewError(libacp.ErrInvalidParams, "cwd is required")
 	}
+	if cwd == "/" {
+		// The sentinel survives this precheck; resolveWorkspaceCwd settles it
+		// against the host root, or refuses it where none is configured.
+		return nil
+	}
 	if _, err := vfs.ResolveSessionCwd(nil, cwd, ""); err != nil {
 		return libacp.NewError(libacp.ErrInvalidParams, err.Error())
 	}
 	return nil
 }
 
-// resolveWorkspaceCwd maps a requested session cwd onto the concrete root to use.
-// This is the enforcement point for the workspace-root allowlist.
+// resolveWorkspaceCwd maps a requested session cwd onto the concrete root to
+// use. With a host root configured (serve), the cwd must resolve under it;
+// without one (an editor over ACP), the client's cwd is authoritative and only
+// control-plane paths are refused — the client owns the workspace.
 func (t *Transport) resolveWorkspaceCwd(cwd string) (string, error) {
 	resolved, err := vfs.ResolveSessionCwd(t.deps.WorkspaceRoots, cwd, "")
 	if err != nil {
@@ -435,10 +442,17 @@ func (t *Transport) resolveWorkspaceCwd(cwd string) (string, error) {
 // resolveExistingSessionCwd is resolveWorkspaceCwd plus one rule: the sentinel "/"
 // sent on every load/resume must not clobber the session's stored workspace.
 func (t *Transport) resolveExistingSessionCwd(ctx context.Context, store runtimetypes.Store, sid libacp.SessionID, cwd string) (string, error) {
-	if f := t.deps.WorkspaceRoots; f != nil && (cwd == "" || cwd == "/") {
+	if cwd == "" || cwd == "/" {
 		if existing := t.sessionCwd(ctx, store, sid); existing != "" {
-			if resolved, ok := f.Allows(existing); ok {
-				return resolved, nil
+			if f := t.deps.WorkspaceRoots; f != nil {
+				if resolved, ok := f.Allows(existing); ok {
+					return resolved, nil
+				}
+			} else {
+				// No host root: the stored workspace was validated when the
+				// session was created, and nothing narrower exists to check
+				// it against now.
+				return existing, nil
 			}
 		}
 	}

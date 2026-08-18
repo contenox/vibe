@@ -4,7 +4,9 @@ description: Give a model controlled, policy-scoped access to the filesystem and
 
 # Local Tools
 
-Contenox never touches the filesystem or spawns processes itself. Local tools give a model access to the filesystem and shell of the machine an ACP client is running on: `local_fs` and `local_shell` calls are forwarded to the connected ACP client's `fs/*` and `terminal/*` capabilities, which the client — an editor, or the beam TUI — actually carries out.
+Contenox never touches the filesystem or spawns processes itself. Local tools give a model access to the filesystem and shell of the machine a client is running on: `local_fs` and `local_shell` calls are forwarded to the connected client's `fs/*` and `terminal/*` capabilities, which the client — `contenox beam`, or an editor — actually carries out.
+
+A [`contenox serve`](/docs/guide/serve/) host has no such client, so neither of these toolsets exists there: every capability a host has is an MCP server or an OpenAPI service you attached.
 
 ## `local_fs` — Filesystem access
 
@@ -134,11 +136,11 @@ To use `local_shell` with **no policy restrictions** (fully open), omit `tools_p
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `command` | string | ✅ | Executable path or name |
-| `args` | string \| array | — | Space-separated arguments string, or an array of argument strings |
+| `command` | string | ✅ | The executable alone — flags and operands go in `args`: `{"command": "ls", "args": ["-F"]}`, never `{"command": "ls -F"}` |
+| `args` | string \| array | — | Everything after the executable: an array of argument strings, or a space-separated string |
 | `cwd` | string | — | Working directory |
 | `timeout` | string | — | Duration e.g. `30s` |
-| `shell` | boolean | — | Run via `/bin/sh -c` (allows pipes, redirects, `$VAR`). **Disabled when `_allowed_commands` or `_allowed_dir` is set.** |
+| `shell` | boolean | — | Run via `/bin/sh -c` (allows pipes, redirects, `$VAR`); without it the argv is executed directly and none of those are interpreted. **Disabled when `_allowed_commands` or `_allowed_dir` is set.** |
 
 ---
 

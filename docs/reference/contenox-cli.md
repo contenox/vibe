@@ -6,7 +6,9 @@ order: 3
 
 # Contenox CLI Reference
 
-`contenox` is the local agent server, driven from the command line. Agents, tools, models and the rules they run under are files on your machine, and so is everything it executes.
+Every contenox subcommand, flag, and environment variable. Agents, tools, models and the rules they run under are files on your machine, and so is everything it executes.
+
+Three commands are the ones you reach for; the rest configure what they run. [`contenox beam`](#contenox-beam) is the front door — you, at a terminal. [`contenox run`](#contenox-run) is the scripting shape — a program is the caller. [`contenox serve`](#contenox-serve-path) is the standing host — an organization is accountable for it.
 
 ## Global Flags
 
@@ -40,6 +42,42 @@ contenox setup
 ```
 
 The wizard guides you through picking a provider (local Ollama, Ollama Cloud, OpenAI, Anthropic, Google Gemini, Vertex AI, AWS Bedrock, or self-hosted vLLM), entering an API key or base URL where needed, and setting your first default model. It needs a real terminal (reads answers from stdin) and will not guess a default from a closed or piped stdin.
+
+### `contenox beam`
+
+The first-party terminal client, and the front door: a person at the keyboard, on their own device. Bare `contenox` on a TTY opens it, so `contenox` and `contenox beam` are the same command.
+
+```bash
+contenox                     # on a terminal, this is beam
+contenox beam                # the same, said explicitly
+contenox beam --new          # start a fresh session instead of resuming
+contenox beam --session api-review   # open a named session
+```
+
+The transcript is written into your native scrollback rather than a managed pane, so it scrolls, copies and searches like everything else in that window. The composer takes `/` for commands and `@` to put a file in front of the agent. A gated tool call raises an **approval card** inline — the tool, its arguments, and the rule that gated it — answered with one keystroke; leave it unanswered and the turn checkpoints into a [durable ask](#contenox-approvals) instead of holding the process open.
+
+`local_fs` and `local_shell` work natively here: beam is the ACP client, so it performs the filesystem and terminal calls itself, in the workspace the instance was launched with.
+
+| Flag | Description |
+| ---- | ----------- |
+| `--new` | Start a new session rather than resuming the active one |
+| `--session <name>` | Open (or create) the named session |
+| `--light` | Light-background colour scheme |
+| `--plain` | Plain output: no colour and no redrawing, for terminals and captures that want neither |
+| `--log-dir <dir>` | Write structured logs here (default: `<data-dir>/logs`) |
+
+### `contenox run`
+
+The scripting shape: a program is the caller — CI, a cron entry, a Makefile, another agent. It runs one task with the tools on that machine, prints the report to stdout, and exits.
+
+```bash
+contenox run "summarise what changed under ./internal since Friday"
+contenox run reviewer "review the payment retry change"
+```
+
+The first argument is a declared agent when it names one, and part of the task otherwise; with no agent named, the preseeded `run` declaration handles it. Exit status is 0 when the work landed and nonzero when it did not, so a pipeline can branch on it without parsing the report.
+
+There is no terminal in front of `run`, so a gated call has nobody to ask: it becomes a durable ask like any other, answerable later with [`contenox approvals respond`](#contenox-approvals), and the run resumes from its checkpoint exactly once. Bound what a scripted run may do unattended in its envelope rather than by watching it.
 
 <h3 id="sessions"><code>contenox session</code></h3>
 
@@ -75,30 +113,23 @@ contenox session list --namespace <ns>   # sessions in a namespace (e.g. jetbrai
 
 A namespace is the session-name prefix before its generated id (e.g. `jetbrainsgoland`, `zed`, `default`). To recover a session an editor abandoned: find it with `session list --namespace <ns>`, then `session show <id>`.
 
-### Workspace roots
+### Workspace authority
 
-There is **one** workspace-root allowlist, and it bounds every session this process serves. It is assembled from three sources, which **union** — no source overrides or subtracts from another:
+**One instance serves exactly one workspace, fixed at launch.** There is nothing to select afterwards, and no client anywhere offers a picker.
 
-1. **The launch directory** — the directory the surface was started in. Always present, and always the **default root**.
-2. **The roots you granted** with [`contenox workspace add`](#contenox-workspace) — durable operator config, read from the shared database when the process starts.
-3. **`--workspace-root` flags and `CONTENOX_WORKSPACE_ROOTS`** — additions for this run only.
+Which directory that is depends on the shape:
 
-```bash
-contenox workspace add ~/src/shared-lib                    # durable: every future session may use it
-cd ~/src/myproject && contenox acp                         # launch dir is the default root
-contenox acp --workspace-root /tmp/scratch                 # plus one, just this run
-CONTENOX_WORKSPACE_ROOTS=/tmp/scratch contenox acp         # same, for launchers and service units
-```
+| Shape | The workspace is |
+| --- | --- |
+| [`contenox beam`](#contenox-beam), [`contenox run`](#contenox-run) | the directory you started it in |
+| [`contenox serve [path]`](#contenox-serve-path) | the path you named, or your home directory when you name none |
+| [`contenox acp`](#contenox-acp--contenox-acpx) | whatever the editor opened — per the protocol, the client owns the cwd |
 
-Because the sources union, a flag can never widen or narrow what you granted, and a grant can never displace the launch directory as the default. Withdrawing access is always `contenox workspace remove` — never "remember which flags the launcher passed".
+A client does not propose a working directory and the runtime does not offer a menu of them. An app or an editor **discovers** instances and the sessions they are already holding, and attaches to one; the workspace is a property of the instance it attached to. Serving a second workspace means starting a second instance — which is also how the process list says so.
 
-The allowlist belongs to the machine, and it matters because this process also serves remote clients once the machine is [paired](/docs/guide/pairing/). A client reads the advertised roots, picks one, and passes it as the new session's workspace; the runtime refuses any directory outside them. A client that proposes no workspace gets the default root — never the filesystem root, where an agent has no project to work in and goes hunting for one.
+The runtime's own control plane (`~/.contenox` and a workspace's `.contenox` — its config, database, and policies) is never a workspace, on any shape. There is no setting that turns this off.
 
-Granting a root grants everything **under** it. A directory inside the runtime's own control plane (`~/.contenox` and the workspace `.contenox` — its config, database, and policies) is refused from every source, unconditionally: as a launch directory, as a flag, as an environment entry, and as a grant. There is no setting that turns this off.
-
-The same allowlist bounds a mission dispatched from this process: a unit cannot be given a working directory the session that fired it could not have opened.
-
-`contenox acp` assembles the allowlist from the same three sources and advertises it to the client; the client picks one of the advertised roots as the session's cwd, and any directory outside them is refused.
+A mission dispatched from an instance inherits that instance's workspace: a unit cannot be given a working directory the session that fired it could not have opened.
 
 ### `contenox doctor`
 
@@ -269,7 +300,7 @@ Initializes a workspace (`.contenox/`) and ensures default runtime presets exist
 
 `init` creates the `.contenox/workspace.id` marker — a project's portable identity. The marker carries a stable workspace UUID (the database scoping token every session under the project is filed under) plus an optional friendly **name**. It travels *with* the directory, so a project means one thing to the CLI and every ACP session alike. It also seeds `agents.toml` and an `agents/` directory — where you [declare an agent](/docs/guide/agents/) — plus the HITL policies and the [oracle](/docs/use-cases/auto-attention/) set (`chain-oracle-default.json` and `hitl-policy-oracle.json` — inert until `default-oracle-chain` names one) under `~/.contenox/`, and the shipped chain files under `~/.contenox/system/`, unless they already exist. Workspace-local `.contenox/` files can override these global presets by name; `init --local` seeds those workspace copies for you instead of writing to `~/.contenox/`. The seeded chain files follow the `chain-<role>-<variant>.json` convention — [Chain files: naming, roles, and resolution](/docs/guide/chains/naming/) covers the grammar and the exact touch/never-touch matrix of every init flag.
 
-By default `init` walks up to reuse an ancestor's `.contenox` if one exists (like `git`). Pass `--project` to force a *fresh* project marker in the current directory instead — a distinct workspace nested under a larger one — and `--name` to give it a friendly name (default: the folder's own name). Marking a project does not by itself let sessions open it; `init --project` prints the `contenox workspace add` line that grants it.
+By default `init` walks up to reuse an ancestor's `.contenox` if one exists (like `git`). Pass `--project` to force a *fresh* project marker in the current directory instead — a distinct workspace nested under a larger one — and `--name` to give it a friendly name (default: the folder's own name).
 
 You can optionally specify a provider to pre-configure defaults.
 
@@ -445,7 +476,7 @@ contenox mission stop <mission-id> --reason "no longer needed"
 | `--timeout` (`fire`)            | Maximum time to wait for a terminal status before tearing the unit down (default `30m`)           |
 | `--reason` (`stop`)             | One line on why the mission is being stopped, persisted as the status reason                     |
 
-`mission fire <agent> <intent...>` dispatches the fleet **in-process**: the unit is a child subprocess of this CLI invocation, so `--wait` is required — a detached fire from a one-shot CLI would tear its own mission down when the command exits. Fire-and-detach needs a long-lived host: an editor session (`contenox acp`, the `/mission` command). Exit status is 0 when the mission lands; non-zero when it derails, gets stuck, is abandoned, or the wait times out.
+`mission fire <agent> <intent...>` dispatches the fleet **in-process**: the unit is a child subprocess of this CLI invocation, so `--wait` is required — a detached fire from a one-shot CLI would tear its own mission down when the command exits. Fire-and-detach needs a long-lived session: `contenox beam`, an editor over `contenox acp`, or a host — each with the `/mission` command. Exit status is 0 when the mission lands; non-zero when it derails, gets stuck, is abandoned, or the wait times out.
 
 > **Beta:** user-authored agents (custom `chain-agent-*` chain files, like the one declaring `agent-reviewer` above) require `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`) and their interface may change; missions themselves and the shipped `agent-planner` work without it.
 
@@ -522,33 +553,6 @@ contenox events prune --keep-days 30      # drop whole day-partitions older than
 
 `dispatch` runs in the foreground and prints one line per firing; there is no daemon — keep it alive with tmux, systemd, or `nohup`. Each (trigger, event) pair fires at most once, including across restarts — with one recovery: a claim left `running` for two hours by a dead host is taken over on the next claim attempt and fired again. A chain failure is recorded on the firing and never stops the loop; events past hop 4 are refused so triggers cannot loop forever. `firings` lists the durable claim records both firing paths write — [the guide](/docs/guide/events/#inspecting-firings-events-firings) reads the statuses. `prune` is never automatic: retention runs only when you invoke it, as an O(1) table drop per day, leaving the dispatch cursor and firing records untouched.
 
-### `contenox workspace`
-
-Grant or revoke **workspace roots** — the durable half of the one allowlist that bounds where a session may run. A granted root joins the launch directory and this run's `--workspace-root` flags to form the allowlist described under [Workspace roots](#workspace-roots); the three sources union, and a directory outside all of them is refused.
-
-Granting a root grants everything **under** it. A directory outside every root (a sibling, a prefix-trick neighbour like `/home/meX` against `/home/me`, or a symlink whose real target escapes) is refused. A too-broad root — the filesystem root, your home directory, or a top-level system directory like `/srv` — is refused at grant time, so a grant can never hand a session an entire home or disk; grant the specific project directory. A directory inside the runtime's own control plane is refused unconditionally, both when granted and again when the allowlist is built.
-
-```bash
-contenox workspace add /home/me/src              # grant a root (and everything under it)
-contenox workspace add /home/me/api --name "API" # grant AND name the project
-contenox workspace list                           # the roots you have granted
-contenox workspace remove /home/me/scratch        # revoke a grant
-```
-
-Granting a root also **registers it as a project**: `add` writes (or reuses) the folder's `.contenox/workspace.id` marker, so a root added here shows the same friendly name in `list`. `--name` sets that name (default: the folder's own name); re-running `add` on an already-granted path with a new `--name` **renames** the project without changing its workspace id, so its existing sessions stay attached. This is the exact same marker stamp `init --project` applies — one on-disk result across both entry points.
-
-A grant is durable config in the shared database (`~/.contenox/local.db`), so `add`/`remove` write it directly and every surface that serves sessions reads the same grants.
-
-**When a grant takes effect.** The allowlist is read once, when a surface starts. A session's working directory is chosen at session creation and is immutable afterward, so a grant added now applies to the **next** surface you start — not to a process already running, and not to a session already open. `remove` behaves the same way: it stops future sessions from choosing the root, and does not evict a session already running there. Restart the surface to apply either immediately.
-
-`add` requires the path to be an existing directory (a workspace root must be a real directory); `remove` does not, so a grant to a since-deleted directory can be cleaned up. Both are idempotent. `list` prints the durable grants these verbs manage, each with its project name when set — it lists what is granted, which is the durable source only; to see the full allowlist a given process is using, including its launch directory and flags, consult the roots that surface advertises to its client.
-
-A grant that can no longer be honoured — one pointing inside the control plane, for instance, written before that guard existed or under a different `--data-dir` — is skipped when the allowlist is built, with a note on stderr naming the `workspace remove` line that clears it. One stale row never stops a surface from starting.
-
-| Flag | Description |
-| ---- | ----------- |
-| `--name <name>` (on `add`) | Friendly project name stamped into the folder's marker; re-adding with a new name renames the project |
-
 ### `contenox shell-env`
 
 Manage the global environment variables contenox injects into the shells it spawns (`local_shell`, forwarded to the connected client's terminal), layered on top of the environment scrub so an injected value always wins. See [Least-privilege shell environment](/docs/guide/confinement/environment/) for the full design and current status.
@@ -580,7 +584,7 @@ See [Least-privilege shell environment](/docs/guide/confinement/environment/) fo
 
 Missions are the dual of chat mode. In chat you prompt turn by turn and approve each gated action yourself. In mission mode you fire a one-line intent at a declared agent under an **envelope** — a HITL policy that bounds what it may do unattended — and keep working; the unit acts inside the envelope, and only crossing it costs your attention.
 
-From inside a session (`contenox acp`, or the terminal UI) fire a mission without leaving the conversation:
+From inside a session (`contenox beam`, or an editor over `contenox acp`) fire a mission without leaving the conversation:
 
 - `/mission` — fires nothing. Prints the grammar, the defaults in force, and every envelope on the policy search path with its character: what a call no rule matches does, the unattended tool-call ceiling, and whether an agent may answer the unit's questions.
 - `/mission <intent>` — fires the configured `default-mission-agent` under the `default-mission-policy` envelope.
@@ -601,7 +605,7 @@ The [oracle](/docs/use-cases/auto-attention/) needs no `/mission` equivalent: it
 
 Pairing attaches the machine to a relay, so the sessions this process serves can be reached from somewhere else — the [contenox app](https://app.contenox.com) on a phone, typically. A pairing describes the **machine**, so the credential lands in `~/.contenox/relay.json` and every contenox process on that machine uses it; these slash commands and the [`contenox pair`](#contenox-pair--contenox-unpair) CLI verbs are two entry points to the same stored pairing.
 
-From inside an ACP editor session:
+From inside a session — `contenox beam`, or an editor over `contenox acp`:
 
 - `/pair <key>` — redeem a key minted in the app (**Pair device**) against the hosted relay whose address ships in the binary.
 - `/pair <key> <endpoint>` — redeem against a relay you run yourself; the `CONTENOX_RELAY_ENDPOINT` environment variable sets the same thing for every `/pair` without an inline endpoint.
@@ -657,21 +661,23 @@ contenox acpx                # headless / untrusted-driver profile
 
 Each profile's chain resolves in order: an operator copy at `~/.contenox/<name>.json`, then a compiled `~/.contenox/.generated/<name>.json`, then the shipped `~/.contenox/system/<name>.json` — first match wins. `CONTENOX_ACP_CHAIN_PATH` (acp) and `CONTENOX_ACPX_CHAIN_PATH` (acpx) override this for one run. See the [editor integration guides](/docs/integrations/editors/zed/) for client setup.
 
-### `contenox serve [path]` / `contenox beam [path]`
+### `contenox serve [path]`
 
-Run contenox as a long-lived host: the same runtime `contenox acp` builds, reachable from the [contenox app](https://app.contenox.com) through the relay, with no editor involved. `beam` is an alias for the same host.
+Run contenox as a long-lived host — the organization's shape: a standing process on a box nobody is sitting at, reachable from the [contenox app](https://app.contenox.com) through the relay.
 
-Where `acp` serves one client over stdio, `serve` has no stdin to serve: the relay tunnel is its inbound path, so it checks its setup, prints a status screen, and stays up until interrupted.
+Where `acp` serves one client over stdio and `beam` serves the person who started it, `serve` has no client of its own: the relay tunnel is its inbound path, so it checks its setup, prints a status screen, and stays up until interrupted.
 
 ```bash
-contenox serve              # host, rooted at your home directory
-contenox serve .            # host, scoped to the current directory
-contenox serve ~/src/api    # host, scoped to one workspace
+contenox serve              # the workspace is your home directory
+contenox serve .            # the directory you are standing in
+contenox serve ~/src/api    # one project
 ```
 
-The optional path is the default workspace root for sessions the app opens, and the first entry in the [workspace roots](#workspace-roots) allowlist that bounds every relay attachment. With no path the host serves your home directory: a host outlives the shell that started it and is reached from a device that knows nothing about that shell's working directory, so scoping it to the launch directory would make what the app can open depend on where you happened to be standing. `contenox serve .` asks for the narrow scope explicitly.
+The optional path is **the** workspace this instance serves, fixed for the life of the process — see [Workspace authority](#workspace-authority). With no path the host serves your home directory: a host outlives the shell that started it and is reached from a device that knows nothing about that shell's working directory, so scoping it to the launch directory would make its scope depend on where you happened to be standing. `contenox serve .` asks for the narrow scope explicitly.
 
-The status screen reports what the process actually is — setup readiness (the same check `contenox doctor` runs), the workspace root, the model, the relay and app URL when paired, and the log directory with the retention bounds in force. An unpaired host says so and prints the steps to pair it; it still runs, it is simply reachable on that machine only.
+A host has **no `local_fs` and no `local_shell`**, under any policy. Those tools are forwarded to a connected client's `fs/*` and `terminal/*` capabilities, and a standing host has no such client; every capability it has is an MCP server or OpenAPI service you attached. See [contenox serve: the standing host](/docs/guide/serve/).
+
+The status screen reports what the process actually is — setup readiness (the same check `contenox doctor` runs), the workspace, the model, the relay and app URL when paired, and the log directory with the retention bounds in force. An unpaired host says so and prints the steps to pair it; it still runs, it is simply reachable on that machine only.
 
 | Flag           | Description                                                              |
 | -------------- | ------------------------------------------------------------------------ |
@@ -679,7 +685,7 @@ The status screen reports what the process actually is — setup readiness (the 
 
 Structured logs go to the log directory rather than the screen, so the screen stays a status display. Files are named `serve-<YYYY-MM-DD>.log`, and a day that outgrows its size bound continues in `serve-<YYYY-MM-DD>.2.log`, `.3.log`, and so on. Retention is bounded by the `log-*` [config keys](/docs/reference/config/#set-persistent-defaults); restarting a host continues the current part rather than starting a new file per launch.
 
-Running a host: [Reaching a machine from the app](/docs/guide/serve/).
+Running a host: [contenox serve: the standing host](/docs/guide/serve/).
 
 ### `contenox pair` / `contenox unpair`
 
@@ -697,7 +703,7 @@ contenox unpair                  # delete the stored credential
 - A self-hosted relay hands out its own public key at redemption and is verified against that key from then on. `CONTENOX_RELAY_ENDPOINT` sets the same endpoint for every `pair` without an inline one.
 - `contenox unpair` is local: it stops this machine dialling but does not revoke. Revoke an instance in the app — a revoked machine is refused at its next dial whether or not it still holds the file.
 
-Pairing alone attaches the machine; run [`contenox serve`](#contenox-serve-path--contenox-beam-path) to keep it reachable.
+Pairing alone attaches the machine; run [`contenox serve`](#contenox-serve-path) — or keep a [`contenox beam`](#contenox-beam) session open — to keep it reachable.
 
 ### `contenox autocomplete --stdio`
 
@@ -732,7 +738,6 @@ contenox version
 |---|---|
 | `CONTENOX_ACP_CHAIN_PATH` | Override the chain file used by `contenox acp` sessions |
 | `CONTENOX_ACPX_CHAIN_PATH`| Override the chain file used by headless ACPX sessions |
-| `CONTENOX_WORKSPACE_ROOTS` | Add roots to the [workspace-root allowlist](#workspace-roots) for one run, as an OS path-list separated value (`:` on POSIX, `;` on Windows). Read in addition to `--workspace-root` and to the roots granted by `contenox workspace add`, never instead of either; the launch directory stays the default root. |
 | `CONTENOX_DEFAULT_MODEL` / `CONTENOX_DEFAULT_PROVIDER` | Process-level override of the configured default model/provider (nothing is persisted). Also the ACP `env_var` auth-method contract for non-interactive setup. |
 | `CONTENOX_DEFAULT_ALT_MODEL` / `CONTENOX_DEFAULT_ALT_PROVIDER` | Same, for the alt model pair. |
 | `CONTENOX_DEFAULT_MAX_TOKENS` / `CONTENOX_DEFAULT_THINK` | Same, for the response token cap and reasoning level. |

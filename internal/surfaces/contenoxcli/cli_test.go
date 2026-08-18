@@ -4,8 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/contenox/contenox/internal/version"
 	"github.com/contenox/contenox/libtracker"
 )
 
@@ -18,12 +20,12 @@ func TestUnit_acpxIsReservedSubcommand(t *testing.T) {
 	}
 }
 
-func TestUnit_retiredServeIsReservedSubcommand(t *testing.T) {
+func TestUnit_serveIsReservedSubcommand(t *testing.T) {
 	if !reservedSubcommands["serve"] {
-		t.Fatal(`"serve" must stay reserved so the retired command is not injected as run input`)
+		t.Fatal(`"serve" must stay reserved so the host command is not injected as run input`)
 	}
 	if !firstNonFlagIsReserved([]string{"serve"}) {
-		t.Fatal(`expected "serve" to be recognized as a retired reserved subcommand`)
+		t.Fatal(`expected "serve" to be recognized as a reserved subcommand`)
 	}
 }
 
@@ -175,6 +177,32 @@ func TestUnit_firstNonFlagIsReserved_version(t *testing.T) {
 	}
 }
 
+// TestUnit_PrintVersion_NamesDirtyWorkingTreeBuilds pins I7's version half: a
+// VCS-stamped build prints its revision, dirty flag, and build time, and a
+// build with no stamp keeps the one-line release format byte-for-byte.
+func TestUnit_PrintVersion_NamesDirtyWorkingTreeBuilds(t *testing.T) {
+	var out strings.Builder
+	printVersion(&out, "contenox", "v0.41.0", version.Provenance{})
+	if got := out.String(); got != "contenox version v0.41.0\n" {
+		t.Fatalf("unstamped build must keep the release format, got %q", got)
+	}
+
+	out.Reset()
+	printVersion(&out, "contenox", "v0.41.0", version.Provenance{
+		Revision: "41b11dd6", Dirty: true, Time: "2026-08-18T06:57:00Z",
+	})
+	got := out.String()
+	if !strings.Contains(got, "contenox version v0.41.0\n") {
+		t.Errorf("the version line must stay first, got %q", got)
+	}
+	if !strings.Contains(got, "revision 41b11dd6 (working tree modified)") {
+		t.Errorf("a dirty working-tree build must say so, got %q", got)
+	}
+	if !strings.Contains(got, "built 2026-08-18T06:57:00Z") {
+		t.Errorf("the build time must be printed, got %q", got)
+	}
+}
+
 func TestUnit_resolveContenoxDir(t *testing.T) {
 	// Create a temporary directory structure for testing.
 	tempDir, err := os.MkdirTemp("", "contenox-test-*")
@@ -234,10 +262,50 @@ func TestUnit_resolveContenoxDir(t *testing.T) {
 
 // TestUnit_DispatchSubcommand_BarePromptIsNotDispatched asserts a bare prompt no longer becomes a chat turn: it falls through to cobra, which reports an unknown command.
 func TestUnit_DispatchSubcommand_BarePromptIsNotDispatched(t *testing.T) {
+	pinTerminal(t, true)
 	if got := dispatchSubcommand([]string{"say hello"}, false); got != "" {
 		t.Fatalf("bare prompt dispatched to %q, want no dispatch", got)
 	}
 	if got := dispatchSubcommand([]string{"--db", "x.db", "say hello"}, false); got != "" {
 		t.Fatalf("bare prompt with flags dispatched to %q, want no dispatch", got)
 	}
+}
+
+func pinTerminal(t *testing.T, tty bool) {
+	t.Helper()
+	previous := stdoutIsTerminal
+	stdoutIsTerminal = func() bool { return tty }
+	t.Cleanup(func() { stdoutIsTerminal = previous })
+}
+
+// TestUnit_DispatchSubcommand_BareInvocationOpensBeam pins the front door: with
+// a terminal to draw on, `contenox` with no arguments is beam, not a help page.
+// Without one there is nothing to draw on, so help stays the answer — and
+// `contenox --help` asks for help on either.
+func TestUnit_DispatchSubcommand_BareInvocationOpensBeam(t *testing.T) {
+	pinTerminal(t, true)
+	if got := dispatchSubcommand(nil, true); got != "beam" {
+		t.Fatalf("bare invocation on a terminal dispatched to %q, want %q", got, "beam")
+	}
+	for _, args := range [][]string{{"--help"}, {"-h"}, {"--version"}} {
+		if got := dispatchSubcommand(args, true); got != "" {
+			t.Fatalf("%v dispatched to %q, want help", args, got)
+		}
+	}
+
+	pinTerminal(t, false)
+	if got := dispatchSubcommand(nil, true); got != "" {
+		t.Fatalf("bare invocation with no terminal dispatched to %q, want help", got)
+	}
+}
+
+// TestUnit_BeamCommandIsRegistered proves the name the bare dispatch injects is
+// a real subcommand: dispatchSubcommand only prepends a string.
+func TestUnit_BeamCommandIsRegistered(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "beam" {
+			return
+		}
+	}
+	t.Fatal("no `beam` command is registered, so a bare `contenox` would fail as an unknown command")
 }

@@ -159,7 +159,7 @@ func (s *service) RespondAsAgentBounded(ctx context.Context, askID, agentName st
 		MissionID:      *row.MissionID,
 		ResolutionLike: agentApprovalResolutionLike,
 		Max:            max,
-	}, state, marshalAgentApprovalResolution(approved, agentActor(agentName), guidance), time.Now().UTC())
+	}, state, marshalDecidedApprovalResolution(approved, agentActor(agentName), guidance, true), time.Now().UTC())
 	if resolveErr != nil {
 		if !errors.Is(resolveErr, libdb.ErrNotFound) {
 			return fmt.Errorf("hitlservice: resolve ask %s: %w", askID, resolveErr)
@@ -197,10 +197,14 @@ func (s *service) RespondAsAgentBounded(ctx context.Context, askID, agentName st
 	return nil
 }
 
-func marshalAgentApprovalResolution(approved bool, by, guidance string) json.RawMessage {
+func marshalDecidedApprovalResolution(approved bool, by, guidance string, byAgent bool) json.RawMessage {
 	res := approvalResolution{Approved: &approved}
-	if by != "" {
+	switch {
+	case by == "":
+	case byAgent:
 		res.DecidedBy = &by
+	default:
+		res.DecidedByHuman = &by
 	}
 	if g := strings.TrimSpace(guidance); g != "" {
 		res.Guidance = &g
@@ -212,16 +216,36 @@ func marshalAgentApprovalResolution(approved bool, by, guidance string) json.Raw
 	return raw
 }
 
-// DecidedByOf returns the non-human actor recorded on a resolved permission ask, and "" for a human verdict or a pending row.
+// DecidedByOf returns the actor recorded on a resolved permission ask — an adjudicating agent, or the person a relayed verdict named — and "" for an unattributed verdict or a pending row.
 func DecidedByOf(row *runtimetypes.HITLApproval) string {
-	if row == nil || len(row.Resolution) == 0 {
+	res, ok := resolutionOf(row)
+	if !ok {
 		return ""
+	}
+	if res.DecidedBy != nil {
+		return strings.TrimSpace(*res.DecidedBy)
+	}
+	if res.DecidedByHuman != nil {
+		return strings.TrimSpace(*res.DecidedByHuman)
+	}
+	return ""
+}
+
+// decidedByAgent reports an agent-attributed permission verdict, the only kind a mission's agent-approval bound counts.
+func decidedByAgent(row *runtimetypes.HITLApproval) bool {
+	res, ok := resolutionOf(row)
+	return ok && res.DecidedBy != nil && strings.TrimSpace(*res.DecidedBy) != ""
+}
+
+func resolutionOf(row *runtimetypes.HITLApproval) (approvalResolution, bool) {
+	if row == nil || len(row.Resolution) == 0 {
+		return approvalResolution{}, false
 	}
 	var res approvalResolution
-	if err := json.Unmarshal(row.Resolution, &res); err != nil || res.DecidedBy == nil {
-		return ""
+	if err := json.Unmarshal(row.Resolution, &res); err != nil {
+		return approvalResolution{}, false
 	}
-	return strings.TrimSpace(*res.DecidedBy)
+	return res, true
 }
 
 // GuidanceOf returns what an agent-decided ask told the unit to do instead, or "" when none was given.
@@ -249,7 +273,7 @@ func (s *service) AgentApprovalCount(ctx context.Context, missionID string) (int
 		if IsAttentionAsk(row) {
 			continue
 		}
-		if DecidedByOf(row) != "" {
+		if decidedByAgent(row) {
 			count++
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,8 +18,10 @@ import (
 	"github.com/contenox/contenox/internal/models/modelcapability"
 	"github.com/contenox/contenox/internal/services/chatservice"
 	"github.com/contenox/contenox/internal/services/clikv"
+	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/contenox/contenox/internal/services/setupcheck"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/version"
 	libacp "github.com/contenox/contenox/libacp"
 	"github.com/contenox/contenox/libtracker"
 )
@@ -28,7 +31,7 @@ import (
 func allACPCommands() []libacp.AvailableCommand {
 	return []libacp.AvailableCommand{
 		{Name: "help", Description: "List the available commands."},
-		{Name: "doctor", Description: "Check provider/model/backend readiness (read-only — no test prompt is sent)."},
+		{Name: "doctor", Description: "Check provider/model/backend readiness, this build's provenance, and the tools this session holds (read-only — no test prompt is sent)."},
 		{Name: "clear", Description: "Clear this session's conversation history."},
 		{Name: "compact", Description: "Summarize older history into a single message to reclaim context.", Input: &libacp.AvailableCommandInput{Hint: "[keep]"}},
 		{Name: "rename", Description: "Show or set this session's title: /rename <title> (- resets it).", Input: &libacp.AvailableCommandInput{Hint: "[title|-]"}},
@@ -157,7 +160,7 @@ func (t *Transport) dispatchCommand(ctx context.Context, sid libacp.SessionID, s
 	case "help":
 		out = t.handleHelp()
 	case "doctor":
-		out, err = t.handleDoctor(ctx)
+		out, err = t.handleDoctor(ctx, sess)
 	case "model":
 		out, err = t.handleModel(ctx, args)
 	case "provider":
@@ -317,8 +320,9 @@ func (t *Transport) handleHelp() string {
 }
 
 // handleDoctor reports current provider/model/backend readiness from live
-// runtime state; read-only, never a model completion.
-func (t *Transport) handleDoctor(ctx context.Context) (string, error) {
+// runtime state, this build's provenance, and the tools this session's turns
+// advertise; read-only, never a model completion.
+func (t *Transport) handleDoctor(ctx context.Context, sess *sessionEntry) (string, error) {
 	if t.deps.Engine == nil || t.deps.Engine.SetupStatus == nil {
 		return "", fmt.Errorf("readiness check unavailable")
 	}
@@ -339,7 +343,130 @@ func (t *Transport) handleDoctor(ctx context.Context) (string, error) {
 			}
 		}
 	}
+	summary += "\n\n" + buildProvenanceLine()
+	// Partial answers over none: the readiness half stays useful when the
+	// roster cannot be enumerated.
+	if roster, rosterErr := t.sessionToolRoster(ctx, sess); rosterErr != nil {
+		summary += "\nTools: unavailable (" + rosterErr.Error() + ")"
+	} else {
+		summary += "\n" + roster
+	}
 	return summary, nil
+}
+
+// buildProvenanceLine names the running build: version plus the VCS state that
+// separates a dirty working-tree build from the release version.txt claims.
+func buildProvenanceLine() string {
+	if p := version.GetProvenance().String(); p != "" {
+		return fmt.Sprintf("Build: %s (%s)", version.Get(), p)
+	}
+	return fmt.Sprintf("Build: %s", version.Get())
+}
+
+// sessionToolRoster renders the tools a turn in sess would advertise right
+// now: the engine's aggregate repo enumerated under the session's runtime
+// allowlist, mission role, and the attached client's capabilities — the same
+// resolution a prompt runs through, so the report cannot drift from it.
+func (t *Transport) sessionToolRoster(ctx context.Context, sess *sessionEntry) (string, error) {
+	if t.deps.Engine == nil || t.deps.Engine.Tools == nil {
+		return "", fmt.Errorf("tool roster unavailable")
+	}
+	rosterCtx := ctx
+	var store runtimetypes.Store
+	if t.deps.DB != nil {
+		store = runtimetypes.New(t.deps.DB.WithoutTransaction())
+		var names []string
+		if sess != nil {
+			names = sess.McpServerNames
+		}
+		allowlist, err := t.runtimeToolsAllowlist(ctx, store, names)
+		if err != nil {
+			return "", err
+		}
+		rosterCtx = taskengine.WithRuntimeToolsAllowlist(rosterCtx, allowlist)
+	}
+	if sess != nil && sess.InternalSessionID != "" {
+		rosterCtx = context.WithValue(rosterCtx, runtimetypes.SessionIDContextKey, sess.InternalSessionID)
+		// Mirrors the prompt path's mission decoration: the mission toolset
+		// advertises by session role.
+		if sess.MissionID != "" {
+			rosterCtx = missiontools.WithMissionID(rosterCtx, sess.MissionID)
+		} else if t.hasMissionCapability() {
+			rosterCtx = missiontools.WithParentSessionID(rosterCtx, sess.InternalSessionID)
+		}
+	}
+
+	names, err := t.deps.Engine.Tools.Supports(rosterCtx)
+	if err != nil {
+		return "", err
+	}
+	sort.Strings(names)
+
+	var b strings.Builder
+	b.WriteString("Tools this session holds (tool — toolset — origin):\n")
+	if len(names) == 0 {
+		b.WriteString("  (none)")
+		return b.String(), nil
+	}
+	for _, name := range names {
+		kind, label := t.toolsetOrigin(rosterCtx, store, name)
+		if kind == originRemoteProvider {
+			// Enumerating a remote provider fetches its spec over HTTP; /doctor
+			// stays local and names the provider instead.
+			fmt.Fprintf(&b, "  %s — %s; tools listed by `contenox tools show %s`\n", name, label, name)
+			continue
+		}
+		tools, err := t.deps.Engine.Tools.GetToolsForToolsByName(rosterCtx, name)
+		if err != nil {
+			fmt.Fprintf(&b, "  %s — %s — unavailable: %v\n", name, label, err)
+			continue
+		}
+		if len(tools) == 0 {
+			if capName := clientProxiedCapability(name); kind == originClientCapability && capName != "" {
+				fmt.Fprintf(&b, "  %s — nothing advertised (the attached client grants no %s)\n", name, capName)
+			} else {
+				fmt.Fprintf(&b, "  %s — nothing advertised in this session\n", name)
+			}
+			continue
+		}
+		for _, tool := range tools {
+			origin := label
+			if kind == originClientCapability {
+				origin = "client capability " + RequiredClientCapability(name, tool.Function.Name)
+			}
+			fmt.Fprintf(&b, "  %s — %s — %s\n", tool.Function.Name, name, origin)
+		}
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
+}
+
+type toolsetOriginKind int
+
+const (
+	originLocal toolsetOriginKind = iota
+	originClientCapability
+	originMCPServer
+	originRemoteProvider
+)
+
+// toolsetOrigin classifies where name's tools run: in-process, proxied to the
+// ACP client, an MCP server, or a store-registered remote OpenAPI provider.
+func (t *Transport) toolsetOrigin(ctx context.Context, store runtimetypes.Store, name string) (toolsetOriginKind, string) {
+	if slices.Contains(t.deps.Engine.LocalTools, name) {
+		if capName := clientProxiedCapability(name); capName != "" {
+			return originClientCapability, "client capability " + capName
+		}
+		return originLocal, "local (in-process)"
+	}
+	if store != nil {
+		if srv, err := store.GetMCPServerByName(ctx, name); err == nil {
+			if runtimetypes.IsACPManagedMCPServerName(srv.Name) {
+				return originMCPServer, "MCP server " + srv.Name + " (session-scoped, supplied by the client)"
+			}
+			return originMCPServer, "MCP server " + srv.Name
+		}
+	}
+	return originRemoteProvider, "remote tool provider (OpenAPI)"
 }
 
 func (t *Transport) handleModel(ctx context.Context, args string) (string, error) {

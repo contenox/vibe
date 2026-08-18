@@ -17,7 +17,7 @@ each is a file you write, diff and review like any other change.
 |---|---|
 | Which model answers | `model:` in the [agent declaration](/docs/guide/agents/); `execute_config.model` / `provider` in an authored chain |
 | Which tools exist at all | `tools:` in the declaration; `execute_config.tools` allowlist in an authored chain |
-| Where it may act | workspace roots, and the [sandbox](/docs/guide/confinement/sandbox/) |
+| Where it may act | the instance's one workspace, and the [sandbox](/docs/guide/confinement/sandbox/) |
 | What runs, asks, or is refused | the envelope — [HITL policy](/docs/guide/hitl/) |
 | What content gets through | a `route` task — [moderation gate](/docs/use-cases/moderation-gate/) |
 | What it may spend | `compute` bounds in the envelope |
@@ -53,9 +53,11 @@ calling.
 
 ## 3. Where it may act
 
-Sessions run only inside the workspace roots you configured — the launch
-directory, roots granted with `contenox workspace add`, and any passed for that
-run. Never the runtime's own config, database or policies.
+An instance serves exactly one workspace, fixed when it was launched: the
+directory `beam` or `run` started in, the path `serve` was given, the project an
+editor opened. Its sessions run there and nowhere else — never in a directory a
+client asked for, and never in the runtime's own config, database or policies.
+See [workspace authority](/docs/reference/contenox-cli/#workspace-authority).
 
 Every agent-reachable shell gets a
 [scrubbed environment](/docs/guide/confinement/environment/), so credentials in
@@ -118,8 +120,8 @@ question — by default a human, never the agent itself.
 
 Every declaration above is enforced outside the model, before the effect lands.
 A tool that was never granted cannot be argued into existence; a path outside
-the workspace roots is not reachable by a better prompt; a call the envelope
-denies does not run. That is what makes them guardrails rather than
+the instance's workspace is not reachable by a better prompt; a call the
+envelope denies does not run. That is what makes them guardrails rather than
 instructions.
 
 ## Next
