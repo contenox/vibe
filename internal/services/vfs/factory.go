@@ -154,6 +154,18 @@ func (f *Factory) Allows(root string) (string, bool) {
 	return resolved, true
 }
 
+// InView is Allows minus the empty-string sentinel: Allows("") resolves to the
+// default root and reports true, but an untagged/legacy session (stored root "")
+// is attributable to no fixed-root instance, so it must not fall into every
+// instance's view.
+func (f *Factory) InView(storedRoot string) bool {
+	if storedRoot == "" {
+		return false
+	}
+	_, ok := f.Allows(storedRoot)
+	return ok
+}
+
 // ErrCwdNotPermitted is the sentinel every session-cwd refusal wraps (see
 // ResolveSessionCwd); callers translate it via errors.Is into their own
 // transport error.

@@ -503,10 +503,12 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		reportErr(err)
 		return fmt.Errorf("resolve working directory: %w", err)
 	}
-	// A host serves where it was told to, not where it happened to be started
-	// from, and it serves exactly one workspace, fixed here for its lifetime.
-	// Editor-driven profiles (acp, beam) build no factory: the client's cwd on
-	// session/new is the workspace, per the protocol.
+	// serve and beam are both single-workspace HOSTS: each serves exactly one
+	// workspace, fixed here for its lifetime, so a session created against it —
+	// by an app, an event trigger, or its own operator — resolves the "/"
+	// sentinel to that one root. Only the editor profile (acp) builds no
+	// factory: there the editor owns the cwd and sends a real path per session,
+	// per the protocol.
 	defaultRoot := launchDir
 	var workspaceRoots *vfs.Factory
 	switch {
@@ -519,6 +521,11 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		}
 	case profile.beam:
 		defaultRoot, err = beamRoot(cmd, launchDir)
+		if err != nil {
+			reportErr(err)
+			return err
+		}
+		workspaceRoots, err = buildWorkspaceFactory(defaultRoot)
 		if err != nil {
 			reportErr(err)
 			return err

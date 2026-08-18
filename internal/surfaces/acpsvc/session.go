@@ -92,6 +92,14 @@ func (t *Transport) LoadSession(ctx context.Context, req libacp.LoadSessionReque
 		return libacp.LoadSessionResponse{}, err
 	}
 	store := runtimetypes.New(t.deps.DB.WithoutTransaction())
+	// A session tagged with a root outside this instance's set belongs to another
+	// workspace on the same machine partition; open it as if it did not exist rather
+	// than replaying a foreign transcript and re-tagging it to this root.
+	if !t.sessionLoadableInView(t.sessionCwd(ctx, store, req.SessionID)) {
+		err := libacp.NewErrorf(libacp.ErrInvalidParams, "load session %q: session %q not found", req.SessionID, req.SessionID)
+		reportErr(err)
+		return libacp.LoadSessionResponse{}, err
+	}
 	sessionCwd, err := t.resolveExistingSessionCwd(ctx, store, req.SessionID, req.Cwd)
 	if err != nil {
 		reportErr(err)
@@ -651,6 +659,13 @@ func (t *Transport) ResumeSession(ctx context.Context, req libacp.ResumeSessionR
 		return libacp.ResumeSessionResponse{}, err
 	}
 	store := runtimetypes.New(t.deps.DB.WithoutTransaction())
+	// See LoadSession: a session rooted outside this instance's set is foreign and
+	// is refused as if unknown, never re-bound and re-tagged to this root.
+	if !t.sessionLoadableInView(t.sessionCwd(ctx, store, req.SessionID)) {
+		err := libacp.NewErrorf(libacp.ErrInvalidParams, "resume session %q: session %q not found", req.SessionID, req.SessionID)
+		reportErr(err)
+		return libacp.ResumeSessionResponse{}, err
+	}
 	sessionCwd, err := t.resolveExistingSessionCwd(ctx, store, req.SessionID, req.Cwd)
 	if err != nil {
 		reportErr(err)
@@ -1114,17 +1129,23 @@ func (t *Transport) ListSessions(ctx context.Context, req libacp.ListSessionsReq
 	exec := t.deps.DB.WithoutTransaction()
 
 	// The ACP session id is the message-index name; unnamed rows predate ACP naming
-	// and aren't listed. Ordering and pagination happen in Go, and the cwd filter
-	// applies after pagination.
+	// and aren't listed. Ordering and pagination happen in Go. The workspace-root
+	// view is scoped here, BEFORE pagination, so pages stay full and the cursor
+	// stays correct; the stored root is a per-session KV, so this costs one read per
+	// candidate. req.Cwd narrows further, per page.
 	indices, err := runtimetypes.NewMessageStore(exec, t.workspaceID()).
 		ListMessageSessions(ctx, ClientIdentity)
 	if err != nil {
 		return libacp.ListSessionsResponse{}, fmt.Errorf("could not list sessions: %w", err)
 	}
 
+	store := runtimetypes.New(exec)
 	var all []sessionListRow
 	for _, s := range indices {
 		if s.Name == "" {
+			continue
+		}
+		if !t.sessionInWorkspaceView(t.sessionCwd(ctx, store, libacp.SessionID(s.Name))) {
 			continue
 		}
 		all = append(all, sessionListRow{
@@ -1142,7 +1163,6 @@ func (t *Transport) ListSessions(ctx context.Context, req libacp.ListSessionsReq
 	}
 	end := min(start+listSessionsPageSize, len(all))
 
-	store := runtimetypes.New(exec)
 	var sessions []libacp.SessionInfo
 	for _, row := range all[start:end] {
 		info := libacp.SessionInfo{
@@ -1305,4 +1325,25 @@ func (t *Transport) sessionCwd(ctx context.Context, store runtimetypes.Store, si
 		return ""
 	}
 	return rec.Cwd
+}
+
+// sessionInWorkspaceView is the listing scope: the editor shape (nil factory) has
+// no server root, so everything is in view and req.Cwd stays the only filter;
+// otherwise the stored root must be in this instance's root set.
+func (t *Transport) sessionInWorkspaceView(storedRoot string) bool {
+	f := t.deps.WorkspaceRoots
+	if f == nil {
+		return true
+	}
+	return f.InView(storedRoot)
+}
+
+// sessionLoadableInView is the load/resume scope: it differs from the listing
+// scope only in admitting a legacy/untagged session (stored root ""), which the
+// loading instance then claims and re-tags — listing excludes it, opening adopts it.
+func (t *Transport) sessionLoadableInView(storedRoot string) bool {
+	if storedRoot == "" {
+		return true
+	}
+	return t.sessionInWorkspaceView(storedRoot)
 }
