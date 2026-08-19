@@ -89,7 +89,15 @@ func TestUnit_VetPolicy_ToolPatternsThatNeverMatch(t *testing.T) {
 func TestUnit_VetPolicy_TimeoutValues(t *testing.T) {
 	err := VetPolicy([]byte(`{"rules": [{"tools": "x", "tool": "y", "action": "approve", "timeout_s": -5}]}`))
 	require.ErrorIs(t, err, ErrEnvelopeVet)
-	require.Contains(t, err.Error(), "timeout_s must not be negative")
+	require.Contains(t, err.Error(), "timeout_s -5 is not a wait")
+
+	// The one negative that is a wait: no deadline at all.
+	require.NoError(t, VetPolicy([]byte(`{"rules": [{"tools": "x", "tool": "y", "action": "approve", "timeout_s": -1}]}`)))
+
+	// ...which nothing may pair an on_timeout with, since it never expires.
+	err = VetPolicy([]byte(`{"rules": [{"tools": "x", "tool": "y", "action": "approve", "timeout_s": -1, "on_timeout": "deny"}]}`))
+	require.ErrorIs(t, err, ErrEnvelopeVet)
+	require.Contains(t, err.Error(), "an ask with no deadline never expires")
 
 	err = VetPolicy([]byte(`{"rules": [{"tools": "x", "tool": "y", "action": "approve", "timeout_s": 999999999}]}`))
 	require.ErrorIs(t, err, ErrEnvelopeVet)

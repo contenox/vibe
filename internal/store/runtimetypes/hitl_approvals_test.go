@@ -174,6 +174,42 @@ func TestUnit_ListExpiredHITLApprovals_ReturnsOnlyPastDeadlinePendingRows(t *tes
 	require.Equal(t, expired.ID, got[0].ID)
 }
 
+// TestUnit_ListExpiredHITLApprovals_SkipsRowsWithNoDeadline pins the SQL that
+// makes "wait until somebody answers" durable: a zero expires_at is outside
+// the sweep's range, however old the row is, so no background read can ever
+// resolve it on the operator's behalf.
+func TestUnit_ListExpiredHITLApprovals_SkipsRowsWithNoDeadline(t *testing.T) {
+	t.Parallel()
+	ctx, s := setupHITLApprovalsStore(t)
+	now := time.Now().UTC()
+
+	noDeadline := newPendingApproval()
+	noDeadline.CreatedAt = now.Add(-90 * 24 * time.Hour)
+	noDeadline.ExpiresAt = time.Time{}
+	require.NoError(t, s.CreateHITLApproval(ctx, noDeadline))
+
+	expired := newPendingApproval()
+	expired.ExpiresAt = now.Add(-time.Minute)
+	require.NoError(t, s.CreateHITLApproval(ctx, expired))
+
+	got, err := s.ListExpiredHITLApprovals(ctx, now, 100)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "an ask with no deadline is not an expired ask")
+	require.Equal(t, expired.ID, got[0].ID)
+
+	// Even asked about a moment far in the future.
+	got, err = s.ListExpiredHITLApprovals(ctx, now.Add(365*24*time.Hour), 100)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, expired.ID, got[0].ID)
+
+	// ...and it reads back as the deadline-less row it was written as.
+	back, err := s.GetHITLApproval(ctx, noDeadline.ID)
+	require.NoError(t, err)
+	require.True(t, back.ExpiresAt.IsZero())
+	require.Equal(t, runtimetypes.HITLApprovalPending, back.State)
+}
+
 func TestUnit_ListExpiredHITLApprovals_EmptyIsNonNil(t *testing.T) {
 	t.Parallel()
 	ctx, s := setupHITLApprovalsStore(t)

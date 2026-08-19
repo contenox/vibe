@@ -8,18 +8,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The kernel is store-free by design, so taskengine carries its own copy of the
-// declaration-scope prefix rather than importing this package.
-func TestUnit_DeclaredPrefixMatchesTheKernelsCopy(t *testing.T) {
+// TestUnit_DeclaredNameIsAnOrdinaryAllowlistEntry pins that the decl- prefix is a namespace the kernel never reads: "*" admits a declared toolset, "!name" removes it, a bare name grants exactly it.
+func TestUnit_DeclaredNameIsAnOrdinaryAllowlistEntry(t *testing.T) {
 	scoped := runtimetypes.DeclaredToolName("reviewer", "filesystem")
+	universe := []string{"local_fs", scoped}
 
-	got := taskengine.ExportedApplyAllowlist([]string{"*"}, []string{"local_fs", scoped})
-	require.Equal(t, []string{"local_fs"}, got,
-		"a wildcard must not reach a declaration-scoped toolset — the kernel's prefix copy has drifted from runtimetypes.DeclaredToolNamePrefix")
+	require.Equal(t, universe, taskengine.ExportedApplyAllowlist([]string{"*"}, universe),
+		"\"*\" must admit a declared toolset like any other; the prefix is a namespace, not a hidden exclusion")
 
-	got = taskengine.ExportedApplyAllowlist([]string{"local_fs", scoped}, []string{"local_fs", scoped})
-	require.Equal(t, []string{"local_fs", scoped}, got,
-		"naming a declaration-scoped toolset exactly must still resolve — that is how its own chain reaches it")
+	require.Equal(t, []string{"local_fs"},
+		taskengine.ExportedApplyAllowlist([]string{"*", "!" + scoped}, universe),
+		"\"!\"+the declared name is how an operator drops exactly that toolset")
+
+	require.Equal(t, universe, taskengine.ExportedApplyAllowlist(universe, universe),
+		"naming a declared toolset exactly must resolve — that is how its own chain reaches it")
+
+	require.Empty(t, taskengine.ExportedApplyAllowlist(nil, universe),
+		"an empty allowlist grants nothing")
 }
 
 func TestUnit_DeclaredToolNameIsScopedAndStable(t *testing.T) {

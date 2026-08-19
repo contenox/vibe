@@ -259,10 +259,7 @@ func (h *HITLWrapper) Exec(
 		h.publishDecision(ctx, tools.Name, toolName, args, result, true)
 		h.hitlLog(ctx, "ask raised", "tool", toolName, "approval_id", toolCallID, "rule", result.MatchedRule, "policy", result.PolicyName)
 
-		if h.recorder != nil {
-			return h.askDurable(ctx, startTime, input, debug, tools, req, result, toolCallID, reportErr, reportChange)
-		}
-		return h.askBlocking(ctx, startTime, input, debug, tools, req, result, "", reportErr, reportChange)
+		return h.ask(ctx, startTime, input, debug, tools, req, result, toolCallID, reportErr, reportChange)
 
 	default:
 		h.publishDecision(ctx, tools.Name, toolName, args, result, false)
@@ -270,79 +267,15 @@ func (h *HITLWrapper) Exec(
 	}
 }
 
-func (h *HITLWrapper) askBlocking(
-	ctx context.Context,
-	startTime time.Time,
-	input any,
-	debug bool,
-	tools *taskengine.ToolsCall,
-	req hitlservice.ApprovalRequest,
-	result hitlservice.EvaluationResult,
-	durableID string,
-	reportErr func(error),
-	reportChange func(string, any),
-) (any, taskengine.DataType, error) {
-	askCtx := ctx
-	var askCancel context.CancelFunc
-	if result.TimeoutS > 0 {
-		askCtx, askCancel = context.WithTimeout(ctx, time.Duration(result.TimeoutS)*time.Second)
-		defer askCancel()
-	}
-
-	h.hitlLog(ctx, "card shown", "tool", req.ToolName, "approval_id", req.ToolCallID)
-	approvalPending.Add(1)
-	approved, err := h.ask(askCtx, req)
-	approvalPending.Add(-1)
-	if err != nil {
-		// Only treat as HITL timeout when our own deadline fired, not the
-		// parent context's (both surface as DeadlineExceeded).
-		if result.TimeoutS > 0 &&
-			errors.Is(askCtx.Err(), context.DeadlineExceeded) &&
-			ctx.Err() == nil {
-			onTimeout := result.OnTimeout
-			if onTimeout == "" {
-				onTimeout = hitlservice.ActionDeny
-			}
-			allow := onTimeout == hitlservice.ActionAllow
-			h.hitlLog(ctx, "verdict entered", "tool", req.ToolName, "approval_id", req.ToolCallID, "approved", allow, "reason", "on_timeout")
-			h.closeRowInline(ctx, durableID, allow, reportErr)
-			if allow {
-				return h.inner.Exec(ctx, startTime, input, debug, tools)
-			}
-			h.hitlLog(ctx, "turn failed", "tool", req.ToolName, "approval_id", req.ToolCallID, "reason", "approval_timed_out")
-			reportErr(fmt.Errorf("hitl: approval timed out: %w", err))
-			return DenyTimeoutMessage, taskengine.DataTypeString, nil
-		}
-		h.hitlLog(ctx, "turn failed", "tool", req.ToolName, "approval_id", req.ToolCallID, "reason", "ask_error", "error", err.Error())
-		err = fmt.Errorf("hitl: approval error: %w", err)
-		reportErr(err)
-		return nil, taskengine.DataTypeAny, err
-	}
-	h.hitlLog(ctx, "verdict entered", "tool", req.ToolName, "approval_id", req.ToolCallID, "approved", approved)
-	h.closeRowInline(ctx, durableID, approved, reportErr)
-	if !approved {
-		msg := DenyMessage
-		if durableID != "" {
-			msg = h.denyMessage(ctx, durableID)
-		}
-		reportChange("denied", msg)
-		return msg, taskengine.DataTypeString, nil
-	}
-	return h.inner.Exec(ctx, startTime, input, debug, tools)
-}
-
-func (h *HITLWrapper) closeRowInline(ctx context.Context, approvalID string, approved bool, reportErr func(error)) {
-	if h.recorder == nil || approvalID == "" {
-		return
-	}
-	if err := h.recorder.ResolveApprovalInline(ctx, approvalID, approved); err != nil && !errors.Is(err, hitlservice.ErrApprovalAlreadyResolved) {
-		reportErr(fmt.Errorf("hitl: closing answered approval row %s: %w", approvalID, err))
-		return
-	}
-	h.hitlLog(ctx, "verdict recorded", "approval_id", approvalID, "approved", approved)
-}
-
-func (h *HITLWrapper) askDurable(
+// ask is the one path a gated tool call takes. The durable row is written
+// first, then the call blocks watching that row for a terminal verdict: an
+// answer continues the turn in place and the gated tool runs. The row — not
+// the local card — is what the wait watches, because the verdict may be
+// written by another process or device entirely: a phone over the relay,
+// `contenox approvals respond` in a second terminal, or an adjudicating agent.
+// The call releases the process only when the process is genuinely leaving
+// (ctx cancelled) or the caller detached this run's asks up front.
+func (h *HITLWrapper) ask(
 	ctx context.Context,
 	startTime time.Time,
 	input any,
@@ -361,32 +294,219 @@ func (h *HITLWrapper) askDurable(
 		approvalID = uuid.NewString()
 	}
 
-	// Row first: a restart from here on still shows the ask as pending.
-	if err := h.recorder.RecordPendingApproval(ctx, approvalID, req); err != nil {
-		// Do not lose the gate: fall back to blocking (not restart-durable this once).
-		reportErr(fmt.Errorf("hitl: durable approval row failed, falling back to blocking ask: %w", err))
-		return h.askBlocking(ctx, startTime, input, debug, tools, req, result, "", reportErr, reportChange)
+	// Row first, always: it costs nothing when the answer is instant, and it is
+	// the only thing an answer from elsewhere can land on. A waiter is parked
+	// before the row is recorded, because recording is also what offers the ask
+	// to an adjudicator — an instant verdict must wake this call, not race it.
+	durableID := ""
+	var waiter <-chan bool
+	if h.recorder != nil {
+		var release func()
+		waiter, release = h.parkWaiter(approvalID)
+		defer release()
+		if err := h.recorder.RecordPendingApproval(ctx, approvalID, req); err != nil {
+			// Do not lose the gate: still ask, still block — just not restart-durable this once.
+			release()
+			waiter = nil
+			reportErr(fmt.Errorf("hitl: durable approval row failed, the ask is blocking but not restart-durable: %w", err))
+		} else {
+			durableID = approvalID
+		}
 	}
 
-	if !taskengine.ToolCallSuspendable(ctx) || !taskengine.HasCheckpointSaver(ctx) {
-		return h.askBlocking(ctx, startTime, input, debug, tools, req, result, approvalID, reportErr, reportChange)
+	if durableID != "" && taskengine.AsksDetached(ctx) && taskengine.ToolCallSuspendable(ctx) {
+		// The caller declared nobody is attached to answer this run. Releasing
+		// the process is the point, so the card is detached too and the verdict
+		// comes back through the resume hook.
+		h.hitlLog(ctx, "card shown", "tool", req.ToolName, "approval_id", durableID)
+		h.raiseDetachedCard(ctx, req, durableID, result)
+		h.hitlLog(ctx, "checkpoint pending", "tool", req.ToolName, "approval_id", durableID)
+		reportChange("approval_pending", durableID)
+		return nil, taskengine.DataTypeAny, &taskengine.ApprovalPendingError{
+			ApprovalID: durableID,
+			ToolName:   req.ToolName,
+		}
 	}
 
-	h.hitlLog(ctx, "card shown", "tool", req.ToolName, "approval_id", approvalID)
-	h.raiseCard(ctx, req, approvalID, result)
-	h.hitlLog(ctx, "checkpoint pending", "tool", req.ToolName, "approval_id", approvalID)
-	reportChange("approval_pending", approvalID)
-	return nil, taskengine.DataTypeAny, &taskengine.ApprovalPendingError{
-		ApprovalID: approvalID,
-		ToolName:   req.ToolName,
+	approved, outcome := h.waitForVerdict(ctx, req, result, durableID, waiter, reportErr)
+	switch outcome {
+	case verdictAnswered:
+		h.hitlLog(ctx, "verdict entered", "tool", req.ToolName, "approval_id", approvalID, "approved", approved)
+	case verdictOnTimeout:
+		h.hitlLog(ctx, "verdict entered", "tool", req.ToolName, "approval_id", approvalID, "approved", approved, "reason", "on_timeout")
+	case verdictLeaving:
+		if durableID != "" && taskengine.ToolCallSuspendable(ctx) {
+			// The process is going away with the ask unanswered. The row stays
+			// pending and the engine checkpoints beside it, so answering later
+			// resumes this run wherever it can be resumed.
+			h.hitlLog(ctx, "checkpoint pending", "tool", req.ToolName, "approval_id", durableID, "reason", "process_leaving")
+			reportChange("approval_pending", durableID)
+			return nil, taskengine.DataTypeAny, &taskengine.ApprovalPendingError{
+				ApprovalID: durableID,
+				ToolName:   req.ToolName,
+			}
+		}
+		err := fmt.Errorf("hitl: approval %s went unanswered and this run cannot suspend: %w", approvalID, ctx.Err())
+		h.hitlLog(ctx, "turn failed", "tool", req.ToolName, "approval_id", approvalID, "reason", "cancelled")
+		reportErr(err)
+		return nil, taskengine.DataTypeAny, err
+	case verdictUnaskable:
+		h.hitlLog(ctx, "turn failed", "tool", req.ToolName, "approval_id", approvalID, "reason", "ask_error")
+		err := fmt.Errorf("hitl: approval error: %w", h.lastAskErr(ctx))
+		reportErr(err)
+		return nil, taskengine.DataTypeAny, err
+	}
+
+	h.closeRowInline(ctx, durableID, approved, reportErr)
+	if !approved {
+		msg := DenyMessage
+		if durableID != "" {
+			msg = h.denyMessage(ctx, durableID)
+		}
+		if outcome == verdictOnTimeout {
+			msg = DenyTimeoutMessage
+			h.hitlLog(ctx, "turn failed", "tool", req.ToolName, "approval_id", approvalID, "reason", "approval_timed_out")
+		}
+		reportChange("denied", msg)
+		return msg, taskengine.DataTypeString, nil
+	}
+	return h.inner.Exec(ctx, startTime, input, debug, tools)
+}
+
+type verdictOutcome int
+
+const (
+	// verdictAnswered: somebody decided — the local card, another process, or an adjudicator.
+	verdictAnswered verdictOutcome = iota
+	// verdictOnTimeout: the operator's wait ran out and the rule's on_timeout stands in.
+	verdictOnTimeout
+	// verdictLeaving: this process is shutting down with the ask still open.
+	verdictLeaving
+	// verdictUnaskable: no durable row to watch and the card could not be presented.
+	verdictUnaskable
+)
+
+// waitForVerdict blocks until the ask is decided. The durable row is the
+// authority and is polled throughout; the card and the in-process waiter are
+// only shortcuts onto it, so a verdict written anywhere still lands here.
+func (h *HITLWrapper) waitForVerdict(
+	ctx context.Context,
+	req hitlservice.ApprovalRequest,
+	result hitlservice.EvaluationResult,
+	durableID string,
+	waiter <-chan bool,
+	reportErr func(error),
+) (bool, verdictOutcome) {
+	wait := h.askWait(result)
+	waitCtx := ctx
+	if !hitlservice.Indefinite(wait) {
+		var cancel context.CancelFunc
+		waitCtx, cancel = context.WithTimeout(ctx, wait)
+		defer cancel()
+	}
+
+	// The card is how this wait is presented, so the wait owns it: it is raised
+	// on waitCtx and torn down with it, and a verdict it delivers late — after
+	// the wait already resolved the row — is read by nobody.
+	h.hitlLog(ctx, "card shown", "tool", req.ToolName, "approval_id", req.ToolCallID)
+	card := h.showCard(waitCtx, req)
+
+	approvalPending.Add(1)
+	defer approvalPending.Add(-1)
+
+	// Only a durable row can be answered from somewhere else; without one the
+	// card is the only voice there is.
+	var pollC <-chan time.Time
+	if durableID != "" && h.watcher != nil {
+		poll := time.NewTicker(hitlservice.ApprovalPollInterval)
+		defer poll.Stop()
+		pollC = poll.C
+	}
+
+	for {
+		select {
+		case res := <-card:
+			if res.err != nil {
+				if durableID == "" {
+					h.rememberAskErr(res.err)
+					return false, verdictUnaskable
+				}
+				// Nobody local could answer — a dropped editor, no attached
+				// client. That is not a verdict: the row is still open to the
+				// phone, another terminal, or an adjudicator.
+				reportErr(fmt.Errorf("hitl: no local answer for approval %s, still waiting on its durable row: %w", durableID, res.err))
+				card = nil
+				continue
+			}
+			return res.approved, verdictAnswered
+
+		case approved := <-waiter:
+			return approved, verdictAnswered
+
+		case <-pollC:
+			approved, terminal, err := h.watcher.ApprovalVerdict(ctx, durableID)
+			if err != nil || !terminal {
+				// Unreadable right now, or still pending — including the
+				// pending-to-pending writes a quorum or reassignment makes.
+				continue
+			}
+			return approved, verdictAnswered
+
+		case <-waitCtx.Done():
+			if ctx.Err() != nil {
+				return false, verdictLeaving
+			}
+			// Our own wait elapsed: the rule's on_timeout is the verdict.
+			onTimeout := result.OnTimeout
+			if onTimeout == "" {
+				onTimeout = hitlservice.ActionDeny
+			}
+			return onTimeout == hitlservice.ActionAllow, verdictOnTimeout
+		}
 	}
 }
 
-func (h *HITLWrapper) raiseCard(ctx context.Context, req hitlservice.ApprovalRequest, approvalID string, result hitlservice.EvaluationResult) {
+type cardResult struct {
+	approved bool
+	err      error
+}
+
+// showCard presents the ask on cardCtx and reports the answer once. The
+// goroutine is bounded by cardCtx, which is the wait's own context, so the card
+// never outlives the call that raised it.
+func (h *HITLWrapper) showCard(cardCtx context.Context, req hitlservice.ApprovalRequest) <-chan cardResult {
+	out := make(chan cardResult, 1)
+	go func() {
+		approved, err := h.ask(cardCtx, req)
+		out <- cardResult{approved: approved, err: err}
+	}()
+	return out
+}
+
+// parkWaiter registers this call on the durable ask before the ask is offered,
+// so an adjudicator's instant verdict wakes it rather than waiting for the next
+// poll. It is a shortcut onto the row, never a substitute for reading it.
+func (h *HITLWrapper) parkWaiter(approvalID string) (<-chan bool, func()) {
+	reg, ok := h.recorder.(hitlservice.ApprovalWaiterRegistry)
+	if !ok {
+		return nil, func() {}
+	}
+	return reg.RegisterApprovalWaiter(approvalID)
+}
+
+// raiseDetachedCard is the card for a run whose asks were detached: it outlives
+// the released turn and delivers its verdict through Respond, which is what
+// fires the resume hook. Only the detached path may use it — a blocking wait
+// that resolved through here would resume a checkpoint for a run still alive.
+func (h *HITLWrapper) raiseDetachedCard(ctx context.Context, req hitlservice.ApprovalRequest, approvalID string, result hitlservice.EvaluationResult) {
 	if h.responder == nil {
 		return
 	}
-	askCtx, askCancel := context.WithTimeout(context.WithoutCancel(ctx), rowLifetime(result))
+	askCtx := context.WithoutCancel(ctx)
+	askCancel := context.CancelFunc(func() {})
+	if lifetime := h.askWait(result); !hitlservice.Indefinite(lifetime) {
+		askCtx, askCancel = context.WithTimeout(askCtx, lifetime)
+	}
 	go func() {
 		defer askCancel()
 		approved, err := h.ask(askCtx, req)
@@ -394,11 +514,34 @@ func (h *HITLWrapper) raiseCard(ctx context.Context, req hitlservice.ApprovalReq
 	}()
 }
 
-func rowLifetime(result hitlservice.EvaluationResult) time.Duration {
-	if result.TimeoutS > 0 {
-		return time.Duration(result.TimeoutS) * time.Second
+func (h *HITLWrapper) closeRowInline(ctx context.Context, approvalID string, approved bool, reportErr func(error)) {
+	if h.recorder == nil || approvalID == "" {
+		return
 	}
-	return hitlservice.DefaultApprovalCeiling
+	// Inline, never Respond: this run is alive and about to continue, so no
+	// resume hook may fire for it.
+	if err := h.recorder.ResolveApprovalInline(ctx, approvalID, approved); err != nil && !errors.Is(err, hitlservice.ErrApprovalAlreadyResolved) {
+		reportErr(fmt.Errorf("hitl: closing answered approval row %s: %w", approvalID, err))
+		return
+	}
+	h.hitlLog(ctx, "verdict recorded", "approval_id", approvalID, "approved", approved)
+}
+
+// askWait is the operator's wait for one ask: the rule's own, else the host's
+// configured approval ceiling. It bounds the blocking call, the card and the
+// durable row alike, so none of the three outlives the others.
+func (h *HITLWrapper) askWait(result hitlservice.EvaluationResult) time.Duration {
+	if result.TimeoutS != 0 {
+		return hitlservice.WaitOf(result.TimeoutS)
+	}
+	if reader, ok := h.policy.(approvalCeilingReader); ok {
+		return reader.ApprovalCeiling()
+	}
+	return hitlservice.FallbackApprovalCeiling
+}
+
+type approvalCeilingReader interface {
+	ApprovalCeiling() time.Duration
 }
 
 type guidanceReader interface {

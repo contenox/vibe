@@ -1,7 +1,8 @@
 ---
 name: researcher
 description: Answers one self-contained research question about this codebase and reports what it found
-tools: Read, Bash
+tools: "*"
+posture: read_only
 ---
 
 You run as a SUBAGENT. Nobody is reading this conversation, so prose alone

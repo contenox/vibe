@@ -247,14 +247,14 @@ rewritten — see [Policy resolution order](/docs/guide/hitl/#policy-resolution-
 |---|---|---|
 | `extends` | string | One other envelope in this table — one parent, never a list |
 | `description` | string | Prose, carried into the rendered file's header |
-| `default_action` | `allow` \| `approve` \| `deny` | Applied to a call no emitted rule matched. Omitted fail-closes to `approve` |
+| `default_action` | grant | Applied to a call no emitted rule matched. Omitted fail-closes to `approve` |
 | `files.read` | axis | `read_file`, `read_file_range`, and the directory probe |
 | `files.write` | axis | `write_file`, `edit_file`, `sed` |
 | `shell` | axis | `local_shell` |
 | `network.read` / `network.write` | axis | **Reserved** — see below |
 | `missions.fire` | axis | `mission_start` |
 | `missions.answer` | axis | Who besides a human may answer this mission's asks |
-| `tools` | table | `pattern = action` for tools you connected |
+| `tools` | table | `pattern = grant` for tools you connected |
 | `compute` | table | `max_tool_calls`, `max_tokens`, `max_turns`, `on_exhausted`, `model_allowlist`, `backend_allowlist` |
 | `attention` | table | `allow_agent_answers`, `max_agent_answers`, `allow_agent_approvals`, `max_agent_approvals` |
 | `trusted_binaries` | table | `dirs`, `hashes` — see [Trusted binaries](/docs/guide/confinement/trusted-binaries/) |
@@ -263,13 +263,19 @@ rewritten — see [Policy resolution order](/docs/guide/hitl/#policy-resolution-
 An unknown key is an error naming the known ones, not a key that silently does
 nothing.
 
-#### Axes
+#### Grants
 
-Each axis is either an action string or a table carrying `grant` plus that axis's
-refinements. The two forms are the same document — `shell = "approve"` is sugar
-for `shell = { grant = "approve" }` — and dotted keys and sub-tables are
-interchangeable, so `files.read = "allow"` and an `[envelopes.x.files]` with
-`read = "allow"` arrive identically.
+Wherever this table takes an action — an axis, a `tools` pattern,
+`default_action` — it equally takes a table carrying `grant` plus whatever that
+position refines. The two forms are the same document: `shell = "approve"` is
+sugar for `shell = { grant = "approve" }`. For an axis, dotted keys and
+sub-tables are interchangeable too, so `files.read = "allow"` and an
+`[envelopes.x.files]` with `read = "allow"` arrive identically.
+
+Every grant, in its table form, accepts `timeout` and `on_timeout` — see
+[Bounding the wait](#bounding-the-wait).
+
+#### Axes
 
 **An axis you leave unset emits no rule at all.** It falls through to
 `default_action`; it is not implicitly `approve`.
@@ -304,6 +310,101 @@ instead — `allow` grants agent answers, `approve` grants answers *and* rulings
 gated calls, `deny` omits the block so a human decides. An explicit `[attention]`
 key wins over what the axis would set.
 
+#### Bounding the wait
+
+An `approve` grant stops the call and waits for a person. How long it waits, and
+what happens when nobody comes, are yours to set — on any grant, in its table
+form. With `timeout`, a grant can say all four things there are to say about a
+call:
+
+| What you mean | How you write it |
+|---|---|
+| **allow** — run it unattended | `files.read = "allow"` |
+| **ask, and wait an explicit duration**, then resolve by `on_timeout` | `shell = { grant = "approve", timeout = "30m", on_timeout = "deny" }` |
+| **ask, and wait with no deadline** — until somebody answers | `shell = { grant = "approve", timeout = "never" }` |
+| **deny** — refuse it; it never reaches a person | `files.write = "deny"` |
+
+All four in one envelope:
+
+```toml
+[envelopes.mine]
+description = "Four ways to say what a call may do."
+default_action = "approve"
+
+files.read = "allow"
+shell = { grant = "approve", timeout = "30m", on_timeout = "deny" }
+files.write = "deny"
+
+[envelopes.mine.tools]
+"github.merge_pr" = { grant = "approve", timeout = "2h", on_timeout = "deny" }
+"deploy.production" = { grant = "approve", timeout = "never" }
+```
+
+| Key | Value |
+|---|---|
+| `timeout` | A duration written the way Go writes one: `90s`, `30m`, `2h`, `1h30m`. Whole seconds, at most `168h` (seven days). Or `never` (also `forever`, `indefinite`): no deadline at all |
+| `on_timeout` | `deny` — what the expired ask resolves to. Refused beside `timeout = "never"`, which never expires |
+
+**Omit them and nothing changes.** The rendered rule carries no `timeout_s` and
+no `on_timeout`, exactly as before these keys existed. That is not "waits
+forever": with no rule deadline the ask is bounded by the host's approval
+ceiling — `contenox config set approval-ceiling <duration|never>`, seven days
+until you set it — and then denied. Writing `timeout` is how that number stops
+being one nobody chose.
+
+**`timeout = "never"` is how you say "wait for me".** It is a wait with no
+deadline, not a very long one:
+
+```toml
+[envelopes.mine.tools]
+"deploy.production" = { grant = "approve", timeout = "never" }
+```
+
+The rendered rule carries `"timeout_s": -1`. The durable row is written with no
+expiry, the expiry sweep's range excludes it, `contenox approvals list` shows
+its `EXPIRES-IN` as `never`, and it is still pending — and still answerable —
+after a restart and after the seven-day cap a number could have stated. This is
+the wait that makes an unattended run survivable: nothing resolves the question
+on the operator's behalf. Writing `on_timeout` beside it is **refused**, naming
+the envelope and the axis, because nothing can ever read it.
+
+`deny` is the only `on_timeout` this build can express, and both refusals say
+why: `allow` is rejected by the policy schema, because an ask that allows itself
+when nobody answers bypasses the approval it exists to require; `approve` is
+rejected because the runtime resolves every expiry that is not `allow` as a
+denial, so it would read as its opposite.
+
+A wait only attaches to a rule that asks. It is **refused**, naming the envelope
+and the axis, when the grant it sits on emits no `approve` rule — `grant =
+"allow"` with no `ask_always`, `missions.answer` (which compiles to the
+`attention` block, not a rule), a reserved `network.*` axis. A grant that never
+asks may still bound the asks its refinements carve out:
+
+```toml
+[envelopes.mine.files.write]
+grant = "allow"
+approve_paths = ["**/{*.pem,*.key,.env}"]
+timeout = "10m"
+on_timeout = "deny"
+```
+
+Here every rule the `approve_paths` glob emits carries the ten-minute wait, and
+the `allow` floor beneath them carries none.
+
+`default_action` accepts the same table form, and the transpiler **cannot carry
+it**: the policy schema holds one `default_action` and no field beside it, and
+only a rule has `timeout_s`/`on_timeout`. Rather than fake it as a catch-all
+rule, the render says so in its `//reserved` note and the call that matched no
+rule keeps waiting on the host's approval ceiling. Bound the wait on the axis or
+`tools` pattern that emits the ask instead.
+
+A malformed duration is refused at parse time, naming the envelope, the axis and
+the value — `"half an hour"`, `"30"` and `"1500ms"` (the policy carries whole
+seconds) are all errors, not silent zeroes. A word that is not one of `never`,
+`forever` or `indefinite` is refused the same way, and the message names the
+three that work; `"200h"` is refused pointing at them, since a wait past the cap
+is either a typo or an attempt to spell "never" as a number.
+
 #### Rule order
 
 Rules are first-match-wins, so the emission order **is** the semantics.
@@ -335,7 +436,11 @@ refused at parse time rather than emitted as a rule that can never match.
 [envelopes.mine.tools]
 "github.*" = "approve"
 "tavily.search" = "allow"
+"github.merge_pr" = { grant = "approve", timeout = "2h", on_timeout = "deny" }
 ```
+
+Each entry is a grant, so a pattern takes the table form and its
+[wait](#bounding-the-wait) too.
 
 Order in the file is not precedence: the table is emitted most-specific first
 (exact `toolset.tool`, then one wildcard, then `*`), then by action, then
@@ -440,11 +545,13 @@ Those are a different tier and this file does not describe them:
 | `contenox mcp add` / `contenox tools add` | you | every agent | you remove it |
 | `mcpServers:` / `remoteTools:` in a declaration | the declaration | that one agent | the declaration is deleted |
 
-A declaration-scoped registration is named `decl-<agent>-<name>` and is
-deliberately **not** reachable by `tools: ["*"]` from any other agent — a
-wildcard means every tool this machine offers, and another agent's private
-source is not that. It also never appears in `contenox mcp list` output as
-something you own: reconciliation only ever touches rows carrying that prefix.
+A declaration-scoped registration is named `decl-<agent>-<name>`. That prefix is
+a **namespace**, not an access boundary: it keeps two declarations that each
+bring a `filesystem` from colliding, and it marks the row as declaration-owned
+so reconciliation only ever touches rows carrying it. `*` means every toolset
+this machine offers, declaration-owned rows included — an agent that must not
+reach another agent's source names the toolsets it wants instead of inheriting.
+It also never appears in `contenox mcp list` output as something you own.
 
 `[tools]` below still applies to both: it is how a declaration's tool *names*
 resolve, whoever registered the thing behind them.
@@ -459,6 +566,13 @@ WebSearch = "tavily.search"
 ```
 
 Overlays merge, so naming one tool leaves the built-in names alone.
+
+A declaration's `tools:` line is read through this table, and admission is by
+**toolset**: `Read` resolving to `local_fs.read_file` grants the `local_fs`
+toolset. The vocabulary that line and every chain allowlist share — `*` for
+every connected toolset with no exceptions, `!name` to remove one, a bare name
+to grant exactly it, an empty list to grant nothing — is in
+[What `tools:` grants](/docs/guide/agents/#what-tools-grants).
 
 **A mapping makes a tool reachable, not permitted.** The emitted policy carries
 rules for the tools contenox hosts; a name you mapped yourself matches none of

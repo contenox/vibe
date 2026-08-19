@@ -46,13 +46,42 @@ are. Those agents are prefixed with the tool they came from (`reviewer` becomes
 |---|---|---|
 | `name` | yes | the agent's identity |
 | `description` | yes | when to reach for it |
-| `tools` | no | the tools it may call. **Omitted inherits every tool** — name them to narrow it |
+| `tools` | no | the toolsets it may call. **Omitted inherits every tool**, the same as `"*"` — name them to narrow it. See [What an agent can reach](#what-an-agent-can-reach) |
+| `disallowedTools` | no | individual tools hidden from it, by name, whatever the grant above admits |
 | `model` | no | routing stays on your configured default unless you pin it |
-| `permissionMode` | no | `acceptEdits` auto-accepts file writes; otherwise writes and shell ask you first. It resolves through the shipped `read_only` / `ask_always` / `auto_edit` [envelopes](/docs/reference/agents-config/#envelopesname), which is where the grant is written down |
+| `posture` | no | contenox's own name for the envelope this agent runs under: `read_only`, `ask_always` or `auto_edit`. Prefer it over `permissionMode` in a declaration you write here — it says what you mean without importing another tool's vocabulary |
+| `permissionMode` | no | the Claude Code spelling of the same thing, for a declaration imported from there: `acceptEdits` auto-accepts file writes; otherwise writes and shell ask you first. `posture` wins if both appear. Either resolves through the shipped `read_only` / `ask_always` / `auto_edit` [envelopes](/docs/reference/agents-config/#envelopesname), which is where the grant is written down |
 | `effort` | no | reasoning effort: `low`, `medium`, `high`, `xhigh` |
 | `maxTurns` | no | tightens how much one run may spend |
 | `mcpServers` | no | MCP servers this agent may reach, or ones it brings itself — see [Tools an agent brings with it](#tools-an-agent-brings-with-it) |
 | `remoteTools` | no | OpenAPI services this agent brings itself. contenox's own field; a file without it is unchanged |
+
+## What an agent can reach
+
+`tools` is not the whole answer, and reading it as if it were is the one
+mistake worth warning about. An agent's reach is the sum of three things:
+
+1. **`tools`** — the hosted toolsets. The vocabulary is small:
+   `*` means every connected toolset, with no exceptions; `!name` removes one;
+   a bare name grants exactly that toolset; an empty list grants nothing.
+   Omitting the field is the same as `*`. A name like `native-git` or
+   `decl-…` is a namespace so a server you connect cannot collide with a
+   toolset contenox hosts — it is **not** a hidden exclusion, and `*` admits it
+   like anything else.
+2. **`mcpServers`** — granted by naming the server. You do **not** also list it
+   under `tools`; declaring it is the grant.
+3. **`remoteTools`** — the same, for an OpenAPI service the agent brings.
+
+So an agent with `tools: Read, Bash` and `mcpServers: [github]` can reach
+Read, Bash **and** every tool that GitHub server serves. If you want the
+complete roster a session actually holds, ask the runtime rather than reading
+the file: `contenox doctor` prints it with each tool's origin, and `/doctor`
+inside a session prints the live one.
+
+Granting reach is not granting permission. Every call still passes the
+envelope — see [`posture`](#) above and
+[Human in the loop](/docs/guide/hitl/) — so a tool an agent can reach may
+still be denied, or held until a person answers.
 
 The body is the system prompt and expands the usual macros — `{{tools}}`,
 `{{host:os}}`, `{{var:…}}`, `{{date}}` — plus [`{{skills}}`](#skills-procedures-for-repeated-work).
@@ -66,6 +95,50 @@ Tool names resolved out of the box: `Read`, `Write`, `Edit`, `Bash`,
 `PowerShell`, `Glob`, `Grep`, `WebFetch`. An unknown name is dropped and
 reported; the agent runs with the rest. A declaration where no tool resolves
 fails.
+
+### What `tools:` grants
+
+Admission is by **toolset**: a name resolves through [`[tools]`](/docs/reference/agents-config/#tools)
+to a `toolset.tool`, and the agent is granted that toolset.
+
+| You write | The agent gets |
+|---|---|
+| no `tools:` line | every connected toolset — the declaration inherits |
+| `tools: "*"` | the same thing, said out loud |
+| `tools: Read, Grep` | exactly the toolsets those names resolve to |
+| `disallowedTools: Bash` | the above, minus the individual tool `Bash` resolves to |
+
+> **Quote the star.** This is YAML, where a bare `*` opens an alias, so
+> `tools: *` fails to parse the whole file with `did not find expected
+> alphabetic or numeric character`. Write `tools: "*"` or `tools: ["*"]`.
+
+The two halves work at different grains, deliberately: `tools:` admits whole
+toolsets, and `disallowedTools:` hides individual tools out of what was admitted
+— so `tools: Read` brings the whole `local_fs` toolset, and hiding one of its
+tools is `disallowedTools:`, not a shorter `tools:` line.
+
+**`*` means everything, with no exceptions.** Every toolset connected on this
+machine: the ones contenox hosts, every MCP server and OpenAPI service you
+registered, and the declaration-scoped sources other agents brought with them.
+A `decl-` or `native-` prefix is a **namespace** — it keeps two declarations
+that each bring a `filesystem` from colliding, and keeps a declared source from
+colliding with an in-process toolset. It is not a hidden exclusion, and
+inheriting does not quietly skip it. An agent that must not reach another
+agent's source names the toolsets it wants instead of inheriting.
+
+Whatever the line says, the agent's own `mcpServers:` and `remoteTools:` are
+always granted to it — see [Tools an agent brings with it](#tools-an-agent-brings-with-it).
+
+> **Note:**
+> `!name` is the **chain** allowlist's vocabulary, not a declaration's. In
+> `execute_config.tools` an entry like `"!local_shell"` removes one toolset from
+> `"*"`; in a declaration's `tools:` line it resolves to nothing and is dropped
+> with the rest of the unresolved names. Narrow a declaration with
+> `disallowedTools:`, or by naming what it may reach.
+
+Naming a tool is not permitting it — what happens when the call is actually made
+is the [envelope's](/docs/guide/hitl/) decision. See
+[Naming a tool is not permitting it](#naming-a-tool-is-not-permitting-it).
 
 ## Using it
 
@@ -189,10 +262,11 @@ remoteTools:
 ---
 ```
 
-These are registered **scoped to this agent**. Two agents may each bring a
-`filesystem` without colliding, no other agent can reach either one — not even
-one that inherits every tool — and deleting the declaration retires what it
-brought.
+These are registered **scoped to this agent**: two agents may each bring a
+`filesystem` without colliding, and deleting the declaration retires what it
+brought. The `decl-` prefix is a namespace, not an access boundary — an agent
+that inherits every tool reaches these rows too, so an agent that must not see
+another agent's source names the toolsets it wants instead of inheriting.
 
 They show up in `contenox mcp list` and `contenox tools list` under an
 `OWNER` of `declaration`, because they are genuinely running on this machine:

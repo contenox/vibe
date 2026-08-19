@@ -22,6 +22,12 @@ var realTools = map[string]bool{
 	"write_file":      true,
 	"edit_file":       true,
 
+	// native-fs-browse, real since the 2026-08-19 revival wired it.
+	"list_dir":    true,
+	"find_files":  true,
+	"stat_file":   true,
+	"count_stats": true,
+
 	"git_status":          true,
 	"git_diff":            true,
 	"git_log":             true,
@@ -54,6 +60,23 @@ var promptProse = map[string]bool{
 }
 
 var toolShapedToken = regexp.MustCompile(`\b[a-z]+(?:_[a-z]+)+\b`)
+
+// servedToolsets is every toolset name a shipped grant may address. A dotted
+// grant passes MapTools verbatim, so this is the only thing standing between a
+// renamed toolset and a declaration that silently grants nothing.
+var servedToolsets = map[string]bool{
+	"local_fs":         true,
+	"local_shell":      true,
+	"native-git":       true,
+	"native-fs-browse": true,
+	"native-web":       true,
+	"native-jq":        true,
+	"native-go":        true,
+	"native-goja":      true,
+	"native-ssh":       true,
+	"native-echo":      true,
+	"mission":          true,
+}
 
 // preseedDeclarations returns every markdown file this package ships, keyed by
 // a display path: the preseedTrees embed plus the flat Preseeded files.
@@ -107,11 +130,29 @@ func TestUnit_PreseedDeclarations_GrantsResolve(t *testing.T) {
 			if !ok {
 				continue
 			}
+			// The production path parses YAML, which strips the quotes a
+			// value containing "*" needs (a bare * is a YAML alias); this
+			// test reads the raw line, so normalize the same way.
+			rest = strings.Trim(strings.TrimSpace(rest), `"'`)
 			names := strings.Split(rest, ",")
 			mapped, skipped, err := cfg.MapTools(names)
 			require.NoError(t, err, "%s: tools grant does not resolve", path)
 			require.Empty(t, skipped, "%s: tools grant names dropped by the shipped mapping", path)
 			require.NotEmpty(t, mapped, "%s: tools grant resolved to nothing", path)
+
+			// MapTools passes any dotted name through verbatim without checking
+			// it exists, so skipped stays empty for a grant naming a toolset
+			// nothing serves — which is how `git.git_status` survived the
+			// rename to native-git and silently granted the review agent
+			// nothing. Verify the toolset half against the real roster.
+			for _, m := range mapped {
+				toolset, _, dotted := strings.Cut(m, ".")
+				if !dotted {
+					continue
+				}
+				require.True(t, servedToolsets[toolset],
+					"%s: grant %q names toolset %q, which nothing serves", path, m, toolset)
+			}
 		}
 	}
 }

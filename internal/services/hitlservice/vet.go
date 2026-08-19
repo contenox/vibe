@@ -10,7 +10,9 @@ import (
 // ErrEnvelopeVet marks every defect the envelope vet reports.
 var ErrEnvelopeVet = errors.New("hitl policy failed validation")
 
-const maxRuleTimeoutS = 7 * 24 * 60 * 60
+// MaxRuleTimeoutS bounds Rule.TimeoutS; every producer of a rule checks against
+// this one value rather than restating seven days.
+const MaxRuleTimeoutS = 7 * 24 * 60 * 60
 
 // VetPolicy validates a hitl-policy document for authoring — JSON shape,
 // unknown fields, rule shapes — then applies validatePolicy, so vet can
@@ -125,11 +127,8 @@ func vetRuleSemantics(p *Policy) []error {
 					i, pat.field, pat.value, "*", "*"))
 			}
 		}
-		if r.TimeoutS < 0 {
-			errs = append(errs, fmt.Errorf("rule %d: timeout_s must not be negative (got %d); zero means wait indefinitely", i, r.TimeoutS))
-		}
-		if r.TimeoutS > maxRuleTimeoutS {
-			errs = append(errs, fmt.Errorf("rule %d: timeout_s %d is out of range (max %d, seven days) — a longer wait is a typo, not an intent", i, r.TimeoutS, maxRuleTimeoutS))
+		if r.TimeoutS > MaxRuleTimeoutS {
+			errs = append(errs, fmt.Errorf("rule %d: timeout_s %d is out of range (max %d, seven days) — a longer wait is a typo, not an intent", i, r.TimeoutS, MaxRuleTimeoutS))
 		}
 		// timeout_s/on_timeout only take effect while an approval is pending.
 		if r.Action != ActionApprove && (r.TimeoutS != 0 || r.OnTimeout != "") {

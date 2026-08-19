@@ -133,7 +133,9 @@ func (t *Transport) answerableAsksListing(ctx context.Context, parentSessionID s
 			unit = "unit"
 		}
 		fmt.Fprintf(&b, "  %s  %s — %s", a.row.ID, unit, strings.TrimSpace(a.row.ArgsSummary))
-		if window := untilLabel(now, a.row.ExpiresAt); window != "" {
+		if a.row.ExpiresAt.IsZero() {
+			b.WriteString("  (no deadline — answerable until you answer it)")
+		} else if window := untilLabel(now, a.row.ExpiresAt); window != "" {
 			fmt.Fprintf(&b, "  (answerable for %s)", window)
 		}
 		b.WriteString("\n")

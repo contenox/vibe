@@ -7,6 +7,7 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/fleetservice"
+	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
@@ -51,6 +52,39 @@ func TestUnit_ACPToolset_CarriesTheSharedToolsets(t *testing.T) {
 	for _, name := range []string{"local_fs", "local_shell", missiontools.ToolsProviderName} {
 		require.Containsf(t, stable, name, "stable toolset %q must not be beta-gated", name)
 	}
+}
+
+// TestUnit_ACPToolset_NativeToolsetsAreDeclarationScoped pins the allowlist
+// vocabulary an operator writes: "*" means every connected toolset with no
+// exceptions, "!name" removes one, and naming a set grants exactly it. The
+// native scope is a namespace, not a hidden exclusion — a "*" that quietly
+// withheld the native sets would be the runtime deciding it knows better than
+// the declaration.
+func TestUnit_ACPToolset_NativeToolsetsAreDeclarationScoped(t *testing.T) {
+	tools := testToolset(acpProfileACP, true)
+
+	all := make([]string, 0, len(tools))
+	var native []string
+	for name := range tools {
+		all = append(all, name)
+		if strings.HasPrefix(name, "native-") {
+			native = append(native, name)
+		}
+	}
+	require.Subset(t, all, []string{
+		localtools.GitToolsName, localtools.LocalFSBrowseToolsName, localtools.WebToolsName,
+	}, "the editor profile carries the cleared native toolsets")
+	require.NotEmpty(t, native)
+
+	admitted := taskengine.ExportedApplyAllowlist([]string{"*"}, all)
+	require.ElementsMatch(t, all, admitted, `"*" admits everything connected, native sets included`)
+
+	excluded := taskengine.ExportedApplyAllowlist([]string{"*", "!" + localtools.GitToolsName}, all)
+	require.NotContains(t, excluded, localtools.GitToolsName, `"!name" is how an operator removes one set`)
+	require.Contains(t, excluded, "local_fs", "and removes only that one")
+
+	named := taskengine.ExportedApplyAllowlist([]string{localtools.GitToolsName}, all)
+	require.Contains(t, named, localtools.GitToolsName, "a declaration naming the toolset exactly admits it")
 }
 
 // TestUnit_ACPToolset_AdvertisesNoProxiedToolWithoutAClient pins the rule the

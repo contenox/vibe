@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/contenox/contenox/internal/kernel/clientfsterm"
 	"github.com/contenox/contenox/internal/surfaces/beam/dialect"
 	libacp "github.com/contenox/contenox/libacp"
 )
@@ -31,6 +32,11 @@ type Deps struct {
 	// Empty advertises neither capability, and the agent's client-backed
 	// tools are withheld from the session.
 	WorkspaceRoot string
+
+	// WorkspaceEnv scrubs a launched terminal's parent environment (the shell
+	// scrub composed by resolvedSandboxEnv). Nil falls back to the shared
+	// server's ScrubDenySecrets default, never the raw os.Environ().
+	WorkspaceEnv func([]string) []string
 }
 
 func (d Deps) validate() error {
@@ -44,7 +50,9 @@ type Bridge struct {
 	info *libacp.Implementation
 	root string
 
-	terms terminals
+	// fsterm is the shared client-side fs+terminal server; nil when root is
+	// empty, in which case the fs and terminal capabilities are unadvertised.
+	fsterm *clientfsterm.Server
 
 	conn   *libacp.ClientSideConnection
 	client *routingClient
@@ -88,6 +96,19 @@ func New(ctx context.Context, deps Deps) (*Bridge, error) {
 		notify:    make(chan struct{}, 1),
 		done:      make(chan struct{}),
 		inflight:  make(map[libacp.SessionID]struct{}),
+	}
+
+	if deps.WorkspaceRoot != "" {
+		var opts []clientfsterm.Option
+		if deps.WorkspaceEnv != nil {
+			opts = append(opts, clientfsterm.WithEnvScrub(deps.WorkspaceEnv))
+		}
+		fsterm, err := clientfsterm.New(deps.WorkspaceRoot, opts...)
+		if err != nil {
+			runCancel()
+			return nil, fmt.Errorf("enginebridge: workspace server: %w", err)
+		}
+		b.fsterm = fsterm
 	}
 
 	b.client = &routingClient{bridgeClient: &bridgeClient{b: b}}

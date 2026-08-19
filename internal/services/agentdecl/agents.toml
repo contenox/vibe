@@ -191,7 +191,8 @@ local_shell = "approve"
 # Seven axes. Each is an action — allow, approve or deny — or a table carrying
 # `grant` plus the refinements listed with it:
 #
-#   files.read       read_file, read_file_range, list_dir
+#   files.read       read_file, read_file_range, list_dir, and the native-fs-browse
+#                    reads grep, find_files, stat_file, count_stats, list_dir
 #   files.write      write_file, edit_file, sed
 #   shell            local_shell
 #   network.read     reserved: nothing in this build serves it
@@ -555,6 +556,7 @@ on_exhausted = "finish_stuck"
 # `"tavily.search" = "allow"` in a [envelopes.serve.tools] block of your own is
 # how a connected tool stops asking.
 [envelopes.serve]
+extends = "read_only"
 description = "The MCP host: missions and the servers you connected, nothing local."
 default_action = "approve"
 files.read = "deny"

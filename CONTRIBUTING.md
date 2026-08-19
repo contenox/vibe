@@ -199,6 +199,17 @@ task acp-client-e2e
 task acp-host-e2e
 ```
 
+The published JSON Schemas under `schema/` are generated from the Go types that
+load the formats — `hitlservice.Policy` and `taskengine.TaskChainDefinition`,
+their doc comments becoming the schema descriptions. Every policy contenox
+emits stamps them by URL, so a stale file is drift an operator's editor
+validates against. Touch either type or its doc comments and regenerate:
+
+```bash
+task spec:generate   # rewrite schema/*.schema.json from the Go types
+task spec:verify     # what CI runs: regenerate to a temp dir, fail on drift
+```
+
 Optional race detector:
 
 ```bash
@@ -216,7 +227,9 @@ run `task test-cli-help` and update the relevant docs.
 3. Use clear commit messages. Conventional Commit prefixes are preferred.
 4. Run `gofmt` on Go changes.
 5. Keep docs and blueprints in sync with public-surface changes.
-6. Keep generated artifacts out of commits unless the release process requires
+6. Commit `schema/*.schema.json` when you regenerate it — it is published at
+   contenox.com/schema/ and CI's `task spec:verify` fails when it is stale.
+   Keep other generated artifacts out of commits unless the release process requires
    them.
 
 ## Code conventions

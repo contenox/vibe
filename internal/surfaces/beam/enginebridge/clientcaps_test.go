@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/contenox/contenox/internal/kernel/clientfsterm"
 	libacp "github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +18,11 @@ import (
 // the fs and terminal methods never touch the conn, so the capability half is
 // testable exactly as the agent drives it.
 func capsClient(root string) *bridgeClient {
-	return &bridgeClient{b: &Bridge{root: root}}
+	b := &Bridge{root: root}
+	if root != "" {
+		b.fsterm, _ = clientfsterm.New(root)
+	}
+	return &bridgeClient{b: b}
 }
 
 func intPtr(v int) *int { return &v }

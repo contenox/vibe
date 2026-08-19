@@ -41,6 +41,11 @@ commands and approval flow are identical to 'contenox acp'. With no arguments it
 opens the newest session rooted in the current directory, or starts a fresh one
 when there is none; a path opens that directory instead.
 
+` + toolGrantLine + `
+
+` + askWaitLine + ` Answering inline resolves the same
+durable row, so an ask you walk away from still expires.
+
   ctrl+x ctrl+e   compose the draft in $EDITOR
   ctrl+s          switch sessions
   ctrl+c          clear the composer, interrupt a turn, then quit
@@ -118,6 +123,10 @@ type beamSurface struct {
 	provider      string
 	engineReady   bool
 	logPath       string
+	// workspaceEnv scrubs a launched terminal's parent environment (the shell
+	// scrub from resolvedSandboxEnv). Nil defers to the shared server's
+	// ScrubDenySecrets default rather than the raw os.Environ().
+	workspaceEnv func([]string) []string
 }
 
 const beamInboxQueueDepth = 16
@@ -195,6 +204,7 @@ func runBeamSurface(ctx context.Context, cmd *cobra.Command, s beamSurface) erro
 		ClientInfo:    &libacp.Implementation{Name: "beam", Version: CLIVersion()},
 		Inbox:         inbox,
 		WorkspaceRoot: s.root,
+		WorkspaceEnv:  s.workspaceEnv,
 	})
 	if err != nil {
 		return fmt.Errorf("open engine bridge: %w", err)

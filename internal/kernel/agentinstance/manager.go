@@ -211,6 +211,13 @@ func WithFilesystem(fs InstanceFileSystem) Option {
 	return func(m *manager) { m.fileSystem = fs }
 }
 
+// WithTerminalServer installs ts as the instance-wide terminal server a
+// viewer-less unit's terminal/* callbacks fall back to, the terminal peer of
+// WithFilesystem. A controller viewer that serves terminals still wins.
+func WithTerminalServer(ts TerminalServer) Option {
+	return func(m *manager) { m.terminalServer = ts }
+}
+
 // WithSelfExecutable overrides the program a chain-kind agent is spawned from (default
 // os.Executable()), letting a test point the spawn at a built fixture binary.
 func WithSelfExecutable(path string) Option {
@@ -247,6 +254,7 @@ type manager struct {
 	sink               EventSink
 	permissionFallback PermissionFallback
 	fileSystem         InstanceFileSystem
+	terminalServer     TerminalServer
 
 	rootCtx    context.Context
 	rootCancel context.CancelFunc
@@ -398,6 +406,7 @@ func (m *manager) bringUp(agent *runtimetypes.Agent, spawner agenthost.Agent) (s
 		},
 		onUnsupervisedRequest: m.unattendedPermissionAnswerer(id, agent),
 		fileSystem:            m.fileSystem,
+		terminalServer:        m.terminalServer,
 	})
 
 	if err := inst.start(); err != nil {

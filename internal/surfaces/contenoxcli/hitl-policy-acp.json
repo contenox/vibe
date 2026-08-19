@@ -599,6 +599,32 @@
       "tools": "shell_session",
       "tool": "shell_session_read",
       "action": "allow"
+    },
+    {
+      "//": "native-fs-browse read tools: the files.read floor, same allow tier as the local_fs reads above. Contained by internal/services/vfs like local_fs; a workspace outside the secret trees is the boundary.",
+      "tools": "native-fs-browse",
+      "tool": "grep",
+      "action": "allow"
+    },
+    {
+      "tools": "native-fs-browse",
+      "tool": "find_files",
+      "action": "allow"
+    },
+    {
+      "tools": "native-fs-browse",
+      "tool": "stat_file",
+      "action": "allow"
+    },
+    {
+      "tools": "native-fs-browse",
+      "tool": "count_stats",
+      "action": "allow"
+    },
+    {
+      "tools": "native-fs-browse",
+      "tool": "list_dir",
+      "action": "allow"
     }
   ],
   "attention": {

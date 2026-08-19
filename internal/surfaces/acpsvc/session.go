@@ -1129,10 +1129,10 @@ func (t *Transport) ListSessions(ctx context.Context, req libacp.ListSessionsReq
 	exec := t.deps.DB.WithoutTransaction()
 
 	// The ACP session id is the message-index name; unnamed rows predate ACP naming
-	// and aren't listed. Ordering and pagination happen in Go. The workspace-root
-	// view is scoped here, BEFORE pagination, so pages stay full and the cursor
-	// stays correct; the stored root is a per-session KV, so this costs one read per
-	// candidate. req.Cwd narrows further, per page.
+	// and aren't listed. Ordering and pagination happen in Go. Both scopes are
+	// applied here, BEFORE pagination, so pages stay full and the cursor stays
+	// correct; the stored root is a per-session KV, so this costs one read per
+	// candidate.
 	indices, err := runtimetypes.NewMessageStore(exec, t.workspaceID()).
 		ListMessageSessions(ctx, ClientIdentity)
 	if err != nil {
@@ -1145,7 +1145,11 @@ func (t *Transport) ListSessions(ctx context.Context, req libacp.ListSessionsReq
 		if s.Name == "" {
 			continue
 		}
-		if !t.sessionInWorkspaceView(t.sessionCwd(ctx, store, libacp.SessionID(s.Name))) {
+		storedRoot := t.sessionCwd(ctx, store, libacp.SessionID(s.Name))
+		if !t.sessionInWorkspaceView(storedRoot) {
+			continue
+		}
+		if !sessionUnderRequestedCwd(storedRoot, req.Cwd) {
 			continue
 		}
 		all = append(all, sessionListRow{
@@ -1346,4 +1350,21 @@ func (t *Transport) sessionLoadableInView(storedRoot string) bool {
 		return true
 	}
 	return t.sessionInWorkspaceView(storedRoot)
+}
+
+// sessionUnderRequestedCwd narrows a listing to one workspace. An empty or "/"
+// request asks for every session this instance can see; anything else lists
+// only sessions rooted at that directory or below it. Without this a client
+// that serves no host root — beam, an editor — resumes the newest session on
+// the machine rather than the newest one here.
+func sessionUnderRequestedCwd(storedRoot, requested string) bool {
+	requested = strings.TrimSpace(requested)
+	if requested == "" || requested == "/" {
+		return true
+	}
+	if storedRoot == "" {
+		return false
+	}
+	resolved, err := vfs.Contain(requested, storedRoot)
+	return err == nil && resolved != ""
 }

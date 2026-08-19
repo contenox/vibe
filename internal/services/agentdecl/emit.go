@@ -2,6 +2,7 @@ package agentdecl
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -225,9 +226,8 @@ func exposedToolSets(ir *AgentIR, agentID string) []string {
 			sets = appendToolSet(sets, name)
 		}
 	}
-	// Sources the agent brought itself are named exactly under either form:
-	// "*" deliberately skips declaration-scoped toolsets, so one agent's
-	// private source is never handed to every other agent.
+	// Sources the agent brought itself are named exactly, so they are granted
+	// under either form — including an explicit list that carries no "*".
 	for _, name := range ir.DeclaredToolsetNames(agentID) {
 		sets = appendToolSet(sets, name)
 	}
@@ -258,7 +258,9 @@ func summariseConfig(cfg Config) *taskengine.LLMExecutionConfig {
 
 func toolsPoliciesFor(ir *AgentIR, cfg Config) map[string]map[string]string {
 	sets := ToolSets(ir.Tools.Allow)
-	if ir.Tools.Inherit {
+	// An explicit "*" is the same grant as omitting the list: every connected
+	// toolset, so every configured toolset's knobs travel with it.
+	if ir.Tools.Inherit || slices.Contains(sets, ToolsInheritAll) {
 		sets = make([]string, 0, len(cfg.ToolsPolicies))
 		for set := range cfg.ToolsPolicies {
 			sets = append(sets, set)

@@ -8,9 +8,9 @@ order: 9
 
 Human + AI collaboration in contenox is an authored, versioned artifact — not a runtime default. The policy decides what runs unattended, what pauses to ask a human, and what is denied outright, and it is diffable and swappable like any other file in your repo.
 
-You do not normally write that policy by hand. You write an **envelope** — a named `[envelopes.<name>]` section in [`agents.toml`](/docs/reference/agents-config/#envelopesname) — and the runtime transpiles it into the JSON below. An envelope transpiles to a policy; the approval engine is unchanged either way. See [Where a policy comes from](#where-a-policy-comes-from). Because approvals are durable, a question waits for a person instead of timing out: an unanswered ask checkpoints the run, and answering it later — from any terminal — resumes execution exactly once. A parked turn says so rather than going quiet, and a client that reconnects is shown the question again; see [What a parked approval looks like](#what-a-parked-approval-looks-like). For how these controls fit a sovereignty and oversight posture, see [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/).
+You do not normally write that policy by hand. You write an **envelope** — a named `[envelopes.<name>]` section in [`agents.toml`](/docs/reference/agents-config/#envelopesname) — and the runtime transpiles it into the JSON below. An envelope transpiles to a policy; the approval engine is unchanged either way. See [Where a policy comes from](#where-a-policy-comes-from). Because approvals are durable, an unanswered ask does not hold a process open: it checkpoints the run, and answering it later — from any terminal — resumes execution exactly once. Every ask is also bounded, and you write the bound: a grant carrying `timeout` resolves through its `on_timeout` when nobody answers, a grant carrying `timeout = "never"` waits with no deadline at all, and a grant carrying none rides this host's approval ceiling (`contenox config set approval-ceiling`, seven days until you set it). A parked turn says so rather than going quiet, and a client that reconnects is shown the question again; see [What a parked approval looks like](#what-a-parked-approval-looks-like). For how these controls fit a sovereignty and oversight posture, see [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/).
 
-The file format has a published JSON Schema, generated from the Go types that load it: [`hitl-policy-v1.schema.json`](/schema/hitl-policy-v1.schema.json). Add it as `$schema` in your policy file and your editor validates as you type; every transpiled envelope and every emitted per-agent policy already carries it. The chain format is at [`task-chain.schema.json`](/schema/task-chain.schema.json).
+The file format has a published JSON Schema, generated from the Go types that load it: [`hitl-policy-v1.schema.json`](/schema/hitl-policy-v1.schema.json). CI regenerates it and fails on any difference, so the schema you validate against is the loader, not a hand-kept copy of it. Add it as `$schema` in your policy file and your editor validates as you type; every transpiled envelope and every emitted per-agent policy already carries it. The chain format is at [`task-chain.schema.json`](/schema/task-chain.schema.json).
 
 Human-in-the-loop (HITL) lets you intercept tool calls before they execute and decide — approve, block, or let them pass automatically — based on a named policy file.
 
@@ -40,7 +40,69 @@ contenox events dispatch --auto
 
 ## What a parked approval looks like
 
-An approval nobody has answered yet does not fail and does not hang. The run checkpoints, releases its process, and the ask stays a pending row any process can answer later. Three things make that state visible rather than silent:
+### What happens the moment an ask is raised
+
+A call the policy puts on the `approve` tier becomes a **durable row first** — written before anything waits, so a crash from that instant on still shows the ask as pending rather than losing it. What happens next depends on whether the run can checkpoint:
+
+**A run that can checkpoint releases its process.** Every tool call a model makes inside an agent run can suspend, and agent runs carry a checkpoint saver. So the card is raised to whoever is attached, the run saves its checkpoint, the process is released, and the turn ends — announcing itself as suspended rather than finished. Nothing is held open, nothing is burning a connection, and the ask is now a row. Answering it — the card in beam or your editor, or [`contenox approvals respond`](/docs/reference/contenox-cli/#contenox-approvals) from any terminal that can reach your models — records the verdict and resumes the suspended run to completion. This is the unattended path, and it is the one a mission or a detached run takes.
+
+**A run that cannot checkpoint blocks in place.** A tool call outside a model batch, or one on a path with no checkpoint saver, has nothing to suspend into: it holds the call and waits, and the prompt renders where you are — inline in the terminal for the CLI, as a card in beam or your editor. This is the attended path. The durable row is still written, so the same ask is still listable and still answerable from another terminal; what differs is that this process is waiting for it.
+
+Either way there is one row, and a row becomes terminal exactly once — so a verdict is applied once no matter how many screens saw the question.
+
+### How an unanswered ask ends
+
+How long an ask stays open is the envelope's business, not the runtime's — including the case where the answer is "as long as it takes":
+
+| The grant that gated the call | How long the ask waits | What it resolves to |
+|---|---|---|
+| carries `timeout` and `on_timeout` | exactly that duration | its `on_timeout` — `deny` |
+| carries `timeout = "never"` | forever: no deadline at all | nothing; it stays pending until somebody answers it |
+| carries neither | this host's [approval ceiling](/docs/reference/contenox-cli/#contenox-config) — seven days until you set one | a denial |
+
+The last row is the reason [`timeout`](/docs/reference/agents-config/#bounding-the-wait) exists. An operator who wants a shell ask to die in thirty minutes, a merge to keep waiting for two hours, or a production deploy to wait until a human is actually there, says so on the grant that raised it. All four things a grant can say, in one envelope:
+
+```toml
+# ~/.contenox/agents.toml
+[envelopes.mine]
+description = "Four ways to say what a call may do."
+default_action = "approve"
+
+# 1. allow — runs unattended. No ask, so no wait.
+files.read = "allow"
+
+# 2. ask, and wait an explicit duration — then resolve by on_timeout.
+shell = { grant = "approve", timeout = "30m", on_timeout = "deny" }
+
+# 4. deny — refused outright. It never reaches a person.
+files.write = "deny"
+
+[envelopes.mine.tools]
+"github.merge_pr" = { grant = "approve", timeout = "2h", on_timeout = "deny" }
+
+# 3. ask, and wait with NO deadline. The run parks, the box can restart,
+#    days can pass, and the ask is still here when somebody comes back.
+"deploy.production" = { grant = "approve", timeout = "never" }
+```
+
+That renders `"action": "allow"`, `"timeout_s": 1800` with `"on_timeout": "deny"`, `"action": "deny"`, and `"timeout_s": -1` with no `on_timeout` beside it. `contenox vet` reads the rendered file back and checks the same four shapes.
+
+`timeout = "never"` (also spelled `forever` or `indefinite`) is a real wait, not a very long one: the row is written with no expiry, no sweep ever touches it, `approvals list` shows its `EXPIRES-IN` as `never`, and it is still answerable days later. Because nothing can expire, naming an `on_timeout` beside it is refused rather than quietly ignored.
+
+The wait an ask gets when its grant names none is the host's, and you set it once:
+
+```bash
+contenox config set approval-ceiling 24h      # every unbounded ask waits a day, then denies
+contenox config set approval-ceiling never    # ...or waits until somebody answers it
+```
+
+Unset, that ceiling is seven days — the longest wait the grammar itself admits. It is a chosen number, not a hidden one, and `contenox config get approval-ceiling` reads back what this host applies.
+
+An expiry is applied when the ask is next read rather than by a background sweep — contenox runs no daemon — so a verdict arriving after the window still resumes the run until something lists the inbox. `contenox approvals list` is that read: it sweeps expired asks to their `on_timeout` verdict and says how many it closed. Answering an ask whose window already closed is refused, naming the verdict that was already applied, rather than applied twice.
+
+### How that state stays visible
+
+Three things keep a parked ask from being silent:
 
 **The turn announces itself.** A parked turn ends with a message in the transcript saying it is suspended rather than finished, naming the approval id and the command that resolves it. On the wire the ACP `stopReason` stays `end_turn` — the protocol has no "suspended" reason, and inventing one would break clients that read it as a closed set — so the distinguishing detail travels in the response's `_meta` alongside the announcement. An ordinary completed turn carries neither.
 
@@ -126,14 +188,17 @@ A policy is a JSON file with an optional `default_action` and a list of `rules`:
 | `rules[].tool` | string | Tool name within that tool (`write_file`, `sed`, `local_shell`, …) |
 | `rules[].action` | `"approve"` \| `"allow"` \| `"deny"` | What to do when this rule matches |
 | `rules[].when` | array | Optional conditions on the call's arguments; **all** must hold for the rule to match (AND). Each is `{ "key": …, "op": …, "value": … }`. Omit for a name-only match. |
-| `rules[].timeout_s` | int | Seconds to wait for a human response when `action` is `approve`. `0` (default) waits indefinitely until the context is cancelled. |
-| `rules[].on_timeout` | `"approve"` \| `"deny"` | Fallback action when an approval window expires. `"allow"` is rejected (it would silently bypass approval). |
+| `rules[].timeout_s` | int | Seconds to wait for a human response when `action` is `approve`. `0` (default) sets **no rule deadline** — the ask is then bounded by the host's approval ceiling, not by anything you wrote. `-1` is **no deadline at all**: the ask stays pending until somebody answers it. Positive values are capped at seven days. Only an `approve` rule may carry it. |
+| `rules[].on_timeout` | `"deny"` | What an expired ask resolves to. `"allow"` is rejected outright (it would silently bypass approval), and every value that is not `"allow"` — including `"approve"` and the empty default — resolves as a **denial**, so `"deny"` is the only outcome worth writing. Rejected outright beside `timeout_s: -1`, which never expires. |
+
+You do not normally write these two by hand: this file is rendered from
+`[envelopes.<name>]` in `agents.toml`, where a grant carries `timeout` and
+`on_timeout` — see [Bounding the wait](/docs/reference/agents-config/#bounding-the-wait).
 
 Rules are evaluated top-to-bottom; the first match wins.
 
-An expiry is applied when the ask is next read rather than by a background
-sweep — contenox runs no daemon — so a verdict arriving after the window still
-resumes the run until something lists the inbox.
+What an expired ask resolves to, and when that is applied, is in
+[How an unanswered ask ends](#how-an-unanswered-ask-ends).
 
 Of the compute bounds, `maxTokens` applies when a unit's provider reports usage
 and is inert when it does not, and `maxToolCalls` is validated at parse time and

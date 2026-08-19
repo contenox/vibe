@@ -48,10 +48,24 @@ Behind that, and in a chain you write yourself, the field is
 > Absent or `null` = none. The task has no tools until this field explicitly
 > grants some.
 
-`[]` is no tools, `["*"]` is all, `["*","!local_shell"]` is all-except. There is
-also `hide_tools` to suppress specific tools from both the registry and any
-client-passed set, and `tools_policies` to constrain a provider before it runs —
-`local_shell: { "_allowed_commands": "git,go,ls" }`.
+`[]` is no tools, `["*"]` is all, `["*","!local_shell"]` is all-except. The
+vocabulary is exactly four things, and `*` is the one worth being precise about:
+
+| Entry | Meaning |
+|---|---|
+| `"*"` | **every connected toolset, with no exceptions** — including the `native-` in-process toolsets and the `decl-` sources other agents brought |
+| `"!name"` | removes that one toolset; an exclusion beats `*`, whatever order they appear in |
+| `"name"` | grants exactly that toolset |
+| `[]` (or absent) | grants nothing |
+
+A `native-` or `decl-` prefix is a namespace that stops a declared source from
+colliding with an in-process toolset. It is not a hidden exclusion: `*` admits
+those rows like any other, and `"!native-git"` is how you drop one. Narrowing is
+something you write, not something the runtime does for you.
+
+There is also `hide_tools` to suppress specific tools from both the registry and
+any client-passed set, and `tools_policies` to constrain a provider before it
+runs — `local_shell: { "_allowed_commands": "git,go,ls" }`.
 
 A tool the task was never granted is not a tool the model can be argued into
 calling.
@@ -124,6 +138,24 @@ answer: a `blacklist` that cannot be reached past, a `substitution` verdict
 judged before any verb is trusted, a `prefix_allowlist` that grants, and an
 `ask_always` list that claws back. So `go test` and `ls` can pass while `rm` and
 `sudo` still ask and `mkfs` is refused, all on the same shell.
+
+An `approve` grant stops for a person, and how long it stops is also yours to
+write. Any grant takes a `timeout` and an `on_timeout` in its table form:
+
+```toml
+[envelopes.mine]
+files.write = { grant = "approve", timeout = "30m", on_timeout = "deny" }
+```
+
+Nobody answers in thirty minutes, the ask is denied and the run moves on. Write
+`timeout = "never"` instead and the ask has no deadline at all: it waits, across
+restarts, until somebody answers it. Leave both out and the ask is bounded by
+this host's approval ceiling — `contenox config set approval-ceiling
+<duration|never>`, seven days until you set it. `deny` is the only `on_timeout`
+there is: an ask that allowed itself when nobody answered would bypass the
+approval it exists to require, and beside `timeout = "never"` it is refused
+outright, since nothing can expire. See
+[Bounding the wait](/docs/reference/agents-config/#bounding-the-wait).
 
 The full axis grammar is in
 [`[envelopes.<name>]`](/docs/reference/agents-config/#envelopesname), the

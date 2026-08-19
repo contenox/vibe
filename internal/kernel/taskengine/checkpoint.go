@@ -20,7 +20,9 @@ var ErrCheckpointVersion = errors.New("taskengine: unsupported checkpoint schema
 var checkpointMigrations = map[int]func(raw []byte) ([]byte, error){}
 
 // ApprovalPendingError is the HITL wrapper's third outcome beside allow and deny:
-// the fast-path park elapsed with no human verdict.
+// the ask is durably recorded and unanswered, and this process is not the one
+// that will wait for it — either it is shutting down, or the caller marked the
+// run's asks detached (see WithDetachedAsks).
 type ApprovalPendingError struct {
 	// ApprovalID is the durable approval row's ID and the checkpoint key.
 	ApprovalID string
@@ -478,6 +480,26 @@ func WithSuspendableToolCall(ctx context.Context) context.Context {
 // run — see WithSuspendableToolCall.
 func ToolCallSuspendable(ctx context.Context) bool {
 	ok, _ := ctx.Value(suspendableToolCallContextKey{}).(bool)
+	return ok
+}
+
+type detachedAsksContextKey struct{}
+
+// WithDetachedAsks marks the run under ctx as one whose human asks must not
+// hold the process: a gated tool call records its durable ask and suspends
+// immediately instead of waiting for a verdict. Set it only where nobody is
+// attached to answer — a relay- or event-triggered chain — because the default
+// is to block on the ask, and blocking is what lets an answered ask continue
+// the turn in place. A checkpoint saver is a precondition, not a trigger: a
+// detached run without one fails loudly rather than dropping the gate.
+func WithDetachedAsks(ctx context.Context) context.Context {
+	return context.WithValue(ctx, detachedAsksContextKey{}, true)
+}
+
+// AsksDetached reports whether this run's human asks release the process
+// rather than blocking on it — see WithDetachedAsks.
+func AsksDetached(ctx context.Context) bool {
+	ok, _ := ctx.Value(detachedAsksContextKey{}).(bool)
 	return ok
 }
 

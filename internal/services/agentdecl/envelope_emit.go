@@ -22,6 +22,11 @@ var axisTools = map[string][]toolRef{
 		{localtools.LocalFSToolsName, "read_file"},
 		{localtools.LocalFSToolsName, "read_file_range"},
 		{localtools.LocalFSToolsName, "list_dir"},
+		{localtools.LocalFSBrowseToolsName, "grep"},
+		{localtools.LocalFSBrowseToolsName, "find_files"},
+		{localtools.LocalFSBrowseToolsName, "stat_file"},
+		{localtools.LocalFSBrowseToolsName, "count_stats"},
+		{localtools.LocalFSBrowseToolsName, "list_dir"},
 	},
 	AxisFilesWrite: {
 		{localtools.LocalFSToolsName, "write_file"},
@@ -111,8 +116,8 @@ func (env Envelope) transpile(opts transpileOptions) (TranspiledEnvelope, error)
 	rules = append(rules, shellRules...)
 
 	defaultAction := hitlservice.ActionApprove
-	if env.DefaultAction != "" {
-		parsed, err := parseAction(env.DefaultAction)
+	if env.DefaultAction.Grant != "" {
+		parsed, err := parseAction(env.DefaultAction.Grant)
 		if err != nil {
 			return fail(fmt.Errorf("default_action: %w", err))
 		}
@@ -144,9 +149,13 @@ func (env Envelope) transpile(opts transpileOptions) (TranspiledEnvelope, error)
 	return out, nil
 }
 
-// notes reports every axis whose intent nothing in this build carries.
+// notes reports every grant whose intent nothing in this build carries.
 func (env Envelope) notes() []string {
 	var out []string
+	if env.DefaultAction.bounds() {
+		out = append(out, fmt.Sprintf("default_action = %q states %s, and the policy schema has no field to carry it: default_action is one action, and only a rule holds timeout_s/on_timeout. A call that matches no rule keeps waiting on the operator's approval ceiling (`contenox config set approval-ceiling`). Bound the wait on the axis or tools pattern that emits the ask.",
+			env.DefaultAction.Grant, waitPhrase(env.DefaultAction)))
+	}
 	for _, axis := range []string{AxisNetworkRead, AxisNetworkWrite} {
 		grant, ok := env.Axes[axis]
 		if !ok || grant.Grant == "" {
@@ -161,6 +170,17 @@ func (env Envelope) notes() []string {
 			axis, grant.Grant, strings.Join(names, ", ")))
 	}
 	return out
+}
+
+func waitPhrase(grant AxisGrant) string {
+	parts := make([]string, 0, 2)
+	if grant.Timeout != 0 {
+		parts = append(parts, fmt.Sprintf("timeout = %q", hitlservice.FormatWait(grant.Timeout)))
+	}
+	if grant.OnTimeout != "" {
+		parts = append(parts, fmt.Sprintf("on_timeout = %q", grant.OnTimeout))
+	}
+	return strings.Join(parts, " and ")
 }
 
 // pathRules emits the conditional half of a files axis: one rule per glob per
@@ -181,12 +201,12 @@ func (env Envelope) pathRules(axis string, action hitlservice.Action) []hitlserv
 	out := make([]hitlservice.Rule, 0, len(globs)*len(refs))
 	for _, glob := range globs {
 		for _, ref := range refs {
-			out = append(out, hitlservice.Rule{
+			out = append(out, grant.bounded(hitlservice.Rule{
 				Tools:  ref.tools,
 				Tool:   ref.tool,
 				Action: action,
 				When:   []hitlservice.Condition{{Key: "path", Op: hitlservice.OpGlob, Value: glob}},
-			})
+			}))
 		}
 	}
 	return out
@@ -205,7 +225,7 @@ func (env Envelope) grantRules(axis string) ([]hitlservice.Rule, error) {
 	refs := axisTools[axis]
 	out := make([]hitlservice.Rule, 0, len(refs))
 	for _, ref := range refs {
-		out = append(out, hitlservice.Rule{Tools: ref.tools, Tool: ref.tool, Action: action})
+		out = append(out, grant.bounded(hitlservice.Rule{Tools: ref.tools, Tool: ref.tool, Action: action}))
 	}
 	return out, nil
 }
@@ -221,12 +241,12 @@ func (env Envelope) shellRules() ([]hitlservice.Rule, error) {
 	}
 	var out []hitlservice.Rule
 	shellRule := func(action hitlservice.Action, key string, op hitlservice.ConditionOp, value string) {
-		out = append(out, hitlservice.Rule{
+		out = append(out, grant.bounded(hitlservice.Rule{
 			Tools:  localtools.LocalExecToolsName,
 			Tool:   localtools.LocalExecToolsName,
 			Action: action,
 			When:   []hitlservice.Condition{{Key: key, Op: op, Value: value}},
-		})
+		}))
 	}
 	if len(grant.Blacklist) > 0 {
 		shellRule(hitlservice.ActionDeny, "command", hitlservice.OpCommandBlacklist, strings.Join(grant.Blacklist, ","))
@@ -261,6 +281,7 @@ func (env Envelope) toolPatternRules() ([]hitlservice.Rule, error) {
 		pattern     string
 		tools, tool string
 		action      hitlservice.Action
+		grant       AxisGrant
 	}
 	entries := make([]entry, 0, len(env.Tools))
 	for _, pattern := range sortedKeys(env.Tools) {
@@ -268,11 +289,12 @@ func (env Envelope) toolPatternRules() ([]hitlservice.Rule, error) {
 		if err != nil {
 			return nil, err
 		}
-		action, err := parseAction(env.Tools[pattern])
+		grant := env.Tools[pattern]
+		action, err := parseAction(grant.Grant)
 		if err != nil {
 			return nil, fmt.Errorf("tools.%s: %w", pattern, err)
 		}
-		entries = append(entries, entry{pattern: pattern, tools: tools, tool: tool, action: action})
+		entries = append(entries, entry{pattern: pattern, tools: tools, tool: tool, action: action, grant: grant})
 	}
 	rank := map[hitlservice.Action]int{hitlservice.ActionDeny: 0, hitlservice.ActionApprove: 1, hitlservice.ActionAllow: 2}
 	sort.SliceStable(entries, func(i, j int) bool {
@@ -287,7 +309,7 @@ func (env Envelope) toolPatternRules() ([]hitlservice.Rule, error) {
 	})
 	out := make([]hitlservice.Rule, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, hitlservice.Rule{Tools: e.tools, Tool: e.tool, Action: e.action})
+		out = append(out, e.grant.bounded(hitlservice.Rule{Tools: e.tools, Tool: e.tool, Action: e.action}))
 	}
 	return out, nil
 }

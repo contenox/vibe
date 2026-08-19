@@ -3,7 +3,12 @@
 // run it.
 package agentdecl
 
-import "github.com/contenox/contenox/internal/store/runtimetypes"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+)
 
 // Dialect names a source format.
 type Dialect string
@@ -67,6 +72,23 @@ const (
 	// entirely. Emitting it requires explicit operator consent.
 	PostureUnsafe Posture = "unsafe"
 )
+
+// ParsePosture reads contenox's own posture vocabulary, which is the name of
+// the envelope a declaration runs under. "unsafe" is refused here rather than
+// at emit time so the declaration naming it fails with the same message an
+// operator gets from a foreign dialect asking for the same thing.
+func ParsePosture(raw string) (Posture, error) {
+	switch Posture(strings.ToLower(strings.TrimSpace(raw))) {
+	case PostureReadOnly:
+		return PostureReadOnly, nil
+	case PostureAskAlways:
+		return PostureAskAlways, nil
+	case PostureAutoEdit:
+		return PostureAutoEdit, nil
+	}
+	return "", fmt.Errorf("unknown posture %q: use %s, %s or %s", raw,
+		PostureReadOnly, PostureAskAlways, PostureAutoEdit)
+}
 
 // Budgets are execution bounds the source expressed. They bound what an agent
 // may spend, so they land in the policy rather than the chain.

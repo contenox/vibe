@@ -248,6 +248,7 @@ tasks:
       - task: vuln
       - task: test-unit
       - task: test-cli-help
+      - task: spec:verify
       - task: acp-suites
       - task: test
       - 'echo "==> test-all: every gate that ran is green — re-read any SKIPPED notice above before releasing"'
@@ -321,7 +322,14 @@ tasks:
       # `git diff --no-index` rather than `diff`: it ships wherever git does,
       # including a Windows checkout with no diff(1) on PATH, and prints a
       # reviewable patch instead of a byte offset.
-      - git --no-pager diff --no-index --exit-code {{.ROOT_DIR}}/schema {{.ROOT_DIR}}/.verify
+      - cmd: |
+          if ! git --no-pager diff --no-index --exit-code {{.ROOT_DIR}}/schema {{.ROOT_DIR}}/.verify; then
+            echo
+            echo "schema/ no longer matches the Go types it is generated from (patch above)."
+            echo "Every emitted policy stamps these schemas by URL, so the drift is published."
+            echo "Fix: run 'task spec:generate' and commit schema/."
+            exit 1
+          fi
 
   version:set:
     desc: Stamp the version file (tools/version)

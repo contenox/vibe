@@ -122,7 +122,8 @@ type instanceConfig struct {
 	onUnsupervisedDeny    func(sessionID libacp.SessionID)
 	onUnsupervisedRequest func(ctx context.Context, req libacp.RequestPermissionRequest) (libacp.RequestPermissionResponse, error)
 
-	fileSystem InstanceFileSystem
+	fileSystem     InstanceFileSystem
+	terminalServer TerminalServer
 }
 
 type instance struct {
@@ -157,6 +158,7 @@ func newInstance(cfg instanceConfig) *instance {
 	hub.onUnsupervisedDeny = cfg.onUnsupervisedDeny
 	hub.onUnsupervisedRequest = cfg.onUnsupervisedRequest
 	hub.fileSystem = cfg.fileSystem
+	hub.terminal = cfg.terminalServer
 	driver := newSessionDriver()
 	return &instance{
 		id:             cfg.id,

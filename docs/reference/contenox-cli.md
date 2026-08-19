@@ -379,17 +379,20 @@ contenox config set default-max-tokens 8192
 contenox config set default-think high
 contenox config set default-chain    .contenox/my-chain.json
 contenox config set hitl-policy-name hitl-policy-strict.json
+contenox config set approval-ceiling 24h
+contenox config set approval-ceiling never
 
 contenox config get default-model
 contenox config list
 ```
 
-Valid global keys: `default-model`, `default-provider`, `default-alt-model`, `default-alt-provider`, `default-autocomplete-model`, `default-autocomplete-provider`, `default-audio-model`, `default-audio-provider`, `default-max-tokens`, `default-think`, `telemetry-enabled`, `update-check`, `opt-in-beta`, `default-mission-agent`, `default-mission-policy`, `default-oracle-chain`, `default-oracle-policy`, `oracle-approves-tool-calls`, `fleet-max-parallel`. `opt-in-beta` (`true`/`false`) enables the beta features — the agent roster and the [event tier](/docs/guide/events/) — which are otherwise absent entirely.
+Valid global keys: `default-model`, `default-provider`, `default-alt-model`, `default-alt-provider`, `default-autocomplete-model`, `default-autocomplete-provider`, `default-audio-model`, `default-audio-provider`, `default-max-tokens`, `default-think`, `telemetry-enabled`, `update-check`, `opt-in-beta`, `default-mission-agent`, `default-mission-policy`, `default-oracle-chain`, `default-oracle-policy`, `oracle-approves-tool-calls`, `fleet-max-parallel`, `approval-ceiling`. `opt-in-beta` (`true`/`false`) enables the beta features — the agent roster and the [event tier](/docs/guide/events/) — which are otherwise absent entirely.
 
 Valid workspace keys: `default-chain`, `hitl-policy-name`.
 
 | Key | Description |
 |---|---|
+| `approval-ceiling` | How long an ask whose grant names no `timeout` waits for a human: a duration (`30m`, `24h`), or `never` (also `forever`, `indefinite`) for no deadline at all — the ask then stays pending until somebody answers it, across restarts. Unset it is `168h`, seven days: the longest wait a grant itself may state. This is the fleet-wide default only; a grant's own `timeout` always wins. Refused at `config set` time if it is not a wait, so a typo never becomes a silent hour. |
 | `hitl-policy-name` | Envelope this workspace runs under, as the filename it transpiles to (`hitl-policy-strict.json`). Empty uses `hitl-policy-default.json`. Overridden per run by `--hitl-policy` on `beam`, `acp`, `acpx` and `serve` — see [Policy resolution order](/docs/guide/hitl/#policy-resolution-order). |
 | `default-audio-model` | Model preferred for requests carrying audio attachments, independent from `default-model`. Unset falls back to `default-model`; audio requests resolve only to audio-capable models either way. |
 | `default-audio-provider` | Provider type for the audio model, independent from `default-provider`. Unset uses `default-provider`. |
@@ -512,6 +515,8 @@ contenox approvals respond <ask-id> --answer "use the staging database"
 | `--as-agent <name>` (`respond`) | Beta: record the answer as given by the named agent instead of you; pair with `--answer` |
 
 `respond` requires exactly one of `--approve`, `--deny`, or `--answer`, and it must match the ask's kind: a question takes `--answer`; a permission gate takes `--approve`/`--deny`. When the ask has a saved checkpoint, `respond` resumes the suspended run to completion in this process — and a process that cannot build an engine (no default model configured) is refused **before** anything is recorded: a checkpointed run's verdict is one-shot, so the ask stays pending and answerable from a terminal that can reach your models. `approvals list` is also the reconciling read: it applies expired asks' `on_timeout` verdicts, and it finishes any answered run a crashed resumer left behind (a resume claim goes stale after 10 minutes and is then picked up here).
+
+`EXPIRES-IN` is how long an ask has left; an expired ask resolves to a denial. How long that is comes from the envelope that gated the call — a grant written as `shell = { grant = "approve", timeout = "30m", on_timeout = "deny" }` gives its asks thirty minutes, and `{ grant = "approve", timeout = "never" }` gives them no deadline at all: `EXPIRES-IN` reads `never`, no sweep touches them, and they are still listed here after a restart. A grant that names no timeout leaves its asks on this host's `approval-ceiling` (seven days until you set one). See [Bounding the wait](/docs/reference/agents-config/#bounding-the-wait).
 
 > **Beta:** `--as-agent` requires `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`); without the opt-in the flag is absent, not hidden.
 

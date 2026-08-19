@@ -43,8 +43,9 @@ type ApprovalRequest struct {
 	DiffNew    string
 
 	// PolicyName, MatchedRule, TimeoutS, and OnTimeout carry the policy
-	// verdict that produced this ask; TimeoutS<=0 means no rule timeout and
-	// OnTimeout=="" means default deny.
+	// verdict that produced this ask; TimeoutS==0 means no rule timeout,
+	// TimeoutIndefinite means no deadline at all, and OnTimeout=="" means
+	// default deny.
 	PolicyName  string
 	MatchedRule *int
 	TimeoutS    int
@@ -108,10 +109,14 @@ type Rule struct {
 	When   []Condition `json:"when,omitempty"`
 	Action Action      `json:"action" jsonschema:"required"`
 	// TimeoutS is how long to wait for a human response when Action is
-	// ActionApprove; 0 means block indefinitely.
-	TimeoutS int `json:"timeout_s,omitempty"`
-	// OnTimeout is the fallback when the approval window expires; only
-	// "deny" or "approve" is valid (allow would silently bypass approval).
+	// ActionApprove; 0 sets no rule deadline, and the ask is then bounded by
+	// the operator's approval ceiling rather than by anything the policy
+	// states. -1 (TimeoutIndefinite) is the wait with no deadline at all: the
+	// ask stays pending until it is answered, and carries no on_timeout.
+	TimeoutS int `json:"timeout_s,omitempty" jsonschema:"minimum=-1"`
+	// OnTimeout is what an expired ask resolves to. ActionAllow is refused (it
+	// would silently bypass approval) and every other value resolves as a
+	// denial, so ActionDeny is the only outcome worth stating.
 	OnTimeout Action `json:"on_timeout,omitempty"`
 }
 
@@ -811,6 +816,13 @@ func validatePolicy(p *Policy) error {
 		}
 		if r.OnTimeout == ActionAllow {
 			return fmt.Errorf("rule %d: on_timeout=%q is not permitted (would silently bypass approval)", i, ActionAllow)
+		}
+		if r.TimeoutS < TimeoutIndefinite {
+			return fmt.Errorf("rule %d: timeout_s %d is not a wait; write a positive number of seconds, %d for an ask that waits until it is answered, or zero to leave the ask on the operator's approval ceiling",
+				i, r.TimeoutS, TimeoutIndefinite)
+		}
+		if r.TimeoutS == TimeoutIndefinite && r.OnTimeout != "" {
+			return fmt.Errorf("rule %d: on_timeout=%q cannot apply to timeout_s=%d — an ask with no deadline never expires, so nothing would ever read it", i, r.OnTimeout, TimeoutIndefinite)
 		}
 		if r.OnTimeout != "" && !validActions[r.OnTimeout] {
 			return fmt.Errorf("rule %d: unknown on_timeout %q", i, r.OnTimeout)

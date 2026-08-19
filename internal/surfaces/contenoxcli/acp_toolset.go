@@ -6,11 +6,16 @@ import (
 	"slices"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/echotool"
 	"github.com/contenox/contenox/internal/services/fleetservice"
+	"github.com/contenox/contenox/internal/services/gointel"
+	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/jqtool"
 	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
+	"github.com/contenox/contenox/internal/services/sshtool"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
@@ -63,6 +68,31 @@ func acpToolset(
 	tools[localtools.LocalExecToolsName] = acpsvc.ClientBackedToolset(localtools.NewLocalExecToolsWith(
 		acpsvc.NewACPCommandRunnerWithShell(transportFn, localtools.DetectPlatformShell()),
 	), transportFn)
+	// The native-* toolsets, carried by every profile except the host above.
+	// "native-" is a namespace, not a gate: a declaration's "*" admits them
+	// like anything else, "!native-git" removes one, and naming one grants it. Each contains its own reach through internal/services/vfs the
+	// way local_fs does; the ones that own a cwd take the session's, resolved per
+	// call. None is client-backed: they run on the machine contenox runs on, not
+	// through the editor's transport.
+	tools[localtools.GitToolsName] = localtools.NewGitToolsWith("", localtools.GitToolsName, cwdResolver)
+	tools[localtools.LocalFSBrowseToolsName] = localtools.NewLocalFSBrowseTools("", cwdResolver)
+	tools[localtools.WebToolsName] = localtools.NewWebCaller(tracker)
+	tools[jqtool.ToolsProviderName] = jqtool.NewToolsWith("", jqtool.ToolsProviderName, cwdResolver)
+	tools[echotool.ToolsProviderName] = echotool.NewTools()
+	// IdleTimeout below zero keeps the reaper goroutine unstarted, so this is safe
+	// to build on the doctor roster's inert path; MaxRoots still bounds the cache.
+	tools[gointel.ToolsProviderName] = gointel.NewTools(gointel.NewIndex(gointel.Config{
+		CwdResolver: cwdResolver,
+		IdleTimeout: -1,
+	}))
+	if goja, err := gojatool.New(gojatool.Config{}); err == nil {
+		tools[gojatool.ScopedToolsProviderName] = goja
+	}
+	// ssh declines rather than mounts when no host-key store can be established;
+	// an editor session without one simply does not carry the toolset.
+	if ssh, err := sshtool.NewSSHTools(); err == nil {
+		tools[sshtool.ToolsProviderName] = ssh
+	}
 	return tools
 }
 

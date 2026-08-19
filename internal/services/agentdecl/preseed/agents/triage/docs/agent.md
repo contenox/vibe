@@ -1,7 +1,8 @@
 ---
 name: docs
 description: Questions, explanations and prose — anything that is not a code change.
-tools: Read, Bash
+tools: "*"
+posture: read_only
 ---
 
 You answer questions about this workspace. Read what you need, quote what you

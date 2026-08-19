@@ -37,10 +37,14 @@ var termOnlyImports = map[string]bool{
 //	    or beam/style — components are pure (state, width) -> frame.Line
 //	    renderers;
 //	(d) beam/frame imports only the standard library.
-//	(e) no beam package imports this module outside beam/ except libacp —
-//	    beam was a separate module the compiler kept to libacp; in-tree this
-//	    rule is what preserves that, so the runtime's internals cannot leak
-//	    back into a client (the drift that cost the previous in-tree TUI).
+//	(e) no beam package imports this module outside beam/ except libacp and
+//	    the one shared client-side fs+terminal server (internal/kernel/
+//	    clientfsterm) — beam was a separate module the compiler kept to libacp;
+//	    in-tree this rule is what preserves that, so the runtime's internals
+//	    cannot leak back into a client (the drift that cost the previous in-tree
+//	    TUI). The clientfsterm exception is the single package beam and the
+//	    runtime's mission-unit path deliberately share to answer the agent's
+//	    fs/terminal capabilities from one contained, env-scrubbed implementation.
 //
 // A violation reports the offending file and import path.
 func TestUnit_ImportBoundaries(t *testing.T) {
@@ -90,11 +94,19 @@ func TestUnit_ImportBoundaries(t *testing.T) {
 
 const contenoxModule = "github.com/contenox/contenox/"
 
+// sharedClientFSTerm is the one runtime package outside beam/ that a beam
+// production file may import (rule (e)'s narrow exception): the shared
+// client-side fs+terminal capability server both beam and the runtime's
+// mission-unit path consume, so the containment and env-scrub live in exactly
+// one place rather than being duplicated in enginebridge.
+const sharedClientFSTerm = contenoxModule + "internal/kernel/clientfsterm"
+
 // checkModuleBoundary is rule (e): a beam production file may import this
-// module only under beam/ (beamModule) or as libacp; any other
-// contenox/internal or contenox/lib* path is the leak the rule exists to
-// stop. Test files are exempt — a wire-contract test legitimately imports the
-// producer type it pins beam's decoder against, and a test is never shipped.
+// module only under beam/ (beamModule), as libacp, or the shared
+// clientfsterm server; any other contenox/internal or contenox/lib* path is
+// the leak the rule exists to stop. Test files are exempt — a wire-contract
+// test legitimately imports the producer type it pins beam's decoder against,
+// and a test is never shipped.
 func checkModuleBoundary(t *testing.T, file, importPath string) {
 	t.Helper()
 	if strings.HasSuffix(file, "_test.go") {
@@ -103,10 +115,10 @@ func checkModuleBoundary(t *testing.T, file, importPath string) {
 	if !strings.HasPrefix(importPath, contenoxModule) {
 		return
 	}
-	if strings.HasPrefix(importPath, beamModule) || importPath == contenoxModule+"libacp" {
+	if strings.HasPrefix(importPath, beamModule) || importPath == contenoxModule+"libacp" || importPath == sharedClientFSTerm {
 		return
 	}
-	t.Errorf("import boundary: %s imports %q — a beam package may reach this module only under beam/ or libacp", file, importPath)
+	t.Errorf("import boundary: %s imports %q — a beam package may reach this module only under beam/, libacp, or the shared clientfsterm server", file, importPath)
 }
 
 // inPackageOrSub reports whether relDir is exactly name or a subpackage of

@@ -67,6 +67,11 @@ type InProcessDeps struct {
 	Stderr io.Writer
 
 	Filesystem agentinstance.InstanceFileSystem
+
+	// Terminal serves a viewer-less unit's terminal/* callbacks; nil leaves a unit
+	// without a terminal. Beam and the editor profiles pass the same shared server
+	// they pass for Filesystem, so fs and terminal share one root and one env scrub.
+	Terminal agentinstance.TerminalServer
 }
 
 // BuildInProcess embeds the fleet a host process dispatches missions through, returning the fleet Service, the agent registry, and one teardown func that stops the report router, closes the kernel, and reaps every dispatched child subprocess; the host must run it on shutdown.
@@ -93,6 +98,9 @@ func BuildInProcess(ctx context.Context, deps InProcessDeps) (Service, agentregi
 	}
 	if deps.Filesystem != nil {
 		kernelOpts = append(kernelOpts, agentinstance.WithFilesystem(deps.Filesystem))
+	}
+	if deps.Terminal != nil {
+		kernelOpts = append(kernelOpts, agentinstance.WithTerminalServer(deps.Terminal))
 	}
 	if deps.WorkspaceID != "" {
 		kernelOpts = append(kernelOpts, agentinstance.WithWorkspaceID(deps.WorkspaceID))

@@ -135,8 +135,8 @@ Body.
 	require.Empty(t, ir.DeclaredToolsetNames("reviewer"))
 }
 
-// The emitted chain must name the scoped toolsets, because "*" deliberately
-// does not reach them.
+// The emitted chain must name the scoped toolsets the agent brought itself, so
+// an explicit tools list that carries no "*" still grants them.
 func TestUnit_EmittedChainNamesDeclaredSources(t *testing.T) {
 	t.Parallel()
 	cfg := mustConfig(t)

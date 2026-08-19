@@ -1,6 +1,6 @@
 //go:build windows
 
-package enginebridge
+package clientfsterm
 
 import (
 	"os/exec"
@@ -8,8 +8,8 @@ import (
 	libacp "github.com/contenox/contenox/libacp"
 )
 
-// setProcGroup is a no-op on Windows; exec.Cmd has no process-group notion
-// here and Kill takes the direct process only.
+// setProcGroup is a no-op on Windows; exec.Cmd has no process-group notion here
+// and Kill takes the direct process only.
 func setProcGroup(*exec.Cmd) {}
 
 func killProcTree(cmd *exec.Cmd) {

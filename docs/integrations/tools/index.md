@@ -36,11 +36,13 @@ Pattern support:
 |---|---|
 | field absent / `null` | No registered tools exposed to the model |
 | `[]` | No tools exposed to the model |
-| `["*"]` | All registered tools |
-| `["a", "b"]` | Only the named tools |
+| `["*"]` | **Every connected toolset, with no exceptions** |
+| `["a", "b"]` | Only the named toolsets |
 | `["*", "!local_shell"]` | All except `local_shell` |
 
 Unknown names in an exact list are silently ignored — if `local_shell` is disabled the chain still runs.
+
+`"*"` admits everything this machine has connected: the toolsets contenox hosts, the `native-` in-process ones, every MCP server and OpenAPI service you registered, and the `decl-` sources an [agent declaration](/docs/guide/agents/#tools-an-agent-brings-with-it) brought with it. Those prefixes are **namespaces** — they stop a declared source from colliding with an in-process toolset — and never a hidden exclusion. To leave one out, say so: `"!native-git"` removes it, and an exclusion wins over `"*"` wherever the two appear in the list.
 
 Use `{{tools}}` in your `system_instruction` to inject the live tool manifest. It respects the task's `tools` allowlist — the model only sees what the task permits:
 

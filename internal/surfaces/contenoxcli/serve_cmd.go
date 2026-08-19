@@ -34,6 +34,12 @@ a file read or a shell line is refused here by shape, not by policy — give it 
 MCP tool instead. For an agent that needs your files and your shell, run
 'contenox beam' or attach an ACP editor.
 
+` + toolGrantLine + ` What a host grants is bounded by
+shape first: a toolset it does not mount cannot be admitted by any of them.
+
+` + askWaitLine + ` Nobody is at this keyboard, so
+answer them with 'contenox approvals respond'.
+
 One instance serves exactly ONE workspace, fixed when it launches; a client that
 needs a different one attaches to a different instance. With a path, that
 directory is the workspace for sessions the app opens. With no path the host

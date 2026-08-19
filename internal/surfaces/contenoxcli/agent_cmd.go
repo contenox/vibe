@@ -39,6 +39,12 @@ this command inspects them and toggles their enabled state.
 What a declaration cannot say — context budget, retries, shell allowlists, what
 needs a human — lives in agents.toml beside them.
 
+` + toolGrantGrammar + `
+
+Omitting the frontmatter's tools line is the same grant as "*".
+
+` + askWaitGrammar + `
+
 Examples:
   contenox agent list
   contenox agent show reviewer
@@ -96,6 +102,10 @@ var agentShowCmd = &cobra.Command{
 	Use:   "show <name>",
 	Short: "Show an agent's full declaration and run config.",
 	Long: `Look up an agent by name and print its provenance and raw config_json.
+
+The tools allowlist prints as it was resolved: "*" admits every connected
+toolset with no exceptions, "!name" removes one, a bare name grants exactly
+that one.
 Provenance (source, registry id/version) is system-managed.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

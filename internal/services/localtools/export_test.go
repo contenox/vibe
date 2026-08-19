@@ -3,6 +3,7 @@ package localtools
 import (
 	"context"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -10,6 +11,9 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	libdb "github.com/contenox/contenox/libdbexec"
 )
+
+// ExportedIsBlockedEgressIP is a test-only export of the link-local / cloud-metadata predicate.
+func ExportedIsBlockedEgressIP(ip net.IP) bool { return isBlockedEgressIP(ip) }
 
 type TestHostFileIO struct{}
 

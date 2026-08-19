@@ -65,6 +65,7 @@ type viewerHub struct {
 	onUnsupervisedRequest func(ctx context.Context, req libacp.RequestPermissionRequest) (libacp.RequestPermissionResponse, error)
 
 	fileSystem InstanceFileSystem
+	terminal   TerminalServer
 
 	mu       sync.Mutex
 	sessions map[libacp.SessionID]*sessionState
@@ -214,12 +215,15 @@ func permissionRefused(req libacp.RequestPermissionRequest, resp libacp.RequestP
 func (h *viewerHub) terminalServer(sessionID libacp.SessionID) TerminalServer {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	s := h.sessions[sessionID]
-	if s == nil || s.controllerID == "" {
-		return nil
+	if s := h.sessions[sessionID]; s != nil && s.controllerID != "" {
+		if ts, ok := s.viewers[s.controllerID].(TerminalServer); ok {
+			return ts
+		}
 	}
-	if ts, ok := s.viewers[s.controllerID].(TerminalServer); ok {
-		return ts
+	// The controller's terminal wins; a viewer-less unit falls back to the
+	// instance-wide server the manager installed, exactly as fileSystemServer does.
+	if h.terminal != nil {
+		return h.terminal
 	}
 	return nil
 }

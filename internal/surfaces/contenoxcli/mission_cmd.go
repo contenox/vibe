@@ -40,6 +40,22 @@ durable — list, show, and reports read them straight from the local database,
 whether the mission was fired here, from an editor session (/mission), or is
 still running.
 
+` + toolGrantLine + `
+
+` + askWaitLine + `
+
+A mission PARKED on an ask has not stalled and is not lost: its unit
+checkpointed and released its process, and the record stays open. The wait above
+is the whole of its fate — answered, the unit resumes exactly once, wherever the
+answer is given; expired, the on-timeout verdict (deny) applies and the unit
+carries on with it; written 'never', it waits, across restarts, until somebody
+answers. A parked mission is not reclaimed out from under an answerable ask:
+the abandoned-mission sweep widens its silence bound to that ask's own window,
+so it survives exactly as long as the ask can still be answered — and a mission
+holding an ask with no deadline is never reclaimed at all. That last case is the
+one way to park a mission open indefinitely, so 'contenox mission stop <id>' is
+how you end one you no longer want.
+
 'mission fire' embeds the fleet IN-PROCESS: the dispatched unit is a child
 subprocess of THIS command, so --wait is required — when this process exits,
 its units are torn down with it. Fire-and-detach needs a long-lived host: an
@@ -103,7 +119,13 @@ var missionShowCmd = &cobra.Command{
 	Long: `Print a mission's durable record — intent, agent, envelope, status, liveness —
 followed by its reports (summaries and refs). A report the verification gate
 downgraded (a claimed artifact that does not exist) shows its warning inline.
-Use 'contenox mission reports <id>' for full report detail.`,
+Use 'contenox mission reports <id>' for full report detail.
+
+An open mission with no recent liveness is usually parked on an ask rather than
+dead. A pending ask widens the mission's silence bound to that ask's own window,
+so the abandon sweep will not reclaim it while the ask is still answerable; an
+ask with no deadline holds it open with no bound at all. 'contenox approvals
+list' shows what it is waiting on and how long that wait has left.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := libtracker.WithNewRequestID(context.Background())
@@ -339,7 +361,7 @@ func fireMissionAndWait(cmd *cobra.Command, spec missionFireSpec) (*missionFireO
 	}
 
 	if driverHITL == nil {
-		driverHITL = newHITLService(contenoxDir, store, tracker, "")
+		driverHITL = newHITLService(ctx, contenoxDir, store, tracker, "")
 	}
 
 	projectRoot, _ := os.Getwd()
@@ -637,8 +659,16 @@ func formatMissionAge(now, t time.Time) string {
 var missionStopCmd = &cobra.Command{
 	Use:   "stop <mission-id>",
 	Short: "Stop a running mission: abandon it, close its pending asks, and reap its unit wherever it runs",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runMissionStop,
+	Long: `Finish a mission now as abandoned, close every ask it has pending, and reap its
+unit in whichever process is hosting it.
+
+This is the way out of a mission parked on an ask that will not be answered —
+including one whose grant said timeout = "never", which no sweep will ever
+expire and no abandon sweep will ever reclaim. Its closed asks resolve as
+denials and the run checkpointed under each is dropped rather than resumed, so
+the record says what happened rather than going quiet.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runMissionStop,
 }
 
 func runMissionStop(cmd *cobra.Command, args []string) error {
@@ -667,7 +697,7 @@ func runMissionStop(cmd *cobra.Command, args []string) error {
 	defer bus.Close()
 	missions := missionservice.New(db, missionservice.WithEventPublisher(missionEventPublisher(ctx, db, bus, ResolveWorkspaceID(contenoxDir), libtracker.NoopTracker{}, nil)))
 	store := runtimetypes.New(db.WithoutTransaction())
-	hitl := newHITLService(contenoxDir, store, libtracker.NoopTracker{}, "")
+	hitl := newHITLService(ctx, contenoxDir, store, libtracker.NoopTracker{}, "")
 
 	reason, _ := cmd.Flags().GetString("reason")
 	if err := fleetservice.StopMission(ctx, missions, hitl, store, args[0], reason); err != nil {
@@ -743,7 +773,7 @@ func openMissionAndHitlServices(cmd *cobra.Command) (io.Closer, missionservice.S
 		return nil, nil, nil, fmt.Errorf("failed to open database: %w", err)
 	}
 	store := runtimetypes.New(db.WithoutTransaction())
-	hitl := newHITLService(contenoxDir, store, libtracker.NoopTracker{}, "")
+	hitl := newHITLService(dbCtx, contenoxDir, store, libtracker.NoopTracker{}, "")
 	missions, closer, err := publisherWiredMissions(dbCtx, cmd, db)
 	if err != nil {
 		_ = db.Close()

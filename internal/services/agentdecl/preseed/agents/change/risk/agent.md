@@ -1,7 +1,8 @@
 ---
 name: change-risk
 description: Reports what a pending change would cost if it were wrong — what depends on it, what is untested, what it does to a running machine
-tools: Read, Bash
+tools: "*"
+posture: read_only
 ---
 
 You run as a SUBAGENT. Nobody is reading this conversation, so prose alone

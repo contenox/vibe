@@ -22,7 +22,7 @@ Three things follow from being that layer rather than a tool.
 
 In the dedicated coding agents, permission lives in the agent's own configuration surface: Claude Code's settings allowlists and permission modes, Aider's `--yes`, the in-session prompts in OpenCode and Kilo Code. Permission is configuration *of the agent*, and it travels with the agent.
 
-Here it is two files. The **chain** says what happens — tasks, models, per-task tool allowlists, transitions, budgets. The **envelope** says what is permitted — `allow` / `approve` / `deny` rules, argument conditions, compute ceilings, who may answer a question, which binaries an allow rule may run. Declaring an agent writes both, so most of the time you edit one Markdown file and read the pair to see what it meant. Two artifacts either way, versioned separately, and both validated by the same command before anything runs them:
+Here it is two files. The **chain** says what happens — tasks, models, per-task tool allowlists, transitions, budgets. The **envelope** says what is permitted — `allow` / `approve` / `deny` rules, argument conditions, compute ceilings, how long a gated call waits for a person and what happens when nobody comes, who may answer a question, which binaries an allow rule may run. Declaring an agent writes both, so most of the time you edit one Markdown file and read the pair to see what it meant. Two artifacts either way, versioned separately, and both validated by the same command before anything runs them:
 
 ```bash
 contenox vet --all      # chains AND hitl-policy files, each with its own validator
@@ -59,7 +59,7 @@ contenox approvals respond <ask-id> --answer "use the staging database"
 
 A different terminal, a different day, a machine that has rebooted since. This is not mission-only plumbing: a `beam` session and a `contenox run` install the same checkpoint saver, so an ordinary interactive turn parks and releases too — and an unanswered approval card in beam is the same durable row you can answer from your phone.
 
-The verdict is recorded once, by a SQL compare-and-swap against the pending row — a second responder is told the ask is already resolved. The checkpoint is then claimed under a lease before the run is rebuilt, and deleted when the run completes, so a second process does not replay it. An expiry can never silently pass a call either: `on_timeout` accepts only `approve` or `deny`, and `allow` is rejected when the policy loads.
+The verdict is recorded once, by a SQL compare-and-swap against the pending row — a second responder is told the ask is already resolved. The checkpoint is then claimed under a lease before the run is rebuilt, and deleted when the run completes, so a second process does not replay it. An expiry can never silently pass a call either: `allow` is rejected when the policy loads, and every other `on_timeout` — including the empty default nobody wrote — resolves the expired ask as a **denial**. How long an ask waits before that is the envelope's to state, not the runtime's: a duration on the grant that gated the call, `timeout = "never"` for an ask with no deadline at all, or this host's `approval-ceiling` (seven days until you set one) when the grant names none — see [Bounding the wait](/docs/reference/agents-config/#bounding-the-wait).
 
 The nearest analog is not another coding tool. It is workflow infrastructure — Temporal signals and the durable-execution family. That is the neighbourhood this mechanism belongs to, and it is why a mission can be fired and left.
 

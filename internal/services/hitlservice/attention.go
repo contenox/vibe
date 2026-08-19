@@ -88,19 +88,24 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 	}
 	now := time.Now().UTC()
 	timeout := s.ceiling()
+	// An ask with no deadline never expires, so it carries no on-timeout verdict for a surface to quote.
+	onTimeout := ActionDeny
+	if Indefinite(timeout) {
+		onTimeout = ""
+	}
 
 	row := &runtimetypes.HITLApproval{
 		ID:          askID,
 		ToolsName:   AttentionToolsName,
 		ToolName:    AttentionToolName,
 		ArgsSummary: summary,
-		OnTimeout:   string(ActionDeny),
+		OnTimeout:   string(onTimeout),
 		State:       runtimetypes.HITLApprovalPending,
 		InstanceID:  req.InstanceID,
 		SessionID:   req.SessionID,
 		AgentName:   req.AgentName,
 		CreatedAt:   now,
-		ExpiresAt:   now.Add(timeout),
+		ExpiresAt:   expiryAt(now, timeout),
 	}
 	if detail := strings.TrimSpace(req.Detail); detail != "" {
 		// The long form rides the Diff column, the row's one free-text field.
@@ -146,8 +151,12 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 		return "", &AttentionPendingError{AskID: askID}
 	}
 
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	waitCtx := ctx
+	if !Indefinite(timeout) {
+		var cancel context.CancelFunc
+		waitCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
 
 	// Watches the durable row as well as the in-process channel: the unit may run in a different process than the answerer.
 	poll := time.NewTicker(attentionPollInterval)

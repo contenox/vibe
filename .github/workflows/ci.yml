@@ -1,7 +1,7 @@
 # CI: hygiene gates (gofmt, vet, govulncheck), contenox compile smoke, Windows
-# cross-compile smoke, CLI help smoke, and cheap TestUnit_* Go tests, plus a
-# container-backed smoke of the opt-in storage backends and of the wiring that
-# selects them.
+# cross-compile smoke, CLI help smoke, published-schema drift, and cheap
+# TestUnit_* Go tests, plus a container-backed smoke of the opt-in storage
+# backends and of the wiring that selects them.
 # No TestSystem_* / LLM integration tests — those run in release-gate.yml.
 #
 # Third-party actions are pinned to a commit SHA with a trailing version comment.
@@ -66,6 +66,17 @@ jobs:
 
       - name: CLI help smoke
         run: task test-cli-help
+
+      # schema/*.schema.json is generated from the Go types the loaders use, and
+      # every policy contenox emits stamps the published URL of that schema. The
+      # two are only kept honest by regenerating and diffing, and until now
+      # nothing did: a changed field or doc comment could ship a schema that no
+      # longer described the loader, which turns the stamped $schema into a lie
+      # an operator's editor validates against. `task spec:verify` regenerates
+      # to a temp dir and fails on any drift — the fix it asks for is `task
+      # spec:generate` plus committing the result.
+      - name: Published JSON schemas match the Go types
+        run: task spec:verify
 
       - name: Cheap Go tests (TestUnit_* + -short only)
         run: task test-unit

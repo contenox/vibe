@@ -92,11 +92,12 @@
         },
         "timeout_s": {
           "type": "integer",
-          "description": "TimeoutS is how long to wait for a human response when Action is\nActionApprove; 0 means block indefinitely."
+          "minimum": -1,
+          "description": "TimeoutS is how long to wait for a human response when Action is\nActionApprove; 0 sets no rule deadline, and the ask is then bounded by\nthe operator's approval ceiling rather than by anything the policy\nstates. -1 (TimeoutIndefinite) is the wait with no deadline at all: the\nask stays pending until it is answered, and carries no on_timeout."
         },
         "on_timeout": {
           "type": "string",
-          "description": "OnTimeout is the fallback when the approval window expires; only\n\"deny\" or \"approve\" is valid (allow would silently bypass approval)."
+          "description": "OnTimeout is what an expired ask resolves to. ActionAllow is refused (it\nwould silently bypass approval) and every other value resolves as a\ndenial, so ActionDeny is the only outcome worth stating."
         }
       },
       "type": "object",

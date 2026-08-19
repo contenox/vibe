@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/contenox/contenox/internal/services/hitlservice"
 )
@@ -57,9 +58,11 @@ const (
 	axisSubstitutionOff = "off"
 )
 
-// AxisGrant is one capability axis: an action, plus the refinements that axis
-// accepts. `shell = "approve"` is sugar for `shell = { grant = "approve" }`;
-// both forms decode here, so the two can never diverge.
+// AxisGrant is one grant an operator wrote — a capability axis, a tools
+// pattern, or default_action: an action, plus the refinements that grant's
+// position accepts. `shell = "approve"` is sugar for
+// `shell = { grant = "approve" }`; both forms decode here, so the two can never
+// diverge.
 type AxisGrant struct {
 	Grant string
 	// DenyPaths and ApprovePaths refine the two files axes.
@@ -72,7 +75,26 @@ type AxisGrant struct {
 	AskAlways       []string
 	// DenyHosts refines the two network axes.
 	DenyHosts []string
+	// Timeout zero emits no rule deadline, leaving the ask on the operator's approval ceiling; a negative Timeout is hitlservice.WaitIndefinite, which emits no deadline at all; OnTimeout "" is its deny.
+	Timeout   time.Duration
+	OnTimeout string
 }
+
+var timeoutKeys = []string{"timeout", "on_timeout"}
+
+func (g AxisGrant) bounded(rule hitlservice.Rule) hitlservice.Rule {
+	if rule.Action != hitlservice.ActionApprove {
+		return rule
+	}
+	rule.TimeoutS = int(g.Timeout / time.Second)
+	if hitlservice.Indefinite(g.Timeout) {
+		rule.TimeoutS = hitlservice.TimeoutIndefinite
+	}
+	rule.OnTimeout = hitlservice.Action(g.OnTimeout)
+	return rule
+}
+
+func (g AxisGrant) bounds() bool { return g.Timeout != 0 || g.OnTimeout != "" }
 
 // Envelope is one [envelopes.<name>] section, parsed but not yet layered onto
 // its parent. Compute, Attention and TrustedBinaries stay raw so extends can
@@ -82,9 +104,9 @@ type Envelope struct {
 	Name            string
 	Extends         string
 	Description     string
-	DefaultAction   string
+	DefaultAction   AxisGrant
 	Axes            map[string]AxisGrant
-	Tools           map[string]string
+	Tools           map[string]AxisGrant
 	Compute         map[string]any
 	Attention       map[string]any
 	TrustedBinaries map[string]any
@@ -159,7 +181,7 @@ func layerEnvelope(parent, child Envelope) Envelope {
 	if child.Description != "" {
 		out.Description = child.Description
 	}
-	if child.DefaultAction != "" {
+	if child.DefaultAction.Grant != "" {
 		out.DefaultAction = child.DefaultAction
 	}
 	if len(child.Axes) > 0 {
@@ -173,7 +195,7 @@ func layerEnvelope(parent, child Envelope) Envelope {
 		out.Axes = merged
 	}
 	if len(child.Tools) > 0 {
-		merged := make(map[string]string, len(out.Tools)+len(child.Tools))
+		merged := make(map[string]AxisGrant, len(out.Tools)+len(child.Tools))
 		for k, v := range out.Tools {
 			merged[k] = v
 		}
@@ -223,7 +245,7 @@ func parseEnvelope(name string, raw map[string]any) (Envelope, error) {
 		case "description":
 			env.Description, err = envelopeString(key, value)
 		case "default_action":
-			env.DefaultAction, err = envelopeAction(key, value)
+			env.DefaultAction, err = parseAxisGrant(key, value)
 		case "files":
 			err = parseAxisTable(&env, "files", value, map[string]string{"read": AxisFilesRead, "write": AxisFilesWrite})
 		case "network":
@@ -299,8 +321,8 @@ func parseAxisTable(env *Envelope, section string, value any, axes map[string]st
 	return nil
 }
 
-// parseAxisGrant decodes both axis forms: a bare action string, and the inline
-// table carrying `grant` plus that axis's refinements.
+// parseAxisGrant decodes both grant forms: a bare action string, and the inline
+// table carrying `grant` plus that position's refinements.
 func parseAxisGrant(axis string, value any) (AxisGrant, error) {
 	switch v := value.(type) {
 	case string:
@@ -328,8 +350,12 @@ func parseAxisGrantTable(axis string, table map[string]any) (AxisGrant, error) {
 		switch {
 		case key == "grant":
 			grant.Grant, err = envelopeAction(axis+".grant", value)
+		case key == "timeout":
+			grant.Timeout, err = envelopeTimeout(axis, value)
+		case key == "on_timeout":
+			grant.OnTimeout, err = envelopeOnTimeout(axis, value)
 		case !refinements[key]:
-			known := append([]string{"grant"}, sortedKeys(refinements)...)
+			known := append(append([]string{"grant"}, timeoutKeys...), sortedKeys(refinements)...)
 			err = fmt.Errorf("unknown key %q under %s — known keys: %s", key, axis, strings.Join(known, ", "))
 		case key == "substitution":
 			var s string
@@ -368,7 +394,44 @@ func parseAxisGrantTable(axis string, table map[string]any) (AxisGrant, error) {
 			return AxisGrant{}, err
 		}
 	}
+	if err := checkGrantWait(axis, grant); err != nil {
+		return AxisGrant{}, err
+	}
 	return grant, nil
+}
+
+func checkGrantWait(axis string, grant AxisGrant) error {
+	if !grant.bounds() {
+		return nil
+	}
+	switch axis {
+	case AxisMissionsAnswer:
+		return fmt.Errorf("%s: timeout/on_timeout do not apply here — this axis compiles to the attention block, which carries no wait, not to a rule", axis)
+	case AxisNetworkRead, AxisNetworkWrite:
+		return fmt.Errorf("%s: timeout/on_timeout do not apply here — no provider serves this axis in this build, so it emits no rule to bound", axis)
+	}
+	if !grantEmitsAsk(axis, grant) {
+		return fmt.Errorf("%s: timeout/on_timeout apply to an ask, and grant = %q never asks — only %q waits for a human",
+			axis, grant.Grant, hitlservice.ActionApprove)
+	}
+	if hitlservice.Indefinite(grant.Timeout) && grant.OnTimeout != "" {
+		return fmt.Errorf("%s: on_timeout = %q cannot apply to timeout = %q — an ask with no deadline never expires, so nothing would ever read on_timeout; drop one of the two",
+			axis, grant.OnTimeout, hitlservice.FormatWait(grant.Timeout))
+	}
+	return nil
+}
+
+func grantEmitsAsk(axis string, grant AxisGrant) bool {
+	if grant.Grant == string(hitlservice.ActionApprove) {
+		return true
+	}
+	switch axis {
+	case AxisFilesRead, AxisFilesWrite:
+		return len(grant.ApprovePaths) > 0
+	case AxisShell:
+		return len(grant.AskAlways) > 0 || grant.Substitution == string(hitlservice.ActionApprove)
+	}
+	return false
 }
 
 func axisRefinements(axis string) map[string]bool {
@@ -401,6 +464,54 @@ func envelopeAction(key string, value any) (string, error) {
 		return "", fmt.Errorf("%s: %w", key, err)
 	}
 	return s, nil
+}
+
+func envelopeTimeout(axis string, value any) (time.Duration, error) {
+	s, err := envelopeString(axis+".timeout", value)
+	if err != nil {
+		return 0, err
+	}
+	if hitlservice.IsIndefiniteWord(s) {
+		return hitlservice.WaitIndefinite, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, fmt.Errorf("%s.timeout is %q, which is not a duration — write it as Go writes one: 90s, 30m, 2h, or one of %s for an ask that waits until it is answered",
+			axis, s, hitlservice.IndefiniteSpellings())
+	}
+	switch {
+	case d < 0:
+		return 0, fmt.Errorf("%s.timeout is %q; a wait cannot run backwards", axis, s)
+	case d == 0:
+		return 0, fmt.Errorf("%s.timeout is %q, which states no wait at all; omit timeout to leave the rule without a deadline", axis, s)
+	case d%time.Second != 0:
+		return 0, fmt.Errorf("%s.timeout is %q; the policy carries whole seconds, so this would be truncated to %s — write the wait you mean", axis, s, d.Truncate(time.Second))
+	case int64(d/time.Second) > hitlservice.MaxRuleTimeoutS:
+		return 0, fmt.Errorf("%s.timeout is %q, longer than the %s a rule accepts — write one of %s for an ask that waits until it is answered, rather than a number that means it",
+			axis, s, time.Duration(hitlservice.MaxRuleTimeoutS)*time.Second, hitlservice.IndefiniteSpellings())
+	}
+	return d, nil
+}
+
+func envelopeOnTimeout(axis string, value any) (string, error) {
+	s, err := envelopeString(axis+".on_timeout", value)
+	if err != nil {
+		return "", err
+	}
+	action, err := parseAction(s)
+	if err != nil {
+		return "", fmt.Errorf("%s.on_timeout: %w", axis, err)
+	}
+	switch action {
+	case hitlservice.ActionDeny:
+		return string(action), nil
+	case hitlservice.ActionApprove:
+		return "", fmt.Errorf("%s.on_timeout is %q, which decides nothing: the wait exists because a human had to approve, and the runtime resolves every expiry that is not %q as a denial anyway — write %q",
+			axis, s, hitlservice.ActionAllow, hitlservice.ActionDeny)
+	default:
+		return "", fmt.Errorf("%s.on_timeout is %q, which the policy schema refuses: an ask that allows itself when nobody answers bypasses the approval it exists to require — write %q",
+			axis, s, hitlservice.ActionDeny)
+	}
 }
 
 // envelopeStringList decodes a refinement list. joined marks the lists that
@@ -502,24 +613,24 @@ func mergeBlock(parent, child map[string]any) map[string]any {
 // as wildcards.
 var toolPatternName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_-]*$`)
 
-// parseToolPatterns decodes [envelopes.<name>.tools]: pattern -> action, where
+// parseToolPatterns decodes [envelopes.<name>.tools]: pattern -> grant, where
 // pattern := "*" | <toolset> | <toolset> "." <tool> and each half is a literal
 // name or "*".
-func parseToolPatterns(value any) (map[string]string, error) {
+func parseToolPatterns(value any) (map[string]AxisGrant, error) {
 	table, ok := value.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("tools must be a table of pattern = action, got %T", value)
+		return nil, fmt.Errorf("tools must be a table of pattern = action, or pattern = a table carrying grant, got %T", value)
 	}
-	out := make(map[string]string, len(table))
+	out := make(map[string]AxisGrant, len(table))
 	for _, pattern := range sortedKeys(table) {
 		if _, _, err := ToolPatternRef(pattern); err != nil {
 			return nil, err
 		}
-		action, err := envelopeAction("tools."+pattern, table[pattern])
+		grant, err := parseAxisGrant("tools."+pattern, table[pattern])
 		if err != nil {
 			return nil, err
 		}
-		out[pattern] = action
+		out[pattern] = grant
 	}
 	return out, nil
 }

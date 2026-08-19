@@ -48,8 +48,8 @@ func EmitPolicy(ir *AgentIR, cfg Config) (*hitlservice.Policy, error) {
 	// are the ones a declaration can neither request nor waive, so they lead.
 	env.AlwaysDeny = concatStandingRules(cfg.Policy.AlwaysDeny, env.AlwaysDeny)
 	env.AlwaysAllow = concatStandingRules(cfg.Policy.AlwaysAllow, env.AlwaysAllow)
-	if env.DefaultAction == "" {
-		env.DefaultAction = cfg.Policy.DefaultAction
+	if env.DefaultAction.Grant == "" {
+		env.DefaultAction.Grant = cfg.Policy.DefaultAction
 	}
 
 	// The mission tools land where the missions axis would: after every standing

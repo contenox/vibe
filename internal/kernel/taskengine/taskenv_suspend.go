@@ -8,6 +8,10 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
+// checkpointSaveGrace bounds the detached checkpoint write below, so a
+// shutdown cannot hang on an unreachable store.
+const checkpointSaveGrace = 15 * time.Second
+
 func (env SimpleEnv) suspendRun(
 	ctx context.Context,
 	stack StackTrace,
@@ -29,7 +33,7 @@ func (env SimpleEnv) suspendRun(
 	saver := checkpointSaverFromContext(ctx)
 	if saver == nil {
 		return nil, DataTypeAny, stack.GetExecutionHistory(),
-			fmt.Errorf("task %s: approval %s is pending but no checkpoint saver is installed on this run, so it cannot suspend durably; install one via taskengine.WithCheckpointSaver (agentservice does) or answer approvals within the fast window", currentTask.ID, pendErr.ApprovalID)
+			fmt.Errorf("task %s: approval %s is pending but no checkpoint saver is installed on this run, so it cannot suspend durably; install one via taskengine.WithCheckpointSaver (agentservice does), or let the run block on the ask instead of detaching it (taskengine.WithDetachedAsks)", currentTask.ID, pendErr.ApprovalID)
 	}
 
 	scope := EventScope{Chain: chain.ID, Task: currentTask.ID, ToolCall: pendErr.ApprovalID}
@@ -58,7 +62,12 @@ func (env SimpleEnv) suspendRun(
 		cp.RequestID = reqID
 	}
 
-	if err := saver.SaveCheckpoint(ctx, cp); err != nil {
+	// A suspension is often triggered by this process leaving (ctx cancelled,
+	// shutdown): the write that makes the run resumable elsewhere must outlive
+	// the cancellation that caused it, or nothing is left behind to resume.
+	saveCtx, cancelSave := context.WithTimeout(context.WithoutCancel(ctx), checkpointSaveGrace)
+	defer cancelSave()
+	if err := saver.SaveCheckpoint(saveCtx, cp); err != nil {
 		return nil, DataTypeAny, stack.GetExecutionHistory(),
 			fmt.Errorf("task %s: persisting the suspension checkpoint for approval %s failed (the run cannot suspend durably): %w", currentTask.ID, pendErr.ApprovalID, err)
 	}

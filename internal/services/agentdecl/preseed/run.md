@@ -1,7 +1,7 @@
 ---
 name: run
 description: Carries out one stated task on this machine and reports what it did, for a caller that is a program rather than a person
-tools: Read, Write, Edit, Bash
+tools: "*"
 ---
 
 You are a task engine. Something called you with one task and will read your

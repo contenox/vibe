@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/contenox/contenox/internal/store/runtimetypes"
@@ -128,6 +129,9 @@ func formatSilence(d time.Duration) string {
 
 const missionAskScanLimit = 200
 
+// neverStale is the park bound of a mission holding an ask with no deadline; no silence can outlast it.
+const neverStale = time.Duration(math.MaxInt64)
+
 func (s *service) parkBound(ctx context.Context, missionID string) (time.Duration, error) {
 	asks, err := s.store().ListHITLApprovalsForMission(ctx, missionID, missionAskScanLimit)
 	if err != nil {
@@ -137,6 +141,12 @@ func (s *service) parkBound(ctx context.Context, missionID string) (time.Duratio
 	for _, a := range asks {
 		if a == nil || a.State != runtimetypes.HITLApprovalPending {
 			continue
+		}
+		// A zero expires_at is an ask with no deadline: nothing reclaims the
+		// mission out from under it, since it is legitimately silent until
+		// somebody answers.
+		if a.ExpiresAt.IsZero() {
+			return neverStale, nil
 		}
 		if window := a.ExpiresAt.Sub(a.CreatedAt); window > bound {
 			bound = window

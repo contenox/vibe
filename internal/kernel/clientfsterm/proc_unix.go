@@ -1,6 +1,6 @@
 //go:build !windows
 
-package enginebridge
+package clientfsterm
 
 import (
 	"os/exec"

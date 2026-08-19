@@ -280,14 +280,44 @@ func TestUnit_SweepAbandoned_ReclaimsAcrossPagesOfMissions(t *testing.T) {
 
 // TestUnit_StaleHeartbeatAfter_HasHeadroomOverTheLongestLegitimateSilence
 // pins the bound's justification, not its number: liveness is stamped per
-// turn, and the longest a turn can legitimately block is one ask parked on
-// hitlservice's serve-level ceiling.
+// turn, and a turn blocked on an ask is silent for as long as that ask waits.
+// The wait is the operator's now — any duration up to seven days, or none at
+// all — so this floor is only ever a floor, and parkBound is what widens it
+// to the park actually open on the mission.
 func TestUnit_StaleHeartbeatAfter_HasHeadroomOverTheLongestLegitimateSilence(t *testing.T) {
-	require.Equal(t, time.Hour, heartbeatCeiling,
-		"the ceiling tracks hitlservice.DefaultApprovalCeiling; if that moves, this must")
 	require.Greater(t, staleHeartbeatMultiple, 1,
-		"a bound at exactly one ceiling would reap a host that parked on an ask and lived")
+		"a bound at exactly one heartbeat ceiling would reap a host that parked on an ask and lived")
 	require.Equal(t, staleHeartbeatMultiple*heartbeatCeiling, StaleHeartbeatAfter)
+}
+
+// TestUnit_SweepAbandoned_NeverReclaimsAMissionParkedOnAnAskWithNoDeadline is
+// the wait-forever half of the widening: an ask nobody gave a deadline is
+// legitimately silent until it is answered, so no amount of silence may
+// reclaim the mission holding it.
+func TestUnit_SweepAbandoned_NeverReclaimsAMissionParkedOnAnAskWithNoDeadline(t *testing.T) {
+	ctx, db := setupMissionDB(t)
+	svc := New(db)
+
+	m := staleMission(t, ctx, svc, "waiting on a question nobody bounded", StaleHeartbeatAfter*1000)
+	row := &runtimetypes.HITLApproval{
+		ID:          uuid.NewString(),
+		ToolsName:   "mission",
+		ToolName:    "mission_ask_attention",
+		ArgsSummary: "which branch should I target?",
+		OnTimeout:   "deny",
+		State:       runtimetypes.HITLApprovalPending,
+		MissionID:   &m.ID,
+		CreatedAt:   time.Now().UTC().Add(-StaleHeartbeatAfter * 1000),
+	}
+	require.NoError(t, runtimetypes.New(db.WithoutTransaction()).CreateHITLApproval(ctx, row))
+
+	reclaimed, err := svc.SweepAbandoned(ctx)
+	require.NoError(t, err)
+	require.Zero(t, reclaimed)
+
+	got, err := svc.Get(ctx, m.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusOpen, got.Status, "an open ask with no deadline explains any silence")
 }
 
 const maxRuleTimeout = 7 * 24 * time.Hour

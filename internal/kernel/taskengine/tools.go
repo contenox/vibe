@@ -59,7 +59,7 @@ func applyAllowlist(allowlist []string, all []string) []string {
 		if _, skip := excluded[name]; skip {
 			continue
 		}
-		if hasStar && !isDeclarationScopedToolset(name) {
+		if hasStar {
 			result = append(result, name)
 			continue
 		}
@@ -68,17 +68,6 @@ func applyAllowlist(allowlist []string, all []string) []string {
 		}
 	}
 	return result
-}
-
-const declarationScopedPrefix = "decl-"
-
-// nativeScopedPrefix scopes an in-process toolset the same way: unmintable by
-// DeclaredToolName, so a declared MCP source can never collide with one.
-const nativeScopedPrefix = "native-"
-
-func isDeclarationScopedToolset(name string) bool {
-	return strings.HasPrefix(name, declarationScopedPrefix) ||
-		strings.HasPrefix(name, nativeScopedPrefix)
 }
 
 // ExportedApplyAllowlist is a test-only export of applyAllowlist.

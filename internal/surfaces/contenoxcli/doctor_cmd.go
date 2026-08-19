@@ -244,7 +244,7 @@ func printReclaimedMissions(w io.Writer, reclaimed int) {
 	if reclaimed <= 0 {
 		return
 	}
-	fmt.Fprintf(w, "Missions: %d reclaimed as %s — open with no heartbeat for %s, so their host process is gone (contenox mission list).\n",
+	fmt.Fprintf(w, "Missions: %d reclaimed as %s — open with no heartbeat for at least %s, so their host process is gone (contenox mission list). A mission parked on a pending ask is not reclaimed while that ask is still answerable: its bound widens to the ask's own window, and an ask with no deadline holds it open indefinitely (contenox mission show <id>).\n",
 		reclaimed, missionservice.StatusAbandoned, missionservice.StaleHeartbeatAfter)
 }
 

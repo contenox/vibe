@@ -38,7 +38,7 @@ func TestUnit_NewHITLService_EvaluatesThePolicyConfigSetWrote(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	store := runtimetypes.New(db.WithoutTransaction())
 
-	svc := newHITLService(contenoxDir, store, libtracker.NoopTracker{}, "")
+	svc := newHITLService(context.Background(), contenoxDir, store, libtracker.NoopTracker{}, "")
 
 	// What `contenox config set hitl-policy-name deny.json` persists.
 	require.NoError(t, clikv.WriteConfig(ctx, store, ResolveWorkspaceID(contenoxDir),
@@ -67,7 +67,7 @@ func TestUnit_NewHITLService_UnmarkedDirUsesTheDefaultWorkspace(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	store := runtimetypes.New(db.WithoutTransaction())
 
-	svc := newHITLService(contenoxDir, store, libtracker.NoopTracker{}, "")
+	svc := newHITLService(context.Background(), contenoxDir, store, libtracker.NoopTracker{}, "")
 	require.NoError(t, clikv.WriteConfig(ctx, store, ResolveWorkspaceID(contenoxDir),
 		clikv.KeyHITLPolicyName, "deny.json"))
 

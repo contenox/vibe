@@ -27,7 +27,24 @@ the dataflow across every goto and on_failure edge, input_var and template
 references, transition branches that can never fire, and structural defects
 (duplicate task ids, unknown handlers, dangling goto targets). HITL policies
 are checked for unknown fields, invalid rule shapes, tool patterns that can
-never match, and timeout values.
+never match, and timeout values — a timeout_s below -1 or longer than seven
+days, a timeout_s/on_timeout on a rule whose action never waits, and an
+on_timeout beside timeout_s: -1, which never expires.
+
+A rendered envelope is vetted the same way. Its timeouts are written in
+agents.toml as 'timeout' and 'on_timeout' on a grant, and refused there with the
+envelope and axis named, so a defect this reports in a hitl-policy-*.json under
+.generated/ is one to fix in [envelopes.<name>].
+
+A rule carrying no timeout_s is not a rule that waits forever: it falls to this
+host's approval ceiling ('contenox config set approval-ceiling <duration|never>',
+seven days until you set it) and is denied there. The rule that does wait
+forever carries timeout_s: -1, written in agents.toml as timeout = "never".
+
+` + toolGrantGrammar + `
+
+A tool pattern is matched exactly, with "*" as the only wildcard — a partial
+glob like "git_*" can never match, and is reported.
 
 What gets vetted:
 

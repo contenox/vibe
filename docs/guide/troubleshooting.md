@@ -194,7 +194,7 @@ A resume that itself fails is not lost: its checkpoint is retained with the fail
 
 **Cause.** A mission unit is a child subprocess of the host that fired it. The host is gone; the row is not.
 
-**Fix — wait, or close it yourself.** The runtime reclaims it automatically, but on a deliberately generous bound: **six hours of heartbeat silence**, widened further when the mission has an ask parked on it whose own wait window is longer than that. Reaping live work is unrecoverable; reaping late only delays a row you were already ignoring.
+**Fix — wait, or close it yourself.** The runtime reclaims it automatically, but on a deliberately generous bound: **six hours of heartbeat silence**, widened further when the mission has an ask parked on it whose own wait window is longer than that — and never at all while it holds an ask with no deadline (`timeout = "never"`), which explains any silence. Reaping live work is unrecoverable; reaping late only delays a row you were already ignoring.
 
 The sweep is lazy, not scheduled. It runs on a host coming up, on `contenox mission list`, on `contenox mission show`, and on `contenox doctor` (text output). With none of those happening, the row simply waits.
 

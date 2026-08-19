@@ -21,6 +21,9 @@ const (
 	HITLApprovalExpired  HITLApprovalState = "expired"
 )
 
+// noDeadline is the expires_at of an ask that waits until it is answered: the sweeper skips it and every reader renders it as no deadline.
+var noDeadline time.Time
+
 // HITLApproval is a durable row for one runtime/hitlservice approval ask, resolved by exactly one of Respond or the expiry sweeper.
 type HITLApproval struct {
 	ID          string            `json:"id" example:"3f9c6e2a-1b4d-4e8f-9a2c-7d5e6f8a9b0c"`
@@ -34,11 +37,12 @@ type HITLApproval struct {
 	State       HITLApprovalState `json:"state" example:"pending"`
 	Resolution  json.RawMessage   `json:"resolution,omitempty" example:"{\"approved\":true}"`
 	// InstanceID, SessionID, AgentName and MissionID are the attribution set: which fleet unit, session, agent, and mission raised the ask.
-	InstanceID string     `json:"instanceId,omitempty" example:"7c1f9e4a-2b3d-4c5e-8f90-a1b2c3d4e5f6"`
-	SessionID  string     `json:"sessionId,omitempty" example:"sess_01H8XGJWBWBAQ4Z8"`
-	AgentName  string     `json:"agentName,omitempty" example:"reviewer"`
-	MissionID  *string    `json:"missionId,omitempty" example:"9d2e7f10-4c8b-4a1e-b3d6-0f5a7c9e1b24"`
-	CreatedAt  time.Time  `json:"createdAt" example:"2024-01-15T10:00:00Z"`
+	InstanceID string    `json:"instanceId,omitempty" example:"7c1f9e4a-2b3d-4c5e-8f90-a1b2c3d4e5f6"`
+	SessionID  string    `json:"sessionId,omitempty" example:"sess_01H8XGJWBWBAQ4Z8"`
+	AgentName  string    `json:"agentName,omitempty" example:"reviewer"`
+	MissionID  *string   `json:"missionId,omitempty" example:"9d2e7f10-4c8b-4a1e-b3d6-0f5a7c9e1b24"`
+	CreatedAt  time.Time `json:"createdAt" example:"2024-01-15T10:00:00Z"`
+	// ExpiresAt is the moment the sweeper resolves the ask by OnTimeout; the zero time is an ask with no deadline, which stays pending until it is answered.
 	ExpiresAt  time.Time  `json:"expiresAt" example:"2024-01-15T11:00:00Z"`
 	ResolvedAt *time.Time `json:"resolvedAt,omitempty"`
 }
@@ -149,9 +153,9 @@ func (s *store) ListExpiredHITLApprovals(ctx context.Context, asOf time.Time, li
 	rows, err := s.Exec.QueryContext(ctx, `
 		SELECT `+hitlApprovalColumns+`
 		FROM hitl_approvals
-		WHERE state = 'pending' AND expires_at <= $1
+		WHERE state = 'pending' AND expires_at > $1 AND expires_at <= $2
 		ORDER BY expires_at ASC
-		LIMIT $2`, asOf, limit)
+		LIMIT $3`, noDeadline, asOf, limit)
 	if err != nil {
 		return nil, fmt.Errorf("hitl_approvals: list expired query: %w", err)
 	}

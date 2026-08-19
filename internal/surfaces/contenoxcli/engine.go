@@ -73,7 +73,7 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	if opts.EffectiveHITL {
 		hitlSvc = opts.EffectiveHITLService
 		if hitlSvc == nil {
-			hitlSvc = newHITLService(opts.ContenoxDir, runtimetypes.New(db.WithoutTransaction()), tracker, "")
+			hitlSvc = newHITLService(ctx, opts.ContenoxDir, runtimetypes.New(db.WithoutTransaction()), tracker, "")
 		}
 	}
 
@@ -178,8 +178,11 @@ func hitlPolicySource(primaryDir string) hitlservice.PolicySource {
 	return hitlservice.NewFSPolicySource(policyDirs(primaryDir)...)
 }
 
-func newHITLService(contenoxDir string, store runtimetypes.Store, tracker libtracker.ActivityTracker, fallbackPolicy string) hitlservice.Service {
+func newHITLService(ctx context.Context, contenoxDir string, store runtimetypes.Store, tracker libtracker.ActivityTracker, fallbackPolicy string) hitlservice.Service {
 	svc := hitlservice.NewWithDefaultPolicy(hitlPolicySource(contenoxDir), runtimetypes.LocalTenantID, store, tracker, fallbackPolicy)
 	hitlservice.SetWorkspaceID(svc, ResolveWorkspaceID(contenoxDir))
+	// The ask ceiling is the operator's, set once here so every surface that
+	// raises an ask waits the same way.
+	applyApprovalCeiling(ctx, svc, store)
 	return svc
 }

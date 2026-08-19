@@ -104,6 +104,20 @@ func ParseClaudeCode(path string, data []byte, cfg Config) (*AgentIR, error) {
 	}
 	delete(fields, "permissionMode")
 
+	// `posture` is contenox's own vocabulary, read after permissionMode so it
+	// wins: a declaration written here says read_only outright instead of
+	// borrowing a foreign dialect's token, which would report itself as an
+	// approximation. It names the envelope the run is governed by; the tools
+	// list is reach, not permission.
+	if raw := strings.TrimSpace(stringField(fields, "posture")); raw != "" {
+		posture, err := ParsePosture(raw)
+		if err != nil {
+			return nil, fmt.Errorf("agentdecl: %s: %w", path, err)
+		}
+		ir.Posture = posture
+	}
+	delete(fields, "posture")
+
 	ir.Think = strings.TrimSpace(stringField(fields, "effort"))
 	delete(fields, "effort")
 

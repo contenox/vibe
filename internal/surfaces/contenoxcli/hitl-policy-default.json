@@ -601,6 +601,32 @@
       "tools": "webtools",
       "tool": "web_delete",
       "action": "approve"
+    },
+    {
+      "//": "native-fs-browse read tools: the files.read floor, same allow tier as the local_fs reads above. Contained by internal/services/vfs like local_fs; a workspace outside the secret trees is the boundary.",
+      "tools": "native-fs-browse",
+      "tool": "grep",
+      "action": "allow"
+    },
+    {
+      "tools": "native-fs-browse",
+      "tool": "find_files",
+      "action": "allow"
+    },
+    {
+      "tools": "native-fs-browse",
+      "tool": "stat_file",
+      "action": "allow"
+    },
+    {
+      "tools": "native-fs-browse",
+      "tool": "count_stats",
+      "action": "allow"
+    },
+    {
+      "tools": "native-fs-browse",
+      "tool": "list_dir",
+      "action": "allow"
     }
   ],
   "//attention": "Bounded delegation on the mission path's default envelope: an agent (the firing session's own, or the attention oracle mounted by `contenox mission fire --oracle`) may answer up to 3 of a mission's routine questions; the rest wait for a human. The count is durable per mission, and whatever the unit then DOES stays gated by this same envelope.",

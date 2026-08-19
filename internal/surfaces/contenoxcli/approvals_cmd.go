@@ -25,20 +25,75 @@ var approvalsCmd = &cobra.Command{
 is raised, and the run checkpoints and releases its process rather than waiting.
 The ask is a row any process can answer — 'approvals respond' records the verdict
 and resumes the suspended run right here, even if the process that asked is long
-gone.`,
+gone.
+
+EXPIRES-IN is how long an ask has left, and an expired ask resolves to a denial.
+How long that is comes from the envelope that gated the call: a grant written as
+
+  shell = { grant = "approve", timeout = "30m", on_timeout = "deny" }
+
+in [envelopes.<name>] gives its asks thirty minutes, and
+
+  merge = { grant = "approve", timeout = "never" }
+
+gives them no deadline at all — EXPIRES-IN reads "never", nothing sweeps them,
+and they are still here after a restart, waiting to be answered. A grant that
+names no timeout leaves the ask on this host's approval ceiling ('contenox
+config set approval-ceiling <duration|never>', seven days until you set it).
+"deny" is the only on_timeout this build can express, and a grant that names
+none resolves the same way. Answering an ask whose window already closed is
+refused rather than applied twice.`,
 }
 
 var approvalsListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List pending approvals and attention asks",
-	RunE:  runApprovalsList,
+	Short: "List pending approvals and attention asks, newest first, with the wait each has left",
+	Long: `Print every ask still pending on this host: permission gates gated by an
+envelope, and the questions a unit raised for a human's own words.
+
+EXPIRES-IN is the wait the ask has LEFT, and it is the whole of what the
+configuration gives it:
+
+  45s, 30m,    the grant named a timeout; at zero the ask resolves to its
+  4h, 6d       on_timeout (deny) and the run behind it resumes denied
+  never        the grant named timeout = "never" — no deadline at all, nothing
+               sweeps it, and it is still listed here after a restart
+
+An ask whose grant named no timeout shows the wait this host's approval ceiling
+gave it ('contenox config set approval-ceiling <duration|never>', seven days
+until you set it) — not a wait of its own.
+
+Listing is not passive: this command first sweeps asks whose window closed to
+their on-timeout verdict (reporting how many), and resumes any answered run
+still waiting for a capable process. An ask that vanishes between two listings
+expired; it did not go unanswered quietly.`,
+	RunE: runApprovalsList,
 }
 
 var approvalsRespondCmd = &cobra.Command{
 	Use:   "respond [ask-id]",
 	Short: "Answer a pending ask (--approve/--deny a permission, --answer a question) and resume the suspended run",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runApprovalsRespond,
+	Long: `Record a verdict on one ask and resume the run checkpointed under it, in this
+process, right now — the process that raised the ask does not need to be alive.
+
+  contenox approvals respond <id> --approve
+  contenox approvals respond <id> --deny
+  contenox approvals respond <id> --answer "use the staging bucket"
+
+Exactly one of --approve, --deny, or --answer. A permission ask takes a verdict;
+a question takes words. 'approvals list' says which is which.
+
+An answer lands only while the ask is still pending. Answer one whose window
+already closed and this refuses rather than applying a second verdict: its
+on-timeout verdict was applied when it expired, and a verdict is recorded
+exactly once. An ask listed as EXPIRES-IN never has no window to miss — it
+waits until this command answers it, however many restarts away that is.
+
+Resuming needs a reachable model. If this terminal cannot build an engine, the
+verdict is NOT recorded and the ask stays pending — fix it here ('contenox
+setup') or answer from a terminal that can.`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runApprovalsRespond,
 }
 
 func openApprovalsService(cmd *cobra.Command) (libdbexec.DBManager, hitlservice.Service, runtimetypes.Store, error) {
@@ -56,7 +111,7 @@ func openApprovalsService(cmd *cobra.Command) (libdbexec.DBManager, hitlservice.
 		return nil, nil, nil, fmt.Errorf("failed to open database: %w", err)
 	}
 	store := runtimetypes.New(db.WithoutTransaction())
-	svc := newHITLService(contenoxDir, store, libtracker.NoopTracker{}, "")
+	svc := newHITLService(dbCtx, contenoxDir, store, libtracker.NoopTracker{}, "")
 	return db, svc, store, nil
 }
 
@@ -116,9 +171,13 @@ func renderApprovalsTable(w io.Writer, rows []*runtimetypes.HITLApproval, now ti
 		if row.MissionID != nil {
 			mission = *row.MissionID
 		}
+		expires := "never"
+		if !row.ExpiresAt.IsZero() {
+			expires = formatMissionAge(row.ExpiresAt, now)
+		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			row.ID, kind, row.ToolsName+"."+row.ToolName, row.ArgsSummary, mission,
-			formatMissionAge(now, row.CreatedAt), formatMissionAge(row.ExpiresAt, now))
+			formatMissionAge(now, row.CreatedAt), expires)
 	}
 	if err := tw.Flush(); err != nil {
 		return err

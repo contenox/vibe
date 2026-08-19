@@ -59,6 +59,11 @@ reserved for the JSON-RPC stream.
 HITL is on by default — gated tool calls route through the ACP session/request_permission
 flow so the editor's UI controls approval. Pass --auto to disable (unattended/testing).
 
+` + toolGrantLine + `
+
+` + askWaitLine + ` The editor's own prompt is
+answered live; the durable row behind it is what expires.
+
 The /mission slash command dispatches a mission in-process: the fired unit is a child
 subprocess of this editor session and its reports arrive live back in the firing session.`,
 	RunE: runACP,
@@ -76,7 +81,16 @@ the shell denied, secret paths refused on read, anything unnamed denied — pass
 then system/ — override the path entirely with CONTENOX_ACPX_CHAIN_PATH).
 
 Containment for the untrusted driver is the HITL policy, not an in-chain
-step. IDE clients (Zed, GoLand, AionUi) should keep using 'acp'. Selection
+step.
+
+` + toolGrantLine + `
+
+Timeouts do not arise here. The 'acpx' envelope is allow/deny with no approval
+tier — an untrusted non-interactive driver has nobody to approve anything — so
+it raises no ask for a wait to bound. Name another envelope with --hitl-policy
+if you want one.
+
+IDE clients (Zed, GoLand, AionUi) should keep using 'acp'. Selection
 is per-spawn: each ACP client launches its own contenox process, so the two
 profiles never share state.`,
 	RunE: runACPX,
@@ -350,6 +364,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	acpHITL := hitlservice.NewWithDefaultPolicy(policy.source(contenoxDir), runtimetypes.LocalTenantID, runtimetypes.New(db.WithoutTransaction()), tracker, policy.Name)
 	// /policy and `contenox config set hitl-policy-name` both write this workspace's row; the evaluator must read the same one.
 	hitlservice.SetWorkspaceID(acpHITL, workspaceID)
+	applyApprovalCeiling(ctx, acpHITL, runtimetypes.New(db.WithoutTransaction()))
 	askBridge := newRelayAskBridge(acpHITL, tracker)
 	hitlservice.SetAskWatcher(acpHITL, askBridge)
 	resumeBridge := newRelayResumeBridge(tracker)
@@ -362,6 +377,16 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		missions, acpHITL, missionPub, optInBeta,
 		func() fleetservice.Service { return inProcessFleet })
 	printUnservedToolsets(noticeOut, unservedToolsets(chains.Default(), tools))
+
+	// The agent-reachable terminal — beam's and every dispatched unit's shared
+	// server — takes the shell scrub (ScrubDenySecrets by default), never the raw
+	// os.Environ(). Resolved once here so the in-process fleet and the beam surface
+	// below share it.
+	agentShellScrub, _, scrubErr := resolvedSandboxEnv(db, tracker, noticeOut)
+	if scrubErr != nil {
+		fmt.Fprintf(noticeOut, "sandbox env scrub unavailable, using deny-secrets default: %v\n", scrubErr)
+		agentShellScrub = nil
+	}
 
 	oracleStore := runtimetypes.New(db.WithoutTransaction())
 	oracleCfg := resolveOracleConfig(ctx, oracleStore, cmd)
@@ -486,6 +511,11 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			},
 			WorkspaceID: workspaceID,
 			DBPath:      dbPath,
+			// Non-host units get fs and terminal from the shared clientfsterm
+			// server; the host (serve) mounts neither. Same scrub the beam terminal
+			// and the ACP shell take.
+			MountFSTerminal: !profile.host,
+			WorkspaceEnv:    agentShellScrub,
 		})
 		if buildErr != nil {
 			return buildErr
@@ -579,6 +609,8 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	defer presenceReporter.Stop()
 
 	if profile.beam {
+		// The agent-reachable terminal takes the shell scrub (ScrubDenySecrets
+		// by default, resolved above), never the raw os.Environ().
 		return runBeamSurface(ctx, cmd, beamSurface{
 			factory:       transportFactory,
 			bindTransport: func(t *acpsvc.Transport) { transport = t },
@@ -589,6 +621,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			provider:      defaultProvider,
 			engineReady:   engine != nil,
 			logPath:       surfaceLogPath(surfaceLog),
+			workspaceEnv:  agentShellScrub,
 		})
 	}
 

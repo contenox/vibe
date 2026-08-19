@@ -26,6 +26,13 @@ Policy rules ship as presets. Trusted-binary declarations cannot: a SHA256 is a
 fact about a file on one host, so shipping one would ship a false claim. This
 command records them instead.
 
+The rest of a policy — which toolsets a run may reach, and how long its asks
+wait — is written in agents.toml under [envelopes.<name>], not here.
+
+` + toolGrantLine + `
+
+` + askWaitLine + `
+
 See docs/guide/trusted-binaries.md for the full workflow.`,
 }
 

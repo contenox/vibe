@@ -7,9 +7,9 @@ package fleetboot
 import (
 	"context"
 	"os"
-	"sync"
 
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
+	"github.com/contenox/contenox/internal/kernel/clientfsterm"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/fleetservice"
 	"github.com/contenox/contenox/internal/services/hitlservice"
@@ -47,6 +47,17 @@ type Deps struct {
 	// WorkspaceRoots bounds a dispatched unit by the same roots the firing session
 	// has; nil configures no allowlist.
 	WorkspaceRoots *vfs.Factory
+
+	// MountFSTerminal mounts the one shared client-side fs+terminal server
+	// (internal/kernel/clientfsterm) for dispatched units. Beam and the editor
+	// profiles set it; contenox serve does not — the host serves no filesystem and
+	// no terminal, every capability it has being an MCP server.
+	MountFSTerminal bool
+
+	// WorkspaceEnv scrubs a launched terminal's parent environment (the agent-shell
+	// scrub from resolvedSandboxEnv). Nil defers to the shared server's
+	// ScrubDenySecrets default, never the raw os.Environ().
+	WorkspaceEnv func([]string) []string
 }
 
 // BuildInProcessFleet embeds the fleet a host process dispatches /mission
@@ -55,7 +66,7 @@ type Deps struct {
 func BuildInProcessFleet(ctx context.Context, deps Deps) (fleetservice.Service, agentregistryservice.Service, func(), error) {
 	// Defaults a dispatched mission's cwd to the host process's own.
 	projectRoot, _ := os.Getwd()
-	return fleetservice.BuildInProcess(ctx, fleetservice.InProcessDeps{
+	inproc := fleetservice.InProcessDeps{
 		DB:             deps.DB,
 		Bus:            deps.Bus,
 		Missions:       deps.Missions,
@@ -74,40 +85,23 @@ func BuildInProcessFleet(ctx context.Context, deps Deps) (fleetservice.Service, 
 				kernel: kernel,
 			}
 		},
-		Stderr:     os.Stderr,
-		Filesystem: acpsvc.NewUnitFileSystem(deps.Transport, missionParentSession(deps.Missions)),
-	})
-}
-
-func missionParentSession(missions missionservice.Service) func(context.Context, libacp.SessionID) string {
-	if missions == nil {
-		return nil
+		Stderr: os.Stderr,
 	}
-	var (
-		mu     sync.Mutex
-		parent = map[libacp.SessionID]string{}
-	)
-	return func(ctx context.Context, unitSession libacp.SessionID) string {
-		if unitSession == "" {
-			return ""
+	// A viewer-less unit gets fs and terminal from the one shared client-side
+	// server beam consumes too (internal/kernel/clientfsterm): rooted at the unit's
+	// default cwd, contained by internal/services/vfs, its launched terminals
+	// scrubbed off the raw os.Environ(). The host mounts neither.
+	if deps.MountFSTerminal && projectRoot != "" {
+		var opts []clientfsterm.Option
+		if deps.WorkspaceEnv != nil {
+			opts = append(opts, clientfsterm.WithEnvScrub(deps.WorkspaceEnv))
 		}
-		mu.Lock()
-		cached, ok := parent[unitSession]
-		mu.Unlock()
-		if ok {
-			return cached
+		if server, err := clientfsterm.New(projectRoot, opts...); err == nil {
+			inproc.Filesystem = server
+			inproc.Terminal = server
 		}
-		resolved := ""
-		if m, err := missions.GetBySession(ctx, string(unitSession)); err == nil && m != nil {
-			resolved = m.ParentSessionID
-		}
-		if resolved != "" {
-			mu.Lock()
-			parent[unitSession] = resolved
-			mu.Unlock()
-		}
-		return resolved
 	}
+	return fleetservice.BuildInProcess(ctx, inproc)
 }
 
 // missionReportDeliverer is the report router's SessionDeliverer for the

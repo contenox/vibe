@@ -29,6 +29,7 @@ var validConfigKeys = map[string]string{
 	"default-think":                 "Default reasoning level: auto, off, minimal, low, medium, high, xhigh.",
 	"default-chain":                 "Default chain file path (relative to .contenox/ or absolute)",
 	"hitl-policy-name":              "Active HITL policy file name (e.g. hitl-policy-strict.json). Empty = use hitl-policy-default.json.",
+	"approval-ceiling":              "How long an ask whose grant states no timeout waits for a human (e.g. 30m, 24h, or never for no deadline at all). Unset = 168h, seven days.",
 	"telemetry-enabled":             "Enable writing telemetry logs to <data-dir>/telemetry.log (true/false)",
 	"update-check":                  "Enable automatic update availability checks (true/false). Set false for zero-trust/air-gapped environments.",
 	"opt-in-beta":                   "Enable beta features (true/false): agent roster, event triggers. CONTENOX_OPT_IN_BETA overrides per invocation.",
@@ -48,7 +49,7 @@ var configCmd = &cobra.Command{
 	Short: "Manage persistent CLI settings (default model, provider, chain, HITL policy).",
 	Long: `Store and retrieve persistent CLI defaults backed by SQLite.
 
-Global keys (shared across all projects): default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-audio-model, default-audio-provider, default-max-tokens, default-think, telemetry-enabled, update-check, opt-in-beta, default-mission-agent, default-mission-policy, log-max-size, log-max-files, log-max-age-days
+Global keys (shared across all projects): default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-audio-model, default-audio-provider, default-max-tokens, default-think, telemetry-enabled, update-check, opt-in-beta, default-mission-agent, default-mission-policy, approval-ceiling, log-max-size, log-max-files, log-max-age-days
 Workspace keys (scoped to current project): default-chain, hitl-policy-name
 
 Supported keys:
@@ -67,6 +68,7 @@ Supported keys:
   opt-in-beta                    Enable beta features: agent roster, event triggers (true/false)
   default-chain                  Default chain file path
   hitl-policy-name               Active HITL policy file name (e.g. hitl-policy-strict.json)
+  approval-ceiling               Wait an ask gets when its grant names no timeout (30m, 24h, never)
   default-mission-agent          Default agent run as a subagent when none is named
   default-mission-policy         Default subagent envelope (HITL policy) when none is named
   default-oracle-chain           Chain that adjudicates a subagent's asks; unset means human-only
@@ -74,7 +76,16 @@ Supported keys:
   oracle-approves-tool-calls     Let the oracle rule on gated tool calls too (true/false)
   log-max-size                   Size at which 'contenox serve' starts a new log part (e.g. 10MB, 512KB)
   log-max-files                  How many host log files to keep, across every date and part (0 = unlimited)
-  log-max-age-days               Delete host logs older than this many days (0 = no age limit)`,
+  log-max-age-days               Delete host logs older than this many days (0 = no age limit)
+
+Every policy key above names an envelope, not what is in one. The envelope
+itself is a [envelopes.<name>] section in agents.toml, transpiled on every run.
+
+` + toolGrantGrammar + `
+
+` + askWaitGrammar + `
+
+Validate what these keys point at with 'contenox vet'.`,
 }
 
 var configSetCmd = &cobra.Command{
@@ -82,7 +93,7 @@ var configSetCmd = &cobra.Command{
 	Short: "Set a persistent config value.",
 	Long: `Set a persistent CLI default stored in the SQLite database.
 
-Global keys (default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-audio-model, default-audio-provider, default-max-tokens, default-think, telemetry-enabled, update-check, opt-in-beta) are shared across all projects.
+Global keys (default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-audio-model, default-audio-provider, default-max-tokens, default-think, telemetry-enabled, update-check, opt-in-beta, approval-ceiling) are shared across all projects.
 Workspace keys (default-chain, hitl-policy-name) are scoped to the current project
 workspace and fall back to the global value when not set locally.
 
@@ -97,7 +108,12 @@ Examples:
   contenox config set default-max-tokens 8192
   contenox config set default-think    high
   contenox config set default-chain    .contenox/.generated/chain-agent-acp.json
-  contenox config set hitl-policy-name hitl-policy-strict.json`,
+  contenox config set hitl-policy-name hitl-policy-strict.json
+
+  # Every ask whose grant names no timeout waits a day, then resolves by its on_timeout:
+  contenox config set approval-ceiling 24h
+  # ...or waits until somebody answers it, however long that takes:
+  contenox config set approval-ceiling never`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key, value := args[0], args[1]
@@ -125,6 +141,11 @@ Examples:
 		} else if normalized != "" {
 			value = normalized
 		}
+		if normalized, err := normalizeApprovalCeiling(key, value); err != nil {
+			return err
+		} else if normalized != "" {
+			value = normalized
+		}
 		db, store, workspaceID, err := openConfigDBWithWorkspace(cmd)
 		if err != nil {
 			return err
@@ -144,14 +165,18 @@ Examples:
 var configGetCmd = &cobra.Command{
 	Use:   "get <key>",
 	Short: "Get a persistent config value.",
-	Long: `Print the current value of a persistent CLI setting.
+	Long: `Print the current value of a persistent CLI setting, and the scope it came
+from. A value is stored canonically, so what this prints is what the runtime
+applies: 'approval-ceiling' set to '120m' reads back as '2h0m0s', and set to
+'forever' reads back as 'never'.
 
 Examples:
   contenox config get default-model
   contenox config get default-provider
   contenox config get default-think
   contenox config get default-chain
-  contenox config get hitl-policy-name`,
+  contenox config get hitl-policy-name
+  contenox config get approval-ceiling`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key := args[0]
@@ -175,6 +200,10 @@ var configListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all persistent config values.",
 	Long: `Print all known CLI config keys, their current values, and their scope.
+
+A key with no value is unset and running on its built-in default — for
+'approval-ceiling', that is 168h, seven days, the wait every ask whose grant
+names no timeout gets on this host.
 
 Example:
   contenox config list`,

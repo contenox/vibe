@@ -192,10 +192,6 @@ type ApprovalRecorder interface {
 
 const defaultPolicyName = "hitl-policy-default.json"
 
-// DefaultApprovalCeiling bounds RequestApproval when the matched rule sets no
-// TimeoutS of its own.
-const DefaultApprovalCeiling = time.Hour
-
 type service struct {
 	src            PolicySource
 	tenantID       string
@@ -262,10 +258,13 @@ func (s *service) requireResumerForVerdict(ctx context.Context, askID string) er
 	return fmt.Errorf("%w (ask %s)", ErrVerdictNeedsResumer, askID)
 }
 
-// SetApprovalCeiling overrides the approval-wait ceiling on svc.
+// SetApprovalCeiling overrides the approval-wait ceiling on svc; a negative ceiling is WaitIndefinite, and zero leaves the ceiling unset.
 func SetApprovalCeiling(svc Service, ceiling time.Duration) {
-	if ceiling <= 0 {
+	if ceiling == 0 {
 		return
+	}
+	if ceiling < 0 {
+		ceiling = WaitIndefinite
 	}
 	if s, ok := svc.(*service); ok {
 		s.mu.Lock()
@@ -309,11 +308,14 @@ func (s *service) ceiling() time.Duration {
 	s.mu.Lock()
 	d := s.approvalCeiling
 	s.mu.Unlock()
-	if d <= 0 {
-		return DefaultApprovalCeiling
+	if d == 0 {
+		return FallbackApprovalCeiling
 	}
 	return d
 }
+
+// ApprovalCeiling is the wait an ask gets when its rule states none; localtools reads it so a card and its row expire together.
+func (s *service) ApprovalCeiling() time.Duration { return s.ceiling() }
 
 var _ Service = (*service)(nil)
 var _ ComputeBoundsReader = (*service)(nil)
@@ -429,10 +431,10 @@ func (s *service) RequestApproval(ctx context.Context, req ApprovalRequest, sink
 		adopted = true
 	}
 
-	ruleTimeout := req.TimeoutS > 0
+	ruleTimeout := req.TimeoutS != 0
 	timeoutDur := s.ceiling()
 	if ruleTimeout {
-		timeoutDur = time.Duration(req.TimeoutS) * time.Second
+		timeoutDur = WaitOf(req.TimeoutS)
 	}
 
 	var recorded *runtimetypes.HITLApproval
@@ -483,7 +485,7 @@ func (s *service) RequestApproval(ctx context.Context, req ApprovalRequest, sink
 	s.offer(ctx, adjudicationFromApprovalRequest(approvalID, req))
 
 	waitCtx := ctx
-	if !ruleTimeout {
+	if !ruleTimeout && !Indefinite(timeoutDur) {
 		var cancel context.CancelFunc
 		waitCtx, cancel = context.WithTimeout(ctx, timeoutDur)
 		defer cancel()
@@ -512,10 +514,24 @@ func (s *service) RequestApproval(ctx context.Context, req ApprovalRequest, sink
 	}
 }
 
+// expiryAt leaves the zero time on an indefinite wait: that is what every reader, and the expiry sweep's SQL, treats as "no deadline".
+func expiryAt(now time.Time, wait time.Duration) time.Time {
+	if Indefinite(wait) {
+		return time.Time{}
+	}
+	return now.Add(wait)
+}
+
 func buildApprovalRow(approvalID string, req ApprovalRequest, now time.Time, timeoutDur time.Duration) *runtimetypes.HITLApproval {
 	onTimeout := req.OnTimeout
 	if onTimeout == "" {
 		onTimeout = ActionDeny
+	}
+	if Indefinite(timeoutDur) {
+		// Nothing expires, so no verdict may claim the expiry: every surface
+		// that shows an ask its on-timeout would be quoting one that can
+		// never be applied.
+		onTimeout = ""
 	}
 	row := &runtimetypes.HITLApproval{
 		ID:          approvalID,
@@ -530,7 +546,7 @@ func buildApprovalRow(approvalID string, req ApprovalRequest, now time.Time, tim
 		SessionID:   req.SessionID,
 		AgentName:   req.AgentName,
 		CreatedAt:   now,
-		ExpiresAt:   now.Add(timeoutDur),
+		ExpiresAt:   expiryAt(now, timeoutDur),
 	}
 	if req.MissionID != "" {
 		missionID := req.MissionID
@@ -551,8 +567,8 @@ func (s *service) RecordPendingApproval(ctx context.Context, approvalID string, 
 		return fmt.Errorf("hitlservice: RecordPendingApproval requires a non-empty approval ID")
 	}
 	timeoutDur := s.ceiling()
-	if req.TimeoutS > 0 {
-		timeoutDur = time.Duration(req.TimeoutS) * time.Second
+	if req.TimeoutS != 0 {
+		timeoutDur = WaitOf(req.TimeoutS)
 	}
 	row := buildApprovalRow(approvalID, req, time.Now().UTC(), timeoutDur)
 	if err := s.approvals.CreateHITLApproval(ctx, row); err != nil {

@@ -36,6 +36,12 @@ this command and is torn down when it exits, so nothing keeps running after the
 command returns. The unit runs unattended inside an envelope — --policy, or the
 default-mission-policy config — which is what bounds what the task may touch.
 
+` + toolGrantLine + `
+
+` + askWaitLine + ` Nobody is watching a run like this, so
+an envelope that asks is an envelope that stalls it until someone answers with
+'contenox approvals respond' or the wait runs out.
+
 The mission record and every report survive in the local store, so a run whose
 output was discarded can still be read back with 'contenox mission show'.
 

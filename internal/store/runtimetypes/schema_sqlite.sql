@@ -212,7 +212,10 @@ CREATE INDEX IF NOT EXISTS idx_agents_kind ON agents(kind);
 -- docs/development/blueprints/acp/fleet-consolidation.md, slice C1, defect
 -- D3). state starts 'pending' and ends exactly once, at 'approved'/'denied'
 -- (via Respond) or 'expired' (the sweeper, once expires_at passes with
--- nobody having answered, applying on_timeout — default deny).
+-- nobody having answered, applying on_timeout — default deny). A zero
+-- expires_at is the ask an operator gave no deadline (envelope timeout =
+-- "never", or an approval-ceiling of never): the sweeper's range excludes
+-- it, so it stays pending until somebody answers it.
 -- diff is nullable: most tool calls have none. policy_name/matched_rule
 -- mirror hitlservice.EvaluationResult so an operator can always name which
 -- rule gated a given action (matched_rule NULL means the policy's
