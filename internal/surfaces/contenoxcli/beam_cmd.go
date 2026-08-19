@@ -43,8 +43,14 @@ when there is none; a path opens that directory instead.
 
 ` + toolGrantLine + `
 
-` + askWaitLine + ` Answering inline resolves the same
-durable row, so an ask you walk away from still expires.
+` + askWaitLine + ` An ask is a durable row before the card
+appears and the turn waits on that row, so answering the card continues the turn
+right here — and the same ask stays answerable from another terminal or a phone,
+or expires on its own if you walk away. Quit with an ask still open and the turn
+checkpoints beside it, so answering it later, from anywhere, picks the run up
+where it stopped. A card that outlives its turn stays answerable and says so:
+its key line reads 'answering resumes the run' instead of offering an Esc that
+would have no turn left to cancel.
 
   ctrl+x ctrl+e   compose the draft in $EDITOR
   ctrl+s          switch sessions

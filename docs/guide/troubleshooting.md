@@ -166,7 +166,7 @@ Use the context window of the model you configured. The shipped chains use
 
 **Nothing resumes a *run*.** Reopening a session is not resuming a run — resuming a run is not a verb, it is a side effect of the two commands you would run anyway.
 
-**`contenox approvals respond <id> …`** records the verdict and, when a checkpoint exists under that ask, resumes the suspended run *in the responding process*. Ordering matters here and is deliberate: for a checkpointed run, the process proves it can build an engine **before** anything is recorded. A process with no usable model configuration is refused outright and the ask stays pending, answerable from a terminal that can reach your models — because a checkpointed run's verdict is one-shot and must not be spent by a process that cannot act on it.
+**`contenox approvals respond <id> …`** records the verdict. When the run that raised the ask is still up it is *waiting on that row*, so recording the verdict is all that is needed — it stops waiting and carries on where it runs, and nothing is resumed here. When a checkpoint exists under the ask instead, the run's process is gone and this command resumes it *in the responding process*. Ordering matters here and is deliberate: for a checkpointed run, the process proves it can build an engine **before** anything is recorded. A process with no usable model configuration is refused outright and the ask stays pending, answerable from a terminal that can reach your models — because a checkpointed run's verdict is one-shot and must not be spent by a process that cannot act on it.
 
 **`contenox approvals list`** is the reconciling read. Every run of it does three things:
 
@@ -184,7 +184,7 @@ A resume that itself fails is not lost: its checkpoint is retained with the fail
 |---|---|---|
 | **The firing CLI exits** (`mission fire --wait` timed out, or you hit Ctrl-C) | The mission record and every report filed so far. The unit is a child of that process and is torn down with it. | `contenox mission show <id>` to read it; `contenox mission stop <id>` to close it now instead of waiting for reclaim |
 | **A host dies** (`contenox beam`, `contenox acp`, `contenox serve`, or the firing CLI is killed or crashes) | Everything durable. Its units die with it; their mission rows stay `open` with a heartbeat that will never advance. | `contenox mission list` (or `mission show`, or `doctor`) — each reclaims dead-host missions on the way. A host booting sweeps too. |
-| **The asking process dies** while an ask is pending | The ask row, and the run's checkpoint — both exist from the moment the ask is raised. | `contenox approvals respond <id> …` — it resumes the run here. If nothing was checkpointed under it, the verdict is recorded and it says so plainly. |
+| **The asking process dies** while an ask is pending | The ask row, which exists from the moment the ask is raised, and the run's checkpoint, written beside it as the process leaves. | `contenox approvals respond <id> …` — it resumes the run here. If nothing was checkpointed under it, the verdict is recorded and it says so plainly. |
 | **A resumer dies mid-resume** | The checkpoint, with its claim. The claim goes stale after 10 minutes. | `contenox approvals list` — it re-derives the stranded set and finishes them in that process |
 | **The machine restarts** | All of it — missions, reports, asks, checkpoints, inbox, config are in the local database. Nothing resumes on its own; there is no daemon. | `contenox approvals list`, then `contenox mission list` (or `contenox doctor`) |
 
@@ -194,7 +194,7 @@ A resume that itself fails is not lost: its checkpoint is retained with the fail
 
 **Cause.** A mission unit is a child subprocess of the host that fired it. The host is gone; the row is not.
 
-**Fix — wait, or close it yourself.** The runtime reclaims it automatically, but on a deliberately generous bound: **six hours of heartbeat silence**, widened further when the mission has an ask parked on it whose own wait window is longer than that — and never at all while it holds an ask with no deadline (`timeout = "never"`), which explains any silence. Reaping live work is unrecoverable; reaping late only delays a row you were already ignoring.
+**Fix — wait, or close it yourself.** The runtime reclaims it automatically, but on a deliberately generous bound: **six hours of heartbeat silence**, widened further when the mission has an ask still open on it whose own wait window is longer than that — and never at all while it holds an ask with no deadline (`timeout = "never"`), which explains any silence. Reaping live work is unrecoverable; reaping late only delays a row you were already ignoring.
 
 The sweep is lazy, not scheduled. It runs on a host coming up, on `contenox mission list`, on `contenox mission show`, and on `contenox doctor` (text output). With none of those happening, the row simply waits.
 

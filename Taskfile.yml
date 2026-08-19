@@ -23,6 +23,19 @@ vars:
     sh: ls {{.ROOT_DIR}}/tools/rust-sdk/target/debug/testy 2>/dev/null || true
   ACP_MCP_ECHO_BIN:
     sh: ls {{.ROOT_DIR}}/tools/rust-sdk/target/debug/mcp-echo-server 2>/dev/null || true
+  # The black-box CLI suite is Rust too (tools/contenox-e2e/README.md explains
+  # why it cannot be Go). Detected rather than required: a checkout without a
+  # Rust toolchain still runs every other gate.
+  CARGO_BIN:
+    sh: command -v cargo 2>/dev/null || true
+  # The test-name convention CONTRIBUTING publishes, written down once so the
+  # gates below and CI select by it instead of by hand-copied -run strings:
+  # TestUnit_ is the isolated fast loop, TestIntegration_ takes real
+  # dependencies, TestSystem_/TestE2E_ drive whole workflows. The optional
+  # infix is load-bearing — it is what also selects the TestHostE2E_ and
+  # TestFleetE2E_ names already in the tree, which a plain '^TestE2E_' drops.
+  SYSTEM_TESTS: '^Test([A-Za-z0-9]+)?(System|E2E)_'
+  INTEGRATION_TESTS: '^TestIntegration_'
 
 tasks:
   default:
@@ -64,12 +77,17 @@ tasks:
       - go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   test:
-    desc: Full serial Go test suite
+    desc: Full serial Go test suite, every test whatever its name
     cmds:
       - GOMAXPROCS=1 go test -timeout 30m ./...
 
+  # -short is not a gate. It means "unit only": it switches off every case that
+  # needs a container, a kernel feature, a peer binary or a spawned contenox,
+  # which is most of what the product is. Shipping on this task alone is how a
+  # green suite hid a product that failed a ten-second manual test. The release
+  # claim is test-system; this one is the inner loop.
   test-unit:
-    desc: Fast unit gate (TestUnit_, -short)
+    desc: 'Fast inner loop: TestUnit_ under -short. NOT a release gate — that is test-system.'
     cmds:
       - GOMAXPROCS=4 go test -short -timeout 15m -run '^TestUnit_' ./...
 
@@ -173,10 +191,74 @@ tasks:
       - task: test-kv-valkey
       - task: test-substrate
 
-  test-system:
-    desc: System tests (TestSystem_)
+  # Shared body of test-system and test-integration. `go test` prints a skip
+  # only under -v and still ends the package in `ok`, so a suite whose every
+  # case skipped for want of Docker, a kernel feature or a peer binary is
+  # indistinguishable from one that proved every case. That is the same false
+  # green backend-suite exists to stop, one level up, so the census here names
+  # every case that did not run: "141 selected" must never be read as "141
+  # proved". -count=1 for the same reason — a cached ok from an earlier,
+  # better-equipped run is a false green in a third disguise.
+  named-suite:
+    internal: true
+    silent: true
     cmds:
-      - GOMAXPROCS=1 go test -run '^TestSystem_' ./...
+      - |
+        set -o pipefail
+        mkdir -p {{.BIN_DIR}}
+        log={{.BIN_DIR}}/{{.NAME}}.log
+        # `|| status=$?` rather than a bare pipeline: task runs these scripts
+        # under errexit, so a failing run would abort before the census that
+        # explains it. The status is re-raised at the end, unchanged.
+        status=0
+        GOMAXPROCS=1 go test -v -count=1 -timeout {{.TIMEOUT}} -run '{{.PATTERN}}' {{if .SKIP}}-skip '{{.SKIP}}' {{end}}./... 2>&1 | tee "$log" || status=$?
+        passed=$(grep -c '^--- PASS: ' "$log" || true)
+        skipped=$(grep -c '^--- SKIP: ' "$log" || true)
+        printf '\n==> %s: %s passed, %s SKIPPED (not passed)\n' '{{.NAME}}' "$passed" "$skipped"
+        if [ "$skipped" != "0" ]; then
+          grep '^--- SKIP: ' "$log" | sed 's/^--- SKIP: /    did not run: /'
+          printf '    A skip is not a pass: each line above is a case this run did not prove.\n'
+        fi
+        exit $status
+
+  # The release claim. Never -short — these are precisely the cases -short
+  # switches off. SKIP=<regexp> excludes cases by name: CI passes it to keep the
+  # multi-GB model pulls out of the per-push run, the nightly gate passes
+  # nothing so everything is attempted.
+  test-system:
+    desc: 'The release gate: every TestSystem_/TestE2E_ case, with a census of what skipped (SKIP=<regexp> excludes)'
+    cmds:
+      - task: named-suite
+        vars:
+          NAME: test-system
+          PATTERN: '{{.SYSTEM_TESTS}}'
+          TIMEOUT: 45m
+          SKIP: '{{.SKIP}}'
+
+  # Cross-package cases against real dependencies. Kept a separate task from
+  # test-system because its dependencies differ: internal/libsandbox needs a
+  # Landlock kernel and unprivileged user namespaces, which a stock Ubuntu
+  # refuses until the sysctl in docs/guide/confinement/sandbox.md is set.
+  test-integration:
+    desc: 'TestIntegration_ against real dependencies, with a census of what skipped (SKIP=<regexp> excludes)'
+    cmds:
+      - task: named-suite
+        vars:
+          NAME: test-integration
+          PATTERN: '{{.INTEGRATION_TESTS}}'
+          TIMEOUT: 20m
+          SKIP: '{{.SKIP}}'
+
+  # Several hundred tests still carry names that predate the convention
+  # (TestLoopback_, TestManager_, TestFleetService_, TestConformance_, …). They
+  # are real tests and neither named gate selects them, so test-all runs this
+  # complement rather than a second full ./... pass. Between the three gates
+  # every test in the tree runs; only TestUnit_ runs twice, once under -short in
+  # the fast gate and once here with -short off.
+  test-rest:
+    desc: Everything the named gates do not select (test names that predate the convention)
+    cmds:
+      - GOMAXPROCS=1 go test -timeout 30m -skip '{{.SYSTEM_TESTS}}|{{.INTEGRATION_TESTS}}' ./...
 
   test-cli-verbose:
     desc: Verbose CLI package tests
@@ -233,6 +315,65 @@ tasks:
           printf "\n==> SKIPPED, not passed:%b\n\n" "$skipped"
         fi
 
+  # A gate beside test-system, not below it. This is the only suite that proves
+  # anything about the product a user actually meets: it execs the SHIPPED binary
+  # and reads state back through the product's own commands, so it cannot
+  # construct an internal, reach an unexported field, or swap a fake in — there
+  # is no `internal/` to import from Rust. tools/contenox-e2e/README.md has the
+  # full rule set and the reason the language is not Go.
+  #
+  # --no-fail-fast, because cargo stops at the first failing test BINARY: one
+  # broken file otherwise hides every green file after it, and a fix lands
+  # against a census nobody has seen. And a quarantine census for the same
+  # reason named-suite prints a skip census one gate up. A case marked
+  # `#[ignore = "confirmed defect: ..."]` is a documented promise the product
+  # does not keep, written as if it did; it is the opposite of a pass, and
+  # "N passed" must never be read as "N+M proved".
+  e2e-cli:
+    desc: 'Black-box CLI e2e: a Rust suite driving the shipped binary from outside the Go module, with a census of what is quarantined'
+    deps: [build]
+    dir: '{{.ROOT_DIR}}/tools/contenox-e2e'
+    silent: true
+    preconditions:
+      - sh: test -n "{{.CARGO_BIN}}"
+        msg: 'install Rust (https://rustup.rs) — see tools/contenox-e2e/README.md'
+    cmds:
+      - cargo fmt --check
+      # CONTENOX_BIN hands the suite the binary the deps step just built, so no
+      # case shells out to `go build`. Without it the harness builds its own.
+      - |
+        set -o pipefail
+        mkdir -p {{.BIN_DIR}}
+        log={{.BIN_DIR}}/e2e-cli.log
+        # `|| status=$?` rather than a bare pipeline: task runs these scripts
+        # under errexit, so a failing run would abort before the census that
+        # explains it. The status is re-raised at the end, unchanged.
+        status=0
+        CONTENOX_BIN={{.BIN}} cargo test --no-fail-fast {{.CLI_ARGS}} 2>&1 | tee "$log" || status=$?
+        passed=$(grep -cE '^test .+ \.\.\. ok$' "$log" || true)
+        quarantined=$(grep -cE '^test .+ \.\.\. ignored' "$log" || true)
+        printf '\n==> e2e-cli: %s passed, %s QUARANTINED (not passed)\n' "$passed" "$quarantined"
+        if [ "$quarantined" != "0" ]; then
+          grep -E '^test .+ \.\.\. ignored' "$log" | sed -E 's/^test ([^ ]+) \.\.\. ignored,? ?/    did not run: \1 — /'
+          printf '    Each line above is a documented promise this run did not prove.\n'
+          printf "    Reproduce every one of them with: task e2e-cli -- -- --ignored\n"
+        fi
+        exit $status
+
+  # Same contract as acp-suites: named by hand it fails when Rust is missing,
+  # because you asked for it; inside test-all it skips loudly instead.
+  e2e-cli-optional:
+    desc: 'The black-box CLI suite when a Rust toolchain is present, a loud skip when it is not'
+    silent: true
+    cmds:
+      - |
+        set -e
+        if [ -n "{{.CARGO_BIN}}" ]; then
+          task e2e-cli
+        else
+          printf "\n==> SKIPPED, not passed:\n  - e2e-cli   install Rust (tools/contenox-e2e/README.md)\n\n"
+        fi
+
   acp-host-e2e:
     desc: 'Registry→resolve→spawn→session host path, end to end (every case needs a binary or a non-sandboxed spawn path — all skip on a bare checkout)'
     cmds:
@@ -250,8 +391,15 @@ tasks:
       - task: test-cli-help
       - task: spec:verify
       - task: acp-suites
-      - task: test
-      - 'echo "==> test-all: every gate that ran is green — re-read any SKIPPED notice above before releasing"'
+      - task: e2e-cli-optional
+      # The release claim, named rather than implied: the system and e2e cases
+      # run as their own gates so a failure here reads as "the product broke",
+      # not as one line inside a 4000-test sweep. test-rest then picks up the
+      # names that predate the convention, so the whole tree still runs.
+      - task: test-system
+      - task: test-integration
+      - task: test-rest
+      - 'echo "==> test-all: every gate that ran is green — re-read every SKIPPED notice above before releasing"'
 
   dev-install:
     desc: Build and put the CLI on your PATH (~/.local/bin, or %LOCALAPPDATA%\Programs\contenox on Windows)

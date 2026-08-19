@@ -36,9 +36,9 @@ func permissionRequestFor(askID string) libacp.RequestPermissionRequest {
 }
 
 // TestUnit_AttachAskRecovery_CarriesDeadlineAndRecoveryCommand pins what a
-// parked permission card needs to stay actionable: the ask's own deadline (so a
-// client can count down), the verdict that lands at it, and the command that
-// answers it from any other process.
+// permission card needs to stay actionable: the ask's own deadline (so a client
+// can count down to the on_timeout verdict), the verdict that lands at it, and
+// the command that answers the same row from any other process.
 func TestUnit_AttachAskRecovery_CarriesDeadlineAndRecoveryCommand(t *testing.T) {
 	tr, db := newRecoveryTestTransport(t)
 	expires := time.Now().UTC().Add(42 * time.Minute).Truncate(time.Second)
@@ -60,7 +60,7 @@ func TestUnit_AttachAskRecovery_CarriesDeadlineAndRecoveryCommand(t *testing.T) 
 		var rec askRecovery
 		require.NoError(t, json.Unmarshal(raw, &rec))
 		require.Equal(t, "ask-park-1", rec.AskID)
-		require.Equal(t, expires.Format(time.RFC3339), rec.ExpiresAt, "the countdown must run to the ask's own expiry, not the park window")
+		require.Equal(t, expires.Format(time.RFC3339), rec.ExpiresAt, "the countdown must run to the ask's own expiry, which is also the wait the blocked call is serving")
 		require.Equal(t, "deny", rec.OnTimeout)
 		require.Equal(t, "contenox approvals respond ask-park-1 --approve|--deny", rec.RecoveryCommand)
 

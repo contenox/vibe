@@ -158,7 +158,8 @@ func (d *nativeDriver) promptViaRegistry(ctx context.Context, req libacp.PromptR
 	select {
 	case <-turn.Done():
 		turn.Detach(viewer.ID())
-		return nativeResultToResponse(turn.Result())
+		res := turn.Result()
+		return nativeResultToResponse(res, t.askAnswerableHere(req.SessionID, res.ApprovalID))
 	case <-t.connCtx.Done():
 		// The turn keeps running; its result is journaled for the reattaching client.
 		turn.Detach(viewer.ID())
@@ -167,14 +168,16 @@ func (d *nativeDriver) promptViaRegistry(ctx context.Context, req libacp.PromptR
 }
 
 // nativeResultToResponse maps a completed turn's Result onto the ACP prompt
-// response.
-func nativeResultToResponse(res nativeturn.Result) (libacp.PromptResponse, error) {
+// response. answerableHere is askAnswerableHere for the suspended turn's
+// approval, so the reattaching client is told to answer where it already is
+// exactly when it can (see explainSuspension).
+func nativeResultToResponse(res nativeturn.Result, answerableHere bool) (libacp.PromptResponse, error) {
 	if res.Err != nil {
 		return libacp.PromptResponse{StopReason: res.StopReason}, libacp.InternalError(res.Err.Error())
 	}
 	resp := libacp.PromptResponse{StopReason: res.StopReason}
 	if res.Suspended {
-		resp.Meta = suspensionMeta(res.ApprovalID)
+		resp.Meta = suspensionMeta(res.ApprovalID, answerableHere)
 	}
 	return withDroppedContentMeta(resp, res.DroppedContentKinds), nil
 }
@@ -324,7 +327,7 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 		approvalID = resp.SuspendedApprovalID
 		emit(turnCtx, libacp.SessionNotification{
 			SessionID: req.SessionID,
-			Update:    suspensionNotice(approvalID),
+			Update:    suspensionNotice(approvalID, t.askAnswerableHere(req.SessionID, approvalID)),
 		})
 	}
 

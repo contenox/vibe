@@ -17,8 +17,8 @@ import (
 
 // The asks here are written straight to the store rather than raised through a
 // turn: what is under test is what an attach does with a row that outlived its
-// asker, and a live turn cannot produce that state without waiting out the park
-// window.
+// asker. A live turn holds its own ask open and waits on it in place, so it
+// reaches this state only by having its process leave or its asks detached.
 
 // parkedAskFleet is a fleet whose transports carry a real hitlservice over the
 // fleet's own store, plus the resume hook a verdict must reach.
@@ -53,7 +53,7 @@ func (pf *parkedAskFleet) resumedRuns() []string {
 	return append([]string(nil), pf.resumed...)
 }
 
-// parkAsk writes the state a park leaves behind: a pending ask naming its
+// parkAsk writes the state a suspension leaves behind: a pending ask naming its
 // session, and the chain checkpoint the run suspended into.
 func (pf *parkedAskFleet) parkAsk(t *testing.T, askID, contenoxSessionID string) *runtimetypes.HITLApproval {
 	t.Helper()

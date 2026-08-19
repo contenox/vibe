@@ -9,15 +9,16 @@ import (
 
 const stopReasonMetaKey = "contenox.stopReason"
 
-// stopReasonSuspended names a turn that parked on a human approval. It is
-// deliberately not a libacp.StopReason, whose set is closed: the spec field stays
-// end_turn and the truth travels in `_meta`.
+// stopReasonSuspended names a turn that ended with a human approval still open
+// behind it. It is deliberately not a libacp.StopReason, whose set is closed:
+// the spec field stays end_turn and the truth travels in `_meta`.
 const stopReasonSuspended = "suspended"
 
 const stopReasonFailed = "failed"
 
 // stopReasonExplained is the operator-facing form of a turn's stop reason: what
-// happened, and the command that resolves it.
+// happened, and — only when this surface cannot resolve it itself — the command
+// that resolves it elsewhere.
 type stopReasonExplained struct {
 	Reason      string `json:"reason"`
 	Explanation string `json:"explanation"`
@@ -55,16 +56,48 @@ func explainStopReason(r libacp.StopReason) (stopReasonExplained, bool) {
 	return stopReasonExplained{}, false
 }
 
-func explainSuspension(approvalID string) stopReasonExplained {
+// explainSuspension is the operator-facing form of a genuinely suspended turn.
+// A gated call does not suspend a turn by itself — it records its durable row
+// and then blocks in place watching it, so answering continues the same turn —
+// which leaves exactly two ways to arrive here: the run's asks were detached, or
+// the process was going away. The sentence says so, because the ask is still
+// open and still answerable; nobody ran out of anything.
+//
+// answerableHere says the surface reading this can answer the ask itself: its
+// permission card is on the operator's screen, or comes back as one the next
+// time this session attaches (see reofferParkedAsks). Then no command is named.
+// Sending a person to another terminal to answer what is already in front of
+// them is the whole defect this text exists to not repeat.
+func explainSuspension(approvalID string, answerableHere bool) stopReasonExplained {
 	e := stopReasonExplained{
 		Reason:      stopReasonSuspended,
-		Explanation: "The turn is suspended, not finished: a tool call is waiting on a human approval that nobody answered inside the park window. The run is checkpointed — answering the approval resumes it from exactly where it stopped, in this process or any other. The gated tool has not run.",
+		Explanation: "The turn is suspended, not finished. A gated call normally holds its turn open and waits on the approval in place; this run's asks were detached, or its process was going away, so the ask outlived the turn instead. The run is checkpointed and the approval is still open: answering it resumes the run from exactly where it stopped, in this process or any other. Not answering is also an answer: when the ask's wait runs out, the rule's on_timeout verdict applies. The gated tool has not run.",
 		ApprovalID:  approvalID,
+	}
+	if answerableHere {
+		e.Explanation += " Its approval card belongs to this session: answer it here, or reattach to be shown it again."
+		return e
 	}
 	if approvalID != "" {
 		e.Command = "contenox approvals respond " + approvalID + " --approve  (or --deny)"
 	}
 	return e
+}
+
+// askAnswerableHere reports whether the ask behind a suspension can be answered
+// on this connection: a permission card is open for it right now, or one is
+// raised again the next time this session attaches, which is what
+// reofferParkedAsks does with every pending ask a session still holds. Either
+// way the operator answers where they already are, and the explanation must not
+// send them anywhere else.
+//
+// A Transport with no connection, or with no ask surface to list from, has
+// neither card to offer; then the command is the only thing that helps.
+func (t *Transport) askAnswerableHere(sid libacp.SessionID, approvalID string) bool {
+	if approvalID == "" || t.conn == nil {
+		return false
+	}
+	return t.isPermissionPending(sid, approvalID) || t.deps.Asks != nil
 }
 
 // explainRecoveredFailure explains a turn whose task errored and whose on_failure
@@ -95,23 +128,25 @@ func recoveredFailureNotice(cause string) libacp.SessionUpdate {
 	return update
 }
 
-func suspensionMeta(approvalID string) json.RawMessage {
-	meta, err := json.Marshal(map[string]stopReasonExplained{stopReasonMetaKey: explainSuspension(approvalID)})
+func suspensionMeta(approvalID string, answerableHere bool) json.RawMessage {
+	meta, err := json.Marshal(map[string]stopReasonExplained{stopReasonMetaKey: explainSuspension(approvalID, answerableHere)})
 	if err != nil {
 		return nil
 	}
 	return meta
 }
 
-// suspensionNotice is the agent message a parked turn announces into the
-// conversation, so a park is visible in a client that reads no `_meta`.
-func suspensionNotice(approvalID string) libacp.SessionUpdate {
-	text := stopReasonMessage(explainSuspension(approvalID))
+// suspensionNotice is the agent message a suspended turn announces into the
+// conversation, so the suspension is visible in a client that reads no `_meta`.
+// It is sent only where the turn genuinely suspended: a turn still blocked on
+// an approval has not stopped, and a cancelled one is explained as a cancel.
+func suspensionNotice(approvalID string, answerableHere bool) libacp.SessionUpdate {
+	text := stopReasonMessage(explainSuspension(approvalID, answerableHere))
 	if approvalID != "" {
 		text += "\nApproval: " + approvalID
 	}
 	update := libacp.NewAgentMessageChunk(text)
-	update.Meta = suspensionMeta(approvalID)
+	update.Meta = suspensionMeta(approvalID, answerableHere)
 	return update
 }
 
@@ -134,7 +169,7 @@ func stopReasonAnnounced(r libacp.StopReason) bool {
 // both ended short and discarded an attachment must report both.
 //
 // An external session is left untouched: its stop reason came from a
-// downstream agent, and these commands are not that agent's levers. A parked
+// downstream agent, and these commands are not that agent's levers. A suspended
 // turn passes through unchanged too — it arrives already carrying its
 // suspension `_meta` (see suspensionMeta), and its end_turn token has no
 // explanation of its own to overwrite it with.

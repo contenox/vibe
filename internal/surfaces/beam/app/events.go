@@ -72,6 +72,11 @@ func (a *app) onBridge(ev enginebridge.Event) {
 
 	case enginebridge.PermissionRequested:
 		a.card = approval.New(e)
+		// A card arriving with no turn of ours in flight is NOT assumed
+		// detached: the session's other attachment may be running the turn
+		// this gates, and cancelling that is exactly what Esc should still
+		// offer. Only a turn ending under the card proves otherwise.
+
 		// The ask settles into scrollback whole and immediately: it is
 		// complete on arrival, and the live region can neither hold a card
 		// this tall (its over-tall tail is what survives, clipping the
@@ -136,6 +141,12 @@ func (a *app) onBridge(ev enginebridge.Event) {
 		// reached beam.
 		if e.StopReason == libacp.StopReasonCancelled {
 			a.retireCard()
+		} else if a.card != nil {
+			// A card outliving its turn is not stale: a gated call waits on
+			// its ask in place, so a turn that ended with one still open is a
+			// suspended run whose ask is answerable from anywhere, here
+			// included. Only the offer to cancel a turn goes away with it.
+			a.card.MarkDetached()
 		}
 		if sessionvitals.NotifiableStop(e.StopReason) {
 			a.bell(now, false)

@@ -43,7 +43,7 @@ func TestSystem_S6Gate_LateVerdictThroughTheSameAskChannel_ResumesWithoutAnExter
 	defer inst.close()
 	createSession(t, inst.db, sessionID)
 
-	resp, err := inst.agent.Prompt(ctx, agentservice.PromptRequest{
+	resp, err := inst.agent.Prompt(detachedRun(ctx), agentservice.PromptRequest{
 		SessionID:  sessionID,
 		InputValue: e2eInput(),
 		InputType:  taskengine.DataTypeChatHistory,
@@ -106,7 +106,7 @@ func TestSystem_S6Gate_LateVerdictThroughTheSameAskChannel_DenyAlsoResumes(t *te
 	defer inst.close()
 	createSession(t, inst.db, sessionID)
 
-	resp, err := inst.agent.Prompt(ctx, agentservice.PromptRequest{
+	resp, err := inst.agent.Prompt(detachedRun(ctx), agentservice.PromptRequest{
 		SessionID:  sessionID,
 		InputValue: e2eInput(),
 		InputType:  taskengine.DataTypeChatHistory,
@@ -162,7 +162,7 @@ func TestSystem_S6Gate_ContinuationModelError_SurfacesAsChainFailure_NeverSilent
 	defer inst.close()
 	createSession(t, inst.db, sessionID)
 
-	resp, err := inst.agent.Prompt(ctx, agentservice.PromptRequest{
+	resp, err := inst.agent.Prompt(detachedRun(ctx), agentservice.PromptRequest{
 		SessionID:  sessionID,
 		InputValue: e2eInput(),
 		InputType:  taskengine.DataTypeChatHistory,

@@ -72,6 +72,9 @@ type AttentionAsk struct {
 	Detail    string
 	// AskID is the durable row identity, the engine tool-call ID on the suspendable path.
 	AskID string
+	// Detached asks the channel to release this call once the row exists,
+	// instead of blocking on the answer.
+	Detached bool
 }
 
 type provider struct {
@@ -253,7 +256,12 @@ func (p *provider) execAskAttention(ctx context.Context, missionID string, input
 		p.heartbeat(ctx, missionID)
 		ask := AttentionAsk{MissionID: missionID, Summary: summary, Detail: detail}
 		if callID != "" && taskengine.ToolCallSuspendable(ctx) && taskengine.HasCheckpointSaver(ctx) {
+			// The engine's call ID doubles as the checkpoint key, so a question
+			// this run may suspend on is answerable after a restart.
 			ask.AskID = callID
+			// Blocking is the default; only a caller that declared its asks
+			// detached gets the process back before the answer arrives.
+			ask.Detached = taskengine.AsksDetached(ctx)
 		}
 		answer, err := p.asker.RaiseAttention(ctx, ask)
 		if err == nil {

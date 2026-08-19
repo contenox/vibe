@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
@@ -79,12 +80,16 @@ func (s *service) RegisterApprovalWaiter(approvalID string) (<-chan bool, func()
 		case <-done:
 		}
 	}()
+	// Idempotent: a caller that unparks early still defers its release.
+	var once sync.Once
 	return out, func() {
-		s.mu.Lock()
-		if cur, ok := s.pending[approvalID]; ok && cur == ch {
-			delete(s.pending, approvalID)
-		}
-		s.mu.Unlock()
-		close(done)
+		once.Do(func() {
+			s.mu.Lock()
+			if cur, ok := s.pending[approvalID]; ok && cur == ch {
+				delete(s.pending, approvalID)
+			}
+			s.mu.Unlock()
+			close(done)
+		})
 	}
 }

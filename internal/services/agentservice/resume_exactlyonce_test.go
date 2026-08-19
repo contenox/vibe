@@ -140,7 +140,7 @@ func seChainFailingAfterTheTool() *taskengine.TaskChainDefinition {
 func suspendOne(t *testing.T, inst *seInstance, effectPath, sessionID string, chain *taskengine.TaskChainDefinition) {
 	t.Helper()
 	ctx := context.Background()
-	resp, err := inst.agent.Prompt(ctx, agentservice.PromptRequest{
+	resp, err := inst.agent.Prompt(detachedRun(ctx), agentservice.PromptRequest{
 		SessionID:  sessionID,
 		InputValue: e2eInput(),
 		InputType:  taskengine.DataTypeChatHistory,

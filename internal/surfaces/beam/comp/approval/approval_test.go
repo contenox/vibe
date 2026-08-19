@@ -583,6 +583,62 @@ func TestUnit_PendingFooterCarriesTheSpinner(t *testing.T) {
 	}
 }
 
+// TestUnit_DetachedCardOffersTheAnswerInsteadOfTheCancel: a card whose turn
+// has ended keeps every way of answering it and drops the one promise that
+// stopped being true — that Esc here cancels the turn waiting on it. Answering
+// is what resumes the suspended run, so that is what the line says.
+func TestUnit_DetachedCardOffersTheAnswerInsteadOfTheCancel(t *testing.T) {
+	var calls []bool
+	c := New(sampleEvent(func(allow bool) { calls = append(calls, allow) }))
+	c.MarkDetached()
+
+	if !c.Detached() || c.State() != StatePending {
+		t.Fatalf("detached = %v state = %v, want a pending card that knows its turn is gone", c.Detached(), c.State())
+	}
+	lines := texts(c.Render(80, false, ""))
+	if got := lines[len(lines)-1]; got != "y allow · n deny · answering resumes the run" {
+		t.Fatalf("footer = %q", got)
+	}
+	ascii := texts(c.Render(80, true, ""))
+	if got := ascii[len(ascii)-1]; got != "y allow - n deny - answering resumes the run" {
+		t.Fatalf("ascii footer = %q", got)
+	}
+	if strings.Contains(strings.Join(lines, "\n"), "Esc cancels turn") {
+		t.Fatal("a card with no turn behind it is still offering to cancel one")
+	}
+	prompt := texts(c.Prompt(80, false, ""))
+	if len(prompt) != PromptRows {
+		t.Fatalf("live block = %d rows, want %d", len(prompt), PromptRows)
+	}
+	if got := prompt[len(prompt)-1]; got != "y allow · n deny · answering resumes the run" {
+		t.Fatalf("live footer = %q", got)
+	}
+
+	// Detaching changes only what is offered: the ask still answers, once.
+	c.Resolve(true)
+	c.Resolve(false)
+	if len(calls) != 1 || !calls[0] {
+		t.Fatalf("underlying Resolve calls = %v, want exactly [true]", calls)
+	}
+	if got := texts(c.Render(80, false, "")); got[len(got)-1] != "✓ allowed" {
+		t.Fatalf("answered footer = %q", got[len(got)-1])
+	}
+
+	// A card that already reached a verdict has no offer left to rewrite.
+	decided := New(sampleEvent(nil))
+	decided.Resolve(false)
+	decided.MarkDetached()
+	if decided.Detached() {
+		t.Fatal("detaching rewrote a card that was already answered")
+	}
+	cancelled := New(sampleEvent(nil))
+	cancelled.MarkCancelled()
+	cancelled.MarkDetached()
+	if cancelled.Detached() {
+		t.Fatal("detaching rewrote a cancelled card")
+	}
+}
+
 // TestUnit_NoDiffFallsBackToANewContentSummary: no diff and new content summarizes as a line count, never a blank section or a content dump.
 func TestUnit_NoDiffFallsBackToANewContentSummary(t *testing.T) {
 	ev := sampleEvent(nil)

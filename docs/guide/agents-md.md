@@ -14,7 +14,9 @@ This page is the mechanism. For the argument — what belongs in the file, what 
 
 ## How it loads
 
-When a new session starts — an ACP session (`contenox acp` / `acpx`) or one created with `contenox session new` — contenox walks up from the current working directory to find the closest `AGENTS.md`. If found, it's prepended to the chat history as a single `system` message — once per session, not once per turn — and persisted alongside the conversation.
+When `contenox chat` opens a conversation, it walks up from the current working directory to find the closest `AGENTS.md`. If found, it's prepended to the chat history as a single `system` message — once per session, not once per turn — and persisted alongside the conversation.
+
+> **Not yet everywhere.** Today only `contenox chat` loads it. The editor surfaces (`contenox acp`, `contenox acpx`), `beam`, and the unattended shapes (`contenox run`, `contenox mission fire`) start their sessions without it, so a project's `AGENTS.md` does not reach an agent driven from an editor or from beam. This is a gap, not a design: those surfaces open their session on a client-supplied working directory, which is where the walk has to start for them.
 
 Because it lands in chat history (not the system prompt), it's:
 
@@ -64,13 +66,13 @@ The spec is open — any markdown — but useful sections include:
 
 ## Verifying it loaded
 
-After starting a session, the AGENTS.md content is the first message in the persisted history. Print the head of the active session to check:
+After a `contenox chat` turn, the AGENTS.md content is the first message in the persisted history. Print the head of the active session to check:
 
 ```bash
 contenox session show --head 1
 ```
 
-The first message should be a `system` message whose content is your `AGENTS.md` (plus a short wrapper). If it isn't there, the loader didn't find an `AGENTS.md` in the working tree — confirm the file exists at or above your current directory.
+The first message should be a `system` message whose content is your `AGENTS.md` (plus a short wrapper). If it isn't there, the loader didn't find an `AGENTS.md` in the working tree — confirm the file exists at or above your current directory, and that the session was opened by `contenox chat` rather than by one of the surfaces named above.
 
 (The active session id is stored per-workspace in the SQLite KV store as a JSON-quoted value, so a hand-written `sqlite3` join against the `messages` table is fiddly to get right — `contenox session show` resolves the active session for you.)
 

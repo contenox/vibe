@@ -33,6 +33,7 @@ func (a missionAttentionAsker) RaiseAttention(ctx context.Context, ask missionto
 		MissionID: missionID,
 		AgentName: agentName,
 		AskID:     ask.AskID,
+		Detached:  ask.Detached,
 		OnRaised: func(askID string) {
 			a.publishAsked(ctx, missionservice.AttentionAskedEvent{
 				MissionID:       missionID,

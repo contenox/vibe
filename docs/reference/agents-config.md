@@ -234,8 +234,14 @@ with TOML sub-table syntax, so `[envelopes.a.b]` could not name an envelope.
 `--hitl-policy hitl-policy-review.json` and
 `config set hitl-policy-name hitl-policy-review.json` all resolve to it.
 Per-agent policies are emitted into that same namespace under the same filename
-rule, so an envelope may **not** take a declared agent's name: the collision is a
-startup error, never a silent overwrite.
+rule, so an envelope and a declared agent can want the same file. **The envelope
+owns it**, and the collision is reported rather than silently overwritten:
+`contenox agent list` prints `not carried  <agent>: posture — "<name>" is also an
+envelope in agents.toml, which owns hitl-policy-<name>.json; this agent runs
+under the envelope`. The declaration still compiles; the one thing it cannot
+carry is its own posture. The shipped set uses this on purpose — `acpx` is both
+a declared agent and an envelope — so naming an envelope after an agent is how
+you put that agent under an envelope you wrote.
 
 The render is derived and disposable. A `hitl-policy-<name>.json` you write at
 the top level of `.contenox/` or `~/.contenox/` shadows it and is never

@@ -1,8 +1,9 @@
 // Package approval renders beam's in-session HITL card: tool, arguments,
 // policy rule, and diff, in that order — diff last, closest to the y/n
 // line — across pending/resolved/cancelled. It decides nothing itself:
-// Resolve/MarkCancelled are app-driven state transitions, and there is no
-// client-side "always allow" memory — every gated call reaches a human.
+// Resolve/MarkCancelled/MarkDetached are app-driven state transitions, and
+// there is no client-side "always allow" memory — every gated call reaches a
+// human.
 package approval
 
 import (
@@ -114,6 +115,12 @@ type Card struct {
 
 	state   State
 	allowed bool
+	// detached marks a card no turn in this session is waiting on: the turn
+	// that raised it ended with the ask still open, which is what a gated
+	// call does only by suspending. Answering works exactly the same — the
+	// verdict lands on the same durable row — but there is no turn here for
+	// Esc to cancel, so the decision line stops offering one.
+	detached bool
 }
 
 // New builds a pending card from the bridge event, decoding RawInput once so
@@ -161,6 +168,22 @@ func (c *Card) MarkCancelled() {
 	}
 	c.state = StateCancelled
 }
+
+// MarkDetached records that the turn that raised this card has ended with the
+// ask still open, so nothing in this session is waiting on it. The ask itself
+// is untouched and still answerable — that is what resumes the suspended run —
+// so this changes only what the decision line promises. A card already resolved
+// or cancelled is left alone: its footer is a verdict, not an offer.
+func (c *Card) MarkDetached() {
+	if c.state != StatePending {
+		return
+	}
+	c.detached = true
+}
+
+// Detached reports whether the card outlived the turn that raised it.
+// See MarkDetached.
+func (c *Card) Detached() bool { return c.detached }
 
 // State reports the card's lifecycle state.
 func (c *Card) State() State { return c.state }
@@ -362,11 +385,19 @@ func (c *Card) footer(ascii bool, spinner string) frame.Line {
 	if spinner != "" {
 		l = append(l, frame.S(frame.StylePending, spinner), frame.S(frame.StyleNone, " "))
 	}
+	// The third segment is the only part a detached card must not repeat:
+	// offering to cancel a turn that already ended is the card claiming work
+	// nothing here is doing. What answering does instead is the honest hint,
+	// and it is the same key either way.
+	hint := "Esc cancels turn"
+	if c.detached {
+		hint = "answering resumes the run"
+	}
 	return append(l,
 		frame.S(frame.StyleStrong, "y"),
 		frame.S(frame.StyleMuted, " allow"+sep(ascii)),
 		frame.S(frame.StyleStrong, "n"),
-		frame.S(frame.StyleMuted, " deny"+sep(ascii)+"Esc cancels turn"),
+		frame.S(frame.StyleMuted, " deny"+sep(ascii)+hint),
 	)
 }
 

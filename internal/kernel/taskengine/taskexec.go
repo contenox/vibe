@@ -858,9 +858,10 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 
 			var pendErr *ApprovalPendingError
 			if errors.As(err, &pendErr) {
-				// The call is awaiting a human past the fast window: no result
-				// is appended, and the unanswered tail is what the checkpoint
-				// records and resume re-executes.
+				// The ask is recorded and unanswered, and this process is not
+				// the one waiting for it: no result is appended, and the
+				// unanswered tail is what the checkpoint records and resume
+				// re-executes.
 				toolEnd()
 				taskErr = err
 				suspendedBatch = true

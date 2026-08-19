@@ -6,6 +6,7 @@ import (
 	_ "github.com/contenox/contenox/internal/models/modelrepo/gemini"
 	_ "github.com/contenox/contenox/internal/models/modelrepo/ollama"
 	_ "github.com/contenox/contenox/internal/models/modelrepo/openai"
+	_ "github.com/contenox/contenox/internal/models/modelrepo/scriptedtest"
 	_ "github.com/contenox/contenox/internal/models/modelrepo/vertex"
 	_ "github.com/contenox/contenox/internal/models/modelrepo/vllm"
 )

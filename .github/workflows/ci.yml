@@ -1,8 +1,15 @@
 # CI: hygiene gates (gofmt, vet, govulncheck), contenox compile smoke, Windows
 # cross-compile smoke, CLI help smoke, published-schema drift, and cheap
 # TestUnit_* Go tests, plus a container-backed smoke of the opt-in storage
-# backends and of the wiring that selects them.
-# No TestSystem_* / LLM integration tests — those run in release-gate.yml.
+# backends and of the wiring that selects them, plus the TestSystem_/TestE2E_/
+# TestIntegration_ suites that are the actual release claim, plus the black-box
+# CLI suite that drives the shipped binary from outside the Go module.
+#
+# Until this job existed, every push and PR ran `-run '^TestUnit_' -short` and
+# nothing else: not one of the ~141 TestSystem_/TestE2E_/TestIntegration_ cases
+# in the tree was selected by any per-push job, and they ran only in the nightly
+# release-gate. A suite of self-referential unit tests stayed green while the
+# product broke. The system-tests job below is what makes green mean something.
 #
 # Third-party actions are pinned to a commit SHA with a trailing version comment.
 # A floating tag (@v4) lets a compromised tag run arbitrary code in this job.
@@ -78,7 +85,11 @@ jobs:
       - name: Published JSON schemas match the Go types
         run: task spec:verify
 
-      - name: Cheap Go tests (TestUnit_* + -short only)
+      # The fast inner loop, first because it is cheap. It is explicitly NOT the
+      # release claim: -short switches off every case that needs a container, a
+      # kernel feature, a peer binary or a spawned contenox. The system-tests
+      # job is the gate.
+      - name: Cheap Go tests (TestUnit_* + -short only, not the gate)
         run: task test-unit
 
   # Postgres, NATS and Valkey are opt-in: an install that sets none of
@@ -143,3 +154,112 @@ jobs:
       # the -short unit gate skips them.
       - name: Substrate wiring on Postgres, NATS and Valkey
         run: task test-substrate
+
+  # The black-box CLI gate, run per change rather than only in the nightly
+  # release-gate. It is the only suite in this repository that proves anything
+  # about the product a user actually meets: a Rust crate that execs the SHIPPED
+  # binary and reads state back through the product's own commands — `contenox
+  # approvals list`, `mission show`, `session list`, `doctor`. Being a second
+  # language is the mechanism, not a style choice: from Rust there is no
+  # `internal/` to import, no unexported field to poke and no in-process runtime
+  # to stand a fake up in, so "end to end" is enforced by construction instead of
+  # by reviewer discipline. tools/contenox-e2e/README.md has the full rule set.
+  #
+  # It needs no credentials and no network: the model is replaced by the
+  # scripted-test backend, which replays a JSON dialog and calls nothing. That is
+  # exactly why it belongs on every push — nothing about it is too expensive or
+  # too secret to run per change.
+  #
+  # Read the census this job prints even when it is green. `task e2e-cli` ends
+  # with "N passed, M QUARANTINED (not passed)" and names every quarantined case:
+  # each is a documented promise the product does not keep, written as a test
+  # that asserts the promise and marked `#[ignore = "confirmed defect: ..."]`.
+  # A rising M is a regression the tick will not show you.
+  e2e-cli:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.25"
+          check-latest: true
+
+      # Rust ships on the ubuntu-latest runner image; this pins the components
+      # the gate uses rather than trusting the image to keep carrying them, and
+      # prints what it resolved so a toolchain change is visible in the log.
+      - name: Rust toolchain
+        run: |
+          rustup component add rustfmt || true
+          cargo --version
+          rustfmt --version
+
+      # Deliberately uncached. Caching cargo here would need a third-party action
+      # pinned to a SHA nobody in this change resolved by hand, and the header
+      # rule above is explicit that a pin is bumped by resolving the SHA, never
+      # by trusting a version comment. The suite has few dependencies and the
+      # cold compile is about a minute; add the cache when someone resolves the
+      # SHA properly.
+
+      - name: Install task
+        run: go install github.com/go-task/task/v3/cmd/task@latest
+
+      # `task e2e-cli` builds bin/contenox first (deps: [build]) and hands it to
+      # the suite through CONTENOX_BIN, so no case shells out to `go build`. It
+      # runs `cargo fmt --check` before the tests, then `cargo test
+      # --no-fail-fast` so one broken file cannot hide the twenty after it.
+      - name: Black-box CLI e2e against the shipped binary
+        run: task e2e-cli
+
+  # The release claim, run on every push and PR rather than only nightly.
+  #
+  # `task test-system` and `task test-integration` run under -v with -count=1
+  # and print a census of every case that skipped, so a run in which the
+  # workflow lost a dependency reports "N SKIPPED (not passed)" in the log
+  # instead of a green tick. Read that census when this job is green.
+  #
+  # Two deliberate exclusions, both of which the nightly release-gate runs
+  # without any SKIP:
+  #   TestSystem_Ollama*  starts an Ollama container and pulls multi-GB models.
+  #                       Minutes and tens of GB per push is not a per-PR cost.
+  #   TestSystem_VLLM*    self-skips unless CONTENOX_RUN_VLLM_TESTS=1, which
+  #                       nothing sets per-push. Excluded rather than left to
+  #                       skip, so the census lists only cases a runner could
+  #                       plausibly have run.
+  # Everything else is attempted. Cases whose dependency is genuinely absent on
+  # a GitHub runner still skip and are named by the census: Bedrock (no AWS
+  # credentials) and the ACP host e2e cases (no Rust reference peers — those are
+  # built and run in release-gate.yml).
+  system-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.25"
+          check-latest: true
+
+      - name: Install task
+        run: go install github.com/go-task/task/v3/cmd/task@latest
+
+      # The runner kernel has Landlock, but Ubuntu 24.04 blocks unprivileged
+      # user namespaces through AppArmor, and libsandbox's suites probe for that
+      # and skip — which is the whole confinement story going unproven. This is
+      # the same sysctl docs/guide/confinement/sandbox.md tells operators to
+      # set; without it these cases are skipped, not passed.
+      # Tolerant of a runner image that has no such knob: the suites probe the
+      # capability themselves and skip by name, so a missing sysctl must show up
+      # in the census rather than as a failed setup step.
+      - name: Allow unprivileged user namespaces (the libsandbox wall)
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          sysctl kernel.apparmor_restrict_unprivileged_userns || echo "no such sysctl on this image"
+
+      - name: System and e2e tests (TestSystem_, TestE2E_, TestHostE2E_, TestFleetE2E_)
+        run: task test-system SKIP='^TestSystem_(Ollama|VLLM)'
+
+      - name: Integration tests (TestIntegration_)
+        run: task test-integration

@@ -102,7 +102,8 @@ type Service interface {
 	AnswerFrom(ctx context.Context, askID, text, by string) error
 
 	// RequestAttention durably records a unit's question and blocks until
-	// Answer replies, the ceiling expires it, or ctx ends.
+	// Answer replies, the ceiling expires it, or ctx ends. A Detached request
+	// is released the moment the row exists instead, with AttentionPendingError.
 	RequestAttention(ctx context.Context, req AttentionRequest, sink taskengine.TaskEventSink) (string, error)
 
 	// Answer resolves a pending attention ask with the operator's reply and
@@ -179,12 +180,14 @@ var (
 
 const approvalPollInterval = time.Second
 
-// ResumeHook resumes the suspended run checkpointed under approvalID once its
-// verdict lands with nobody parked. Return ErrNoCheckpoint for a clean no-op.
+// ResumeHook resumes the run checkpointed under approvalID when its verdict
+// lands and no call in this process is still holding the gate open — the run
+// released the ask, or left. Return ErrNoCheckpoint for a clean no-op.
 type ResumeHook func(ctx context.Context, approvalID string) error
 
-// ApprovalRecorder creates the pending row before parking, and resolves it
-// inline on a fast-path verdict without triggering the resume hook.
+// ApprovalRecorder writes the pending row before anything waits on it, and
+// closes it inline — without triggering the resume hook — when the verdict
+// reaches the call that is still holding the gate open.
 type ApprovalRecorder interface {
 	RecordPendingApproval(ctx context.Context, approvalID string, req ApprovalRequest) error
 	ResolveApprovalInline(ctx context.Context, approvalID string, approved bool) error
@@ -647,7 +650,8 @@ func (s *service) resolveRecorded(ctx context.Context, approvalID string, approv
 		return nil
 	}
 
-	// Waiter gone: resume the suspended run synchronously.
+	// Nobody is waiting in this process: the run that raised this ask left it
+	// behind, so its checkpoint is what carries the verdict — resume it here.
 	if runHook && hook != nil {
 		if err := hook(ctx, approvalID); err != nil && !errors.Is(err, ErrNoCheckpoint) {
 			s.hitlLog(ctx, "turn failed", "approval_id", approvalID, "reason", "resume_failed", "error", err.Error())

@@ -116,8 +116,8 @@ Two flags carry the weight:
   in the next point.
 - **`--timeout`** (default 30m) caps the wait. There is no terminal in front of
   a scripted run, so a gated call has nobody to ask: it becomes a
-  [durable ask](/docs/guide/hitl/#what-a-parked-approval-looks-like), the run
-  parks, and the wait eventually times out with a non-zero exit. When a CI run
+  [durable ask](/docs/guide/hitl/#the-life-of-an-ask), the run
+  waits on it, and the wait eventually times out with a non-zero exit. When a CI run
   times out this way, the fix is in the envelope — the call the agent needed was
   gated, not allowed — and not in the prompt.
 

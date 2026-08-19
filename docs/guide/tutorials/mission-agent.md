@@ -320,7 +320,7 @@ oracle: WAIT for ask 56f0800b (5.508s) — it stays with a human
 
 The difference between those two runs is only the intent. The first said which
 convention to use, so the question was already answered and the oracle relayed
-it. The second did not, so it stayed with a person and the run suspended on the
+it. The second did not, so it stayed with a person and the run waited on the
 pending ask.
 
 That is the lesson worth taking from step 8: **the oracle's quality is your

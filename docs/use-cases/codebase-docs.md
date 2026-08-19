@@ -191,8 +191,9 @@ where that is settled rather than the prompt.
 
 **A gated call has nobody to ask.** There is no terminal in front of
 `contenox run`, so a call the envelope gates becomes a
-[durable ask](/docs/guide/hitl/#what-a-parked-approval-looks-like) and the run
-parks until someone answers it with `contenox approvals respond` — or until
+[durable ask](/docs/guide/hitl/#the-life-of-an-ask) and the run
+waits on that row until someone answers it with `contenox approvals respond` —
+the answer releases the waiting call and the run carries on — or until
 `--timeout` (default 30m) tears it down with a non-zero exit. If a documentation
 run keeps timing out, the envelope gated the write; widen the envelope, not the
 prompt.

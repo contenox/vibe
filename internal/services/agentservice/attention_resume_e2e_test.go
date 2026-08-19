@@ -30,6 +30,7 @@ func (a hitlAttentionAsker) RaiseAttention(ctx context.Context, ask missiontools
 		Detail:    ask.Detail,
 		MissionID: ask.MissionID,
 		AskID:     ask.AskID,
+		Detached:  ask.Detached,
 	}, taskengine.NoopTaskEventSink{})
 	var pending *hitlservice.AttentionPendingError
 	if err != nil && errors.As(err, &pending) {
@@ -131,7 +132,7 @@ func TestSystem_AttentionDetach_AnswerAfterRestartResumesWithOperatorsWords(t *t
 	createSession(t, a.db, sessionID)
 
 	unitCtx := missiontools.WithMissionID(ctx, missionID)
-	resp, err := a.agent.Prompt(unitCtx, agentservice.PromptRequest{
+	resp, err := a.agent.Prompt(detachedRun(unitCtx), agentservice.PromptRequest{
 		SessionID:  sessionID,
 		InputValue: attentionInput(callID),
 		InputType:  taskengine.DataTypeChatHistory,
@@ -190,7 +191,7 @@ func TestSystem_AttentionDetach_DenyAfterRestartFilesBlockerReport(t *testing.T)
 	missionID := createMission(t, a.missions)
 	unitCtx := missiontools.WithMissionID(ctx, missionID)
 
-	resp, err := a.agent.Prompt(unitCtx, agentservice.PromptRequest{
+	resp, err := a.agent.Prompt(detachedRun(unitCtx), agentservice.PromptRequest{
 		InputValue: attentionInput(callID),
 		InputType:  taskengine.DataTypeChatHistory,
 		Chain:      attentionChain(),

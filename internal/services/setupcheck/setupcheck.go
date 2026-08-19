@@ -178,7 +178,37 @@ func evaluateCore(in Input) Result {
 	if len(r.BackendChecks) > 0 {
 		addDefaultProviderIssues(&r)
 	}
+	addScriptedTestIssues(&r)
 	return r
+}
+
+// addScriptedTestIssues keeps the fake visible: a scripted backend answers from a file, and a reader of this report must never take it for a model.
+func addScriptedTestIssues(r *Result) {
+	scripted := filterBackendChecks(r.BackendChecks, func(check BackendCheck) bool {
+		return modelrepo.CanonicalBackendType(check.Type) == modelrepo.ScriptedTestBackendType
+	})
+	if len(scripted) == 0 {
+		return
+	}
+	if modelrepo.CanonicalBackendType(r.DefaultProvider) == modelrepo.ScriptedTestBackendType {
+		addIssue(r, Issue{
+			Code:       "scripted_test_provider_active",
+			Severity:   "warning",
+			Category:   CategoryHealth,
+			Message:    fmt.Sprintf("Default provider is %q: replies are replayed from the backend's script file and NO model is called. This is a test backend — switch the default before doing real work.", modelrepo.ScriptedTestBackendType),
+			FixPath:    "/backends?tab=backends",
+			CLICommand: "contenox config set default-provider ollama",
+		})
+		return
+	}
+	addIssue(r, Issue{
+		Code:       "scripted_test_backend_registered",
+		Severity:   "warning",
+		Category:   CategoryRegistration,
+		Message:    fmt.Sprintf("Backend %s is a %s backend: it replays a script file instead of calling a model. Remove it once the test run is done.", joinBackendNames(scripted), modelrepo.ScriptedTestBackendType),
+		FixPath:    "/backends?tab=backends",
+		CLICommand: fmt.Sprintf("contenox backend remove %s", backendLabel(scripted[0])),
+	})
 }
 
 // OverlayEffectiveDefaults credits an effective default model and provider
@@ -871,6 +901,8 @@ func providerDisplayName(provider string) string {
 		return "vLLM"
 	case "vertex-google":
 		return "Vertex AI (Google)"
+	case modelrepo.ScriptedTestBackendType:
+		return "Scripted test backend (replays a file, calls no model)"
 	default:
 		return "backend"
 	}

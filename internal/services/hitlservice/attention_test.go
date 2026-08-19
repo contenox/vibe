@@ -169,13 +169,18 @@ func TestUnit_RequestAttention_AnswerFromAnotherProcessWakesTheUnit(t *testing.T
 	}
 }
 
-func TestUnit_RequestAttention_SuspendableCallerReleasesAtCreation(t *testing.T) {
+// TestUnit_RequestAttention_DetachedCallerReleasesAtCreation pins that only a
+// caller that DECLARED its asks detached is released at creation. A durable id
+// alone no longer means it: durability is about surviving the process dying,
+// not about handing the process back before anybody has answered.
+func TestUnit_RequestAttention_DetachedCallerReleasesAtCreation(t *testing.T) {
 	ctx, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)
 
 	_, err := svc.RequestAttention(ctx, hitlservice.AttentionRequest{
-		Summary: "anyone there?",
-		AskID:   "call-ask1",
+		Summary:  "anyone there?",
+		AskID:    "call-ask1",
+		Detached: true,
 	}, taskengine.NoopTaskEventSink{})
 
 	var pending *hitlservice.AttentionPendingError
@@ -187,12 +192,54 @@ func TestUnit_RequestAttention_SuspendableCallerReleasesAtCreation(t *testing.T)
 	require.Equal(t, runtimetypes.HITLApprovalPending, row.State, "releasing must leave the question answerable")
 }
 
+// TestUnit_RequestAttention_NamedAskStillBlocks pins the other half: a question
+// with a durable id and no detach declaration holds its caller, and an answer
+// from anywhere releases it in place.
+func TestUnit_RequestAttention_NamedAskStillBlocks(t *testing.T) {
+	ctx, store, _ := setupHITLDB(t)
+	svc := newDurableService(t, store)
+
+	done := make(chan struct{})
+	var answer string
+	var askErr error
+	go func() {
+		defer close(done)
+		answer, askErr = svc.RequestAttention(ctx, hitlservice.AttentionRequest{
+			Summary: "which directory holds the docs?",
+			AskID:   "call-block1",
+		}, taskengine.NoopTaskEventSink{})
+	}()
+
+	require.Eventually(t, func() bool {
+		row, err := store.GetHITLApproval(ctx, "call-block1")
+		return err == nil && row.State == runtimetypes.HITLApprovalPending
+	}, 5*time.Second, 10*time.Millisecond, "the row is written before anything waits")
+
+	select {
+	case <-done:
+		t.Fatal("a named ask must hold its caller, not release it")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	require.NoError(t, svc.Answer(ctx, "call-block1", "docs/"))
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the answer must release the blocked caller")
+	}
+	require.NoError(t, askErr)
+	require.Equal(t, "docs/", answer)
+}
+
+// raiseAsk leaves an answerable question behind without waiting on it, the way
+// a unit whose dispatcher detached its asks does.
 func raiseAsk(t *testing.T, ctx context.Context, svc hitlservice.Service, missionID, askID, summary string) {
 	t.Helper()
 	_, err := svc.RequestAttention(ctx, hitlservice.AttentionRequest{
 		Summary:   summary,
 		MissionID: missionID,
 		AskID:     askID,
+		Detached:  true,
 	}, taskengine.NoopTaskEventSink{})
 	var pending *hitlservice.AttentionPendingError
 	require.ErrorAs(t, err, &pending, "the released ask must be left pending and answerable")
@@ -256,8 +303,9 @@ func TestUnit_RequestAttention_CallerChosenAskIDIsTheRowID(t *testing.T) {
 	svc := newDurableService(t, store)
 
 	_, err := svc.RequestAttention(ctx, hitlservice.AttentionRequest{
-		Summary: "which branch?",
-		AskID:   "call-identity",
+		Summary:  "which branch?",
+		AskID:    "call-identity",
+		Detached: true,
 	}, taskengine.NoopTaskEventSink{})
 	var pending *hitlservice.AttentionPendingError
 	require.ErrorAs(t, err, &pending)

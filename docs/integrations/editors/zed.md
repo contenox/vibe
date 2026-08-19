@@ -70,6 +70,8 @@ Models are global config, shared across every surface that reads `default-model`
 
 When the chain calls a tool listed in your active HITL policy (under the `default` envelope: `local_fs.write_file`, `local_fs.edit_file`, `local_fs.sed`, `local_shell.*`), Contenox emits an ACP permission request which Zed renders as an approval dialog. The card shows the actual command/path, so you approve the specific operation — not a bare tool name.
 
+That dialog is the visible half of a **durable ask** written before it appeared. The turn waits on that row rather than ending, so answering the dialog carries the same turn on in place; the same question is equally answerable from a terminal (`contenox approvals respond`) or your phone while it waits; it resolves to its on-timeout verdict if nobody answers; and closing the editor with one still open checkpoints the run, so answering later resumes it. See [the life of an ask](/docs/guide/hitl/#the-life-of-an-ask).
+
 To skip Contenox HITL entirely (trusted/scripted contexts), launch with `--auto`:
 
 ```json

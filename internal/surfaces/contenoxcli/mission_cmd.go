@@ -44,16 +44,17 @@ still running.
 
 ` + askWaitLine + `
 
-A mission PARKED on an ask has not stalled and is not lost: its unit
-checkpointed and released its process, and the record stays open. The wait above
+A mission WAITING on an ask has not stalled and is not lost: its unit is holding
+that call open on a durable row, and the record stays open with it. If the unit's
+process goes away first, the row plus its checkpoint outlive it. The wait above
 is the whole of its fate — answered, the unit resumes exactly once, wherever the
 answer is given; expired, the on-timeout verdict (deny) applies and the unit
 carries on with it; written 'never', it waits, across restarts, until somebody
-answers. A parked mission is not reclaimed out from under an answerable ask:
+answers. A waiting mission is not reclaimed out from under an answerable ask:
 the abandoned-mission sweep widens its silence bound to that ask's own window,
 so it survives exactly as long as the ask can still be answered — and a mission
 holding an ask with no deadline is never reclaimed at all. That last case is the
-one way to park a mission open indefinitely, so 'contenox mission stop <id>' is
+one way to hold a mission open indefinitely, so 'contenox mission stop <id>' is
 how you end one you no longer want.
 
 'mission fire' embeds the fleet IN-PROCESS: the dispatched unit is a child
@@ -121,7 +122,7 @@ followed by its reports (summaries and refs). A report the verification gate
 downgraded (a claimed artifact that does not exist) shows its warning inline.
 Use 'contenox mission reports <id>' for full report detail.
 
-An open mission with no recent liveness is usually parked on an ask rather than
+An open mission with no recent liveness is usually waiting on an ask rather than
 dead. A pending ask widens the mission's silence bound to that ask's own window,
 so the abandon sweep will not reclaim it while the ask is still answerable; an
 ask with no deadline holds it open with no bound at all. 'contenox approvals
@@ -662,7 +663,7 @@ var missionStopCmd = &cobra.Command{
 	Long: `Finish a mission now as abandoned, close every ask it has pending, and reap its
 unit in whichever process is hosting it.
 
-This is the way out of a mission parked on an ask that will not be answered —
+This is the way out of a mission waiting on an ask that will not be answered —
 including one whose grant said timeout = "never", which no sweep will ever
 expire and no abandon sweep will ever reclaim. Its closed asks resolve as
 denials and the run checkpointed under each is dropped rather than resumed, so

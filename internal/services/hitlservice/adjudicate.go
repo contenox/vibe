@@ -45,7 +45,7 @@ type Adjudication struct {
 	OnTimeout string
 }
 
-// Adjudicator is offered every ask this process raises, before a human sees it. It resolves the durable row or does nothing; the parked requester picks the verdict up either way, so an Adjudicator can only ever be faster than a human, never authoritative over the envelope.
+// Adjudicator is offered every ask this process raises, before a human sees it. It resolves the durable row or does nothing; the requester reads its verdict off that row either way, so an Adjudicator can only ever be faster than a human, never authoritative over the envelope.
 type Adjudicator interface {
 	Adjudicate(ctx context.Context, ask Adjudication)
 }
@@ -77,7 +77,7 @@ func (s *service) offer(ctx context.Context, ask Adjudication) {
 	}
 	s.offered[ask.AskID] = struct{}{}
 	s.mu.Unlock()
-	// Detached: the requester is about to park on this ask, and a verdict that races its own waiter would deadlock.
+	// Detached: the requester registers its waiter before offering, so a verdict landing here wakes it; running inline would instead block the requester before it ever starts waiting.
 	go adj.Adjudicate(context.WithoutCancel(ctx), ask)
 }
 

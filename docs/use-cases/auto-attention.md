@@ -5,7 +5,7 @@ description: An adjudicating agent that answers a subagent's routine asks — qu
 
 # The oracle
 
-Unattended subagents stall. You start a plan, walk away, and come back to a run parked on an ask its own intent already answers — "which directory holds the docs?" on a subagent whose intent names the docs — or on a gated tool call nobody was there to approve. The **oracle** keeps the shift moving: it reviews each ask a subagent raises, rules on the routine ones so the run continues, and leaves everything else exactly where it was — a durable ask waiting for a human.
+Unattended subagents stall. You start a plan, walk away, and come back to a run still waiting on an ask its own intent already answers — "which directory holds the docs?" on a subagent whose intent names the docs — or on a gated tool call nobody was there to approve. The **oracle** keeps the shift moving: it reviews each ask a subagent raises, rules on the routine ones so the run continues, and leaves everything else exactly where it was — a durable ask waiting for a human.
 
 `wait` is always the safe verdict, and the durable record shows exactly who decided what.
 
@@ -74,10 +74,10 @@ The counts are durable and actor-aware: a restart does not refill them, your own
 
 ## What happens on an ask, step by step
 
-1. The subagent raises the ask. It becomes a durable row immediately (`contenox approvals list` shows it), and the run checkpoints and releases its process.
+1. The subagent raises the ask. It becomes a durable row immediately (`contenox approvals list` shows it), and the unit waits on that row — or, if its dispatcher detached its asks, checkpoints and hands the process back.
 2. The ask is offered to the oracle **in-process, before a human sees it**.
 3. The oracle runs its chain with the ask as input: the ask kind, the subagent's **intent**, and — for a gated call — the tool, its arguments, and the rule that gated it. The model holds exactly one tool, `oracle.submit_verdict`, and one job: judge it against that intent and submit one verdict. The loop is budgeted and self-correcting — a malformed call or a chat-text reply gets a machine-register correction and a bounded retry.
-4. A verdict goes through the **service layer**, under the subagent envelope's bounds, recorded as `answeredBy`/`decidedBy: "oracle"`. The durable resume path picks it up and the run continues from its checkpoint — the same route a human's answer takes, whether it lands in a second or a day later.
+4. A verdict goes through the **service layer**, under the subagent envelope's bounds, recorded as `answeredBy`/`decidedBy: "oracle"`. It lands on the same durable row the unit is waiting on, so the unit stops waiting and carries on in place — or, if that unit's dispatcher had detached its asks, the durable resume path picks the verdict up and continues it from its checkpoint. Either way it is the route a human's answer takes, whether it lands in a second or a day later.
 
 ## Everything that is not a verdict leaves the ask alone
 

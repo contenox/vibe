@@ -372,7 +372,11 @@ func (r *relayTriggerRunner) RunChain(ctx context.Context, req relayChainRequest
 	if envelope.Hop > eventtrigger.DefaultMaxHop {
 		return relayChainOutcome{}, refuseChainTrigger(fmt.Errorf("event hop %d exceeds limit %d", envelope.Hop, eventtrigger.DefaultMaxHop))
 	}
-	execCtx := runtimetypes.WithEventHop(ctx, envelope.Hop+1)
+	// A relayed firing has no attached client to raise a card at, so a gated
+	// call records its ask and suspends instead of blocking this host for the
+	// whole approval wait. The phone answers the row over the relay and the
+	// resume hook carries the run on — see relay_trigger_resume.go.
+	execCtx := taskengine.WithDetachedAsks(runtimetypes.WithEventHop(ctx, envelope.Hop+1))
 	if req.Policy != "" {
 		execCtx = hitlservice.WithPolicyName(execCtx, req.Policy)
 	}

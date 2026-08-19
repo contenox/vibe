@@ -53,17 +53,17 @@ The first-party terminal client, and the front door: a person at the keyboard, o
 contenox                     # on a terminal, this is beam
 contenox beam                # the same, said explicitly
 contenox beam --new          # start a fresh session instead of resuming
-contenox beam --session api-review   # open a named session
+contenox beam --session 9f2c1a4e     # open a session by id
 ```
 
-The transcript is written into your native scrollback rather than a managed pane, so it scrolls, copies and searches like everything else in that window. The composer takes `/` for commands and `@` to put a file in front of the agent. A gated tool call raises an **approval card** inline — the tool, its arguments, and the rule that gated it — answered with one keystroke; leave it unanswered and the turn checkpoints into a [durable ask](#contenox-approvals) instead of holding the process open.
+The transcript is written into your native scrollback rather than a managed pane, so it scrolls, copies and searches like everything else in that window. The composer takes `/` for commands and `@` to put a file in front of the agent. A gated tool call raises an **approval card** inline — the tool, its arguments, and the rule that gated it — answered with one keystroke, and the turn carries straight on. The card is the visible half of a [durable ask](#contenox-approvals) written before it appeared, so the same question is answerable from another terminal or your phone, it resolves to its on-timeout verdict if the wait runs out, and quitting beam checkpoints the turn beside the still-pending row so answering later resumes it. A card that outlives its turn keeps working and says so — its key line reads `answering resumes the run` in place of the `Esc cancels turn` it offers over a live one.
 
 `local_fs` and `local_shell` work natively here: beam is the ACP client, so it performs the filesystem and terminal calls itself, in the workspace the instance was launched with.
 
 | Flag | Description |
 | ---- | ----------- |
 | `--new` | Start a new session rather than resuming the active one |
-| `--session <name>` | Open (or create) the named session |
+| `--session <id>` | Open the session with this id instead of the newest one in the directory. A session that is not there is an error, not a create — exit 1 |
 | `--light` | Light-background colour scheme |
 | `--plain` | Plain output: no colour and no redrawing, for terminals and captures that want neither |
 | `--hitl-policy <name\|path>` | Envelope this session runs under: a name from `[envelopes]` in `agents.toml`, or a path to a policy file used verbatim. Default `default` |
@@ -71,7 +71,7 @@ The transcript is written into your native scrollback rather than a managed pane
 
 ### `contenox run`
 
-The scripting shape: a program is the caller — CI, a cron entry, a Makefile, another agent. It runs one task with the tools on that machine, prints the report to stdout, and exits.
+The scripting shape: a program is the caller — CI, a cron entry, a Makefile, another agent. It runs one task, prints the report to stdout, and exits.
 
 ```bash
 contenox run "summarise what changed under ./internal since Friday"
@@ -80,18 +80,27 @@ contenox run reviewer "review the payment retry change"
 
 The first argument is a declared agent when it names one, and part of the task otherwise; with no agent named, the preseeded `run` declaration handles it. Exit status is 0 when the work landed and nonzero when it did not, so a pipeline can branch on it without parsing the report.
 
-There is no terminal in front of `run`, so a gated call has nobody to ask: it becomes a durable ask like any other, answerable later with [`contenox approvals respond`](#contenox-approvals), and the run resumes from its checkpoint exactly once. Bound what a scripted run may do unattended in its envelope rather than by watching it.
+`run` **fires a mission**. It dispatches the named declaration as an unattended unit under an envelope and announces it on stderr — `Mission fired at agent "run" under envelope "run".` — so the work is inspectable afterwards with [`contenox mission show`](#contenox-mission) like any other. Only the report goes to stdout; everything else, the announcement included, goes to stderr, so a caller can pipe stdout straight into the next stage.
+
+| Flag | Description |
+| ---- | ----------- |
+| `--policy <envelope>` | The envelope bounding the unit. Falls back to the `default-mission-policy` config; a run with neither is refused rather than bounded by a guess |
+| `--timeout <duration>` | How long to wait for a terminal status before tearing the unit down (default `30m`). This is `run`'s own bound, distinct from the global `--timeout` |
+
+There is no client in front of `run` — no editor, no terminal — so it carries only the toolsets the runtime performs in-process: `mission`, `native-git`, `native-fs-browse`, `native-go`, `native-goja`, `native-jq`, `native-web`, `native-echo`. It does **not** carry `local_fs` or `local_shell`: both are performed by the ACP client, and a run has none. A declaration that names them is dispatched without them, and a call to one comes back to the model as an unknown tool. `contenox doctor` says the same thing in its Tool roster. Use `contenox beam`, an editor over `contenox acp`, or the in-process toolsets above when a task needs the disk or a shell.
+
+A gated call therefore has nobody to ask: it becomes a durable ask like any other and the run waits on it. Answering it with [`contenox approvals respond`](#contenox-approvals) releases that waiting call and the run finishes; if `--timeout` ended the command first, the same answer resumes its checkpoint exactly once. Bound what a scripted run may do unattended in its envelope rather than by watching it.
 
 <h3 id="sessions"><code>contenox session</code></h3>
 
 Manage named chat sessions. Each session maintains its own conversation history. `list` and `show` default to the active scope; the whole database can also be inspected across workspaces and namespaces, and any session opened directly by id — useful for recovering a session an editor lost track of.
 
 ```bash
-contenox session list                    # list all sessions (* = active)
+contenox session list                    # list this workspace's sessions (* = active)
 contenox session new [name]             # create a session (becomes active)
 contenox session switch <name>          # switch to a different session
 contenox session show                   # show active session's history
-contenox session show <name>            # show any session by name
+contenox session show <name>            # show a session in this workspace by name
 contenox session show <id>              # show any session by id (any workspace)
 contenox session show <id> --ns <name>  # namespace hint when resolving by id (advisory)
 contenox session show --tail 10         # show last 10 messages
@@ -246,7 +255,7 @@ The login-flow flags and `--insecure-skip-tls-verify` can only be set at `tools 
 
 ### `contenox agent`
 
-> **Beta:** the agent roster requires `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`) and its interface may change; without it this command is hidden and only the shipped `agent-planner` is discovered (`agent-planner` is the chain's `id`, declared inside `chain-planner-default.json` — see [Chain files: naming, roles, and resolution](/docs/guide/chains/naming/)).
+> **Beta:** this command's interface may change. It is not gated: `contenox agent` is listed in `contenox --help` and `contenox agent list` shows every discovered agent whether or not `opt-in-beta` is set. Among them is the shipped `agent-planner` — the chain's `id`, declared inside `chain-planner-default.json` (see [Chain files: naming, roles, and resolution](/docs/guide/chains/naming/)). What `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`) does turn on is the [event-trigger tier](/docs/guide/events/) and the beta line `contenox doctor` prints.
 
 Inspect and manage the runtime's declared agents. Most agents are [declared in a Markdown file](/docs/guide/agents/) under `.contenox/agents/`; agents you already keep in `.claude/agents/` or `.agents/agents/` are found there too, and a task chain on disk is an agent as well. Every one is registered automatically by discovery — this command inspects them, toggles their enabled state, and removes stale registrations. Declared agents are what `/mission` and `contenox mission fire` dispatch.
 
@@ -292,7 +301,7 @@ contenox hitl trust --remove go     # drop a declaration
 
 | Flag | Description |
 | ---- | ----------- |
-| `--policy <name\|path>` | Policy to update: a name resolved along the policy search path, or an explicit file path (default `hitl-policy-default.json`) |
+| `--policy <file\|path>` | Policy to update: a policy **file name** (`hitl-policy-strict.json`) found along the policy search path, or an explicit file path (default `hitl-policy-default.json`). Unlike `--hitl-policy` elsewhere, this flag does not take a bare envelope name — `--policy strict` is refused as not found |
 | `--refresh` | Re-read every already-declared binary and rewrite its hash — the legitimate-upgrade path |
 | `--list` | List every declaration and its state on this host; changes nothing |
 | `--remove` | Remove the named declarations instead of adding them |
@@ -347,6 +356,7 @@ contenox backend add gemini       --type gemini  --api-key-env GEMINI_API_KEY
 contenox backend add myvllm       --type vllm    --url http://gpu-host:8000
 contenox backend add vertex       --type vertex-google \
   --url "https://us-central1-aiplatform.googleapis.com/v1/projects/YOUR_PROJECT_ID/locations/us-central1"
+contenox backend add scripted     --type scripted-test --script ./dialog.json   # TEST ONLY
 
 contenox backend list
 contenox backend show openai
@@ -359,8 +369,34 @@ contenox backend remove myvllm
 | `--url`         | Base URL. Inferred automatically for `ollama`, `openai`, `anthropic`, and `gemini` when omitted; **required** for `vllm`, `bedrock`, and `vertex-google` (`bedrock`/`vertex-google` error immediately if omitted, since their URL is account-specific and cannot be defaulted) |
 | `--api-key-env` | Environment variable holding the API key (preferred)                                      |
 | `--api-key`     | API key literal (avoid — use `--api-key-env`)                                             |
+| `--script`      | **`scripted-test` only.** Path to the JSON dialog the backend replays. Validated when the backend is added. |
 
 `--type` accepts any string; only `ollama`, `openai`, `anthropic`, and `gemini` get an inferred base URL. Pass `--url` explicitly for `vllm`, `bedrock`, `vertex-google`, or any other type.
+
+#### `scripted-test` — the backend that calls no model
+
+`--type scripted-test` registers a **test** backend that replays a scripted
+dialog from a JSON file instead of calling a model, so the rest of the stack —
+chain engine, tool dispatch, HITL, sessions, `beam` rendering — can be driven
+deterministically end to end. It ships in the ordinary binary, works with
+`beam`, `run`, `chat` and `acp` with no special flags, and names itself
+everywhere the active model is reported (`backend list`, `doctor`, the `beam`
+header, `--trace`). Running past the last scripted turn fails with the script
+path and turn index rather than inventing a reply.
+
+```bash
+contenox backend add scripted --type scripted-test --script ./dialog.json
+contenox config set default-provider scripted-test
+contenox config set default-model scripted-test
+```
+
+It is a test fixture, not a model. A scripted run proves the machinery — that
+the chain looped, the tool dispatched, the gate held — and says nothing about
+the agent's judgement, because you wrote the tool call yourself. Switch the
+defaults back to a real provider before doing real work.
+
+See [the scripted test backend](../development/scripted-test-backend.md) for the
+script format and how turns are consumed.
 
 ### `contenox config`
 
@@ -497,7 +533,7 @@ Answering a mission's pending question or permission gate is not a mission verb 
 
 ### `contenox approvals`
 
-The durable ask inbox: list pending approvals and questions, and answer them. A gated tool call or a mission's question becomes a durable ask the moment it is raised, and the run checkpoints and releases its process rather than waiting; the ask is a row any process can answer later.
+The durable ask inbox: list pending approvals and questions, and answer them. A gated tool call or a mission's question becomes a durable ask the moment it is raised — the row is written before anything waits — and the run that raised it then waits on that row. This inbox reaches the asks whose process is no longer waiting: a detached trigger firing, a host that shut down, or simply a run somewhere else. Answering records the verdict and, when a run is checkpointed under the ask, resumes it here.
 
 ```bash
 contenox approvals list
@@ -514,7 +550,7 @@ contenox approvals respond <ask-id> --answer "use the staging database"
 | `--answer` (`respond`)  | Answer a pending question (attention ask) with your own words        |
 | `--as-agent <name>` (`respond`) | Beta: record the answer as given by the named agent instead of you; pair with `--answer` |
 
-`respond` requires exactly one of `--approve`, `--deny`, or `--answer`, and it must match the ask's kind: a question takes `--answer`; a permission gate takes `--approve`/`--deny`. When the ask has a saved checkpoint, `respond` resumes the suspended run to completion in this process — and a process that cannot build an engine (no default model configured) is refused **before** anything is recorded: a checkpointed run's verdict is one-shot, so the ask stays pending and answerable from a terminal that can reach your models. `approvals list` is also the reconciling read: it applies expired asks' `on_timeout` verdicts, and it finishes any answered run a crashed resumer left behind (a resume claim goes stale after 10 minutes and is then picked up here).
+`respond` requires exactly one of `--approve`, `--deny`, or `--answer`, and it must match the ask's kind: a question takes `--answer`; a permission gate takes `--approve`/`--deny`. If the run that raised the ask is still waiting on it, the verdict recorded here releases that call where it runs and the turn continues in place — nothing is resumed. When the run's process is gone and a checkpoint was saved under the ask, `respond` resumes it to completion in this process instead — and a process that cannot build an engine (no default model configured) is refused **before** anything is recorded: a checkpointed run's verdict is one-shot, so the ask stays pending and answerable from a terminal that can reach your models. `approvals list` is also the reconciling read: it applies expired asks' `on_timeout` verdicts, and it finishes any answered run a crashed resumer left behind (a resume claim goes stale after 10 minutes and is then picked up here).
 
 `EXPIRES-IN` is how long an ask has left; an expired ask resolves to a denial. How long that is comes from the envelope that gated the call — a grant written as `shell = { grant = "approve", timeout = "30m", on_timeout = "deny" }` gives its asks thirty minutes, and `{ grant = "approve", timeout = "never" }` gives them no deadline at all: `EXPIRES-IN` reads `never`, no sweep touches them, and they are still listed here after a restart. A grant that names no timeout leaves its asks on this host's `approval-ceiling` (seven days until you set one). See [Bounding the wait](/docs/reference/agents-config/#bounding-the-wait).
 
@@ -726,7 +762,9 @@ Pairing alone attaches the machine; run [`contenox serve`](#contenox-serve-path)
 
 ### `contenox autocomplete --stdio`
 
-Serve fill-in-the-middle code completions over a JSON-lines stdio protocol, for editor integrations that want completions without a full ACP session. Uses the `default-autocomplete-model` / `default-autocomplete-provider` config role — the same keys the ACP editor surface reads — and refuses to start (nonzero exit, error naming the key) when no autocomplete model is configured.
+Serve fill-in-the-middle code completions over a JSON-lines stdio protocol, for editor integrations that want completions without a full ACP session. Uses the `default-autocomplete-model` / `default-autocomplete-provider` config role — the same keys the ACP editor surface reads.
+
+With no autocomplete model configured it still **starts and exits 0**: it warns once on stderr and then answers every request on the protocol with `{"id":"…","error":"no autocomplete model is configured; set one with: contenox config set default-autocomplete-model <name>"}`. That is deliberate — an editor client learns about the misconfiguration in the reply to the request it made, rather than by watching the process it spawned vanish.
 
 ```bash
 contenox config set default-autocomplete-model qwen2.5-coder:7b

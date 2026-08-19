@@ -274,6 +274,8 @@ func (s *State) processBackend(ctx context.Context, backend *runtimetypes.Backen
 		s.processVertexBackend(ctx, backend, declaredModels)
 	case "bedrock":
 		s.processBedrockBackend(ctx, backend, declaredModels)
+	case modelrepo.ScriptedTestBackendType:
+		s.processScriptedTestBackend(ctx, backend)
 	default:
 		brokenService := &BackendRuntimeState{
 			ID:      backend.ID,
@@ -541,6 +543,36 @@ func (s *State) processOptionalCredCloudBackend(ctx context.Context, backend *ru
 	}
 	s.state.Store(backend.ID, stateInstance)
 	s.storeObservedModelCache(ctx, backend.ID, credJSON, observedModels)
+}
+
+// processScriptedTestBackend re-reads the script every cycle and never caches its model list, so editing the script is enough to change what the backend offers.
+func (s *State) processScriptedTestBackend(ctx context.Context, backend *runtimetypes.Backend) {
+	stateInstance := &BackendRuntimeState{
+		ID:           backend.ID,
+		Name:         backend.Name,
+		Backend:      *backend,
+		PulledModels: []ModelPullStatus{},
+	}
+	stateInstance.SetAPIKey("")
+
+	catalog, err := s.newCatalogProvider(backend, "")
+	if err != nil {
+		stateInstance.Error = err.Error()
+		s.state.Store(backend.ID, stateInstance)
+		return
+	}
+	observedModels, err := catalog.ListModels(ctx)
+	if err != nil {
+		stateInstance.Error = err.Error()
+		s.state.Store(backend.ID, stateInstance)
+		return
+	}
+
+	stateInstance.Models = observedModelNames(observedModels)
+	for _, model := range observedModels {
+		stateInstance.PulledModels = append(stateInstance.PulledModels, s.applyCapabilityOverrides(ctx, backend.Type, pullStatusFromObservedModel(model)))
+	}
+	s.state.Store(backend.ID, stateInstance)
 }
 
 func (s *State) processOpenAIBackend(ctx context.Context, backend *runtimetypes.Backend, models []*runtimetypes.Model) {

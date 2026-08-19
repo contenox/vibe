@@ -42,7 +42,16 @@ type AttentionRequest struct {
 	// before the wait begins; runs inline, so keep it cheap and non-blocking.
 	OnRaised func(askID string)
 
+	// AskID is the ask's durable identity when the caller has one to give —
+	// the engine's tool-call ID, which is also the checkpoint key a resume
+	// looks the run up by. Empty mints a fresh one.
 	AskID string
+
+	// Detached releases the caller instead of blocking: the row is recorded and
+	// an AttentionPendingError comes straight back, so the run suspends and the
+	// answer arrives through the resume hook. Set it only where nobody is
+	// attached to answer — the default is to block on the ask.
+	Detached bool
 }
 
 type AttentionPendingError struct {
@@ -82,7 +91,9 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 	}
 
 	askID := req.AskID
-	releaseOnRecord := askID != ""
+	// A caller-supplied id is the checkpoint key: it is what makes suspending
+	// on this ask resumable at all.
+	resumable := askID != ""
 	if askID == "" {
 		askID = uuid.NewString()
 	}
@@ -147,7 +158,8 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 	s.askRecorded(ctx, row)
 	s.offer(ctx, adjudicationFromAttentionRequest(askID, req))
 
-	if releaseOnRecord {
+	if req.Detached {
+		// The caller declared nobody is attached to answer this run.
 		return "", &AttentionPendingError{AskID: askID}
 	}
 
@@ -182,6 +194,12 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 			return "", ErrAttentionUnanswered
 		case <-waitCtx.Done():
 			if ctx.Err() != nil {
+				if resumable {
+					// The process is leaving with the question open. The row
+					// stays pending and the run checkpoints beside it, so an
+					// answer resumes it elsewhere rather than being lost.
+					return "", &AttentionPendingError{AskID: askID}
+				}
 				return "", ctx.Err()
 			}
 			// The ceiling fired. The row is left pending; SweepExpired closes it out.
@@ -273,7 +291,7 @@ func (s *service) answerAttention(ctx context.Context, askID, text, by string, b
 		return nil
 	}
 
-	// Waiter gone: the asking run parked past its window; run the resume hook with resolve()'s same contract.
+	// Nobody is waiting here: the asking run released this question or left; run the resume hook with resolve()'s same contract.
 	if hook != nil {
 		if err := hook(ctx, askID); err != nil && !errors.Is(err, ErrNoCheckpoint) {
 			return fmt.Errorf("hitlservice: answer for ask %s recorded, but resuming its suspended run failed: %w", askID, err)

@@ -25,7 +25,7 @@ const (
 
 	TaskEventChainCompleted TaskEventKind = "chain_completed"
 	TaskEventChainFailed    TaskEventKind = "chain_failed"
-	// TaskEventChainSuspended terminates a run segment parked on a human approval past the fast window; carries the interrupt address ({chain, task, tool_call}) and approval_id.
+	// TaskEventChainSuspended terminates a run segment that left a recorded, unanswered approval behind rather than waiting for it; carries the interrupt address ({chain, task, tool_call}) and approval_id.
 	TaskEventChainSuspended TaskEventKind = "chain_suspended"
 
 	TaskEventApprovalRequested TaskEventKind = "approval_requested"

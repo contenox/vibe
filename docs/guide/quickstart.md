@@ -62,7 +62,7 @@ Run this once in each project directory you want Contenox to work in:
 contenox init
 ```
 
-This creates the project-local `.contenox/workspace.id` marker and seeds `agents/` and `agents.toml`. The approval envelopes are transpiled from `agents.toml` into `~/.contenox/.generated/`, the shipped chains sit under `~/.contenox/system/`; a workspace-local file with the same name overrides its global counterpart.
+This creates the project-local `.contenox/workspace.id` marker; `agents/` and `agents.toml` are seeded into `~/.contenox/`, shared by every project on the machine (`contenox init --local` seeds workspace copies that shadow them instead). The approval envelopes are transpiled from `agents.toml` into `~/.contenox/.generated/`, the shipped chains sit under `~/.contenox/system/`; a workspace-local file with the same name overrides its global counterpart.
 
 ---
 
@@ -112,7 +112,7 @@ The first thirty seconds look like this:
 
 Nothing about that card is beam being careful. The envelope decided it before the surface saw it, so the same call gates the same way in an editor, in a mission, or on your phone. That is the whole idea: see [Human gates and envelopes](/docs/guide/hitl/).
 
-If nobody answers the card, the turn does not sit there burning a connection — it checkpoints, releases the process, and waits as a durable ask you can answer later from anywhere. See [the durable ask](/docs/guide/hitl/#what-a-parked-approval-looks-like).
+Answering the card continues the same turn: the gated tool runs and the reply carries on. The ask was a durable row before the card appeared, so it is equally answerable from another terminal or your phone, it resolves to its `on_timeout` verdict if the wait runs out, and quitting checkpoints the run so you can answer it later from anywhere. See [the durable ask](/docs/guide/hitl/#the-life-of-an-ask).
 
 ---
 

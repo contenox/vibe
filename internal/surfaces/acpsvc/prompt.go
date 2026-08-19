@@ -302,6 +302,10 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		})
 	})
 	if suspended {
+		// Asked once and shared by the notice and the `_meta`, so the sentence
+		// the operator reads and the one a client renders itself cannot
+		// disagree about who answers the ask.
+		answerableHere := t.askAnswerableHere(req.SessionID, resp.SuspendedApprovalID)
 		reportChange(string(req.SessionID), map[string]any{
 			"stop_reason":           stopReasonSuspended,
 			"approval_id":           resp.SuspendedApprovalID,
@@ -310,9 +314,9 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		})
 		t.sendUpdate(ctx, libacp.SessionNotification{
 			SessionID: req.SessionID,
-			Update:    suspensionNotice(resp.SuspendedApprovalID),
+			Update:    suspensionNotice(resp.SuspendedApprovalID, answerableHere),
 		})
-		return withDroppedContentMeta(libacp.PromptResponse{StopReason: stopReason, Meta: suspensionMeta(resp.SuspendedApprovalID)}, droppedContentKinds), nil
+		return withDroppedContentMeta(libacp.PromptResponse{StopReason: stopReason, Meta: suspensionMeta(resp.SuspendedApprovalID, answerableHere)}, droppedContentKinds), nil
 	}
 	if resp.StopReason == agentservice.StopFailed && stopReason != libacp.StopReasonCancelled {
 		cause := agentservice.RecoveredFailure(resp.Steps)

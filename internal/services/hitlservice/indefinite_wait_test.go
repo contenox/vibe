@@ -158,7 +158,7 @@ func TestUnit_RequestAttention_HonorsAnIndefiniteCeiling(t *testing.T) {
 
 	askID := uuid.NewString()
 	_, err := svc.RequestAttention(ctx, hitlservice.AttentionRequest{
-		AskID: askID, Summary: "which branch should I target?",
+		AskID: askID, Summary: "which branch should I target?", Detached: true,
 	}, taskengine.NoopTaskEventSink{})
 	var pending *hitlservice.AttentionPendingError
 	require.ErrorAs(t, err, &pending)

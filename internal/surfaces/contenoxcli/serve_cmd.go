@@ -37,8 +37,12 @@ MCP tool instead. For an agent that needs your files and your shell, run
 ` + toolGrantLine + ` What a host grants is bounded by
 shape first: a toolset it does not mount cannot be admitted by any of them.
 
-` + askWaitLine + ` Nobody is at this keyboard, so
-answer them with 'contenox approvals respond'.
+` + askWaitLine + ` Nobody is at this keyboard, so an
+ask waits on its durable row: answer it with 'contenox approvals respond', or
+from the app, and the run holding that call carries straight on. Leave it and
+the on-timeout verdict (deny) applies when the wait ends. Stop the host with an
+ask still open and the run checkpoints beside it — answering later resumes it in
+whichever process answers.
 
 One instance serves exactly ONE workspace, fixed when it launches; a client that
 needs a different one attaches to a different instance. With a path, that

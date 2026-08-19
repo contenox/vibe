@@ -33,7 +33,7 @@ func TestSystem_TriggerRequestID_SurvivesARestartAndASecondPark(t *testing.T) {
 	createSession(t, a.db, sessionID)
 
 	runCtx := agentservice.WithTriggerRequestID(libtracker.WithNewRequestID(ctx), "dispatch/7")
-	resp, err := a.agent.Prompt(runCtx, agentservice.PromptRequest{
+	resp, err := a.agent.Prompt(detachedRun(runCtx), agentservice.PromptRequest{
 		SessionID:  sessionID,
 		InputValue: twoGatedCalls(),
 		InputType:  taskengine.DataTypeChatHistory,

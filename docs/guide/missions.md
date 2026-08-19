@@ -111,7 +111,7 @@ These are routinely confused. They are separate mechanisms with separate durabil
 | | What it is | Where you read it | How it ends |
 |---|---|---|---|
 | **Report** | Something the unit chose to tell you: `progress`, `finding`, `blocker`, or `result` | `contenox mission show <id>`, `contenox mission reports <id>` | It doesn't — it is a permanent line in the mission's record |
-| **Ask** | A question or a permission gate the unit is *parked on*, waiting | `contenox approvals list`, `contenox mission asks [id]` | You answer it, an agent answers it within bounds, or it expires to its `on_timeout` verdict — unless the grant said `timeout = "never"`, in which case it simply waits |
+| **Ask** | A question or a permission gate the unit is *blocked on*, waiting | `contenox approvals list`, `contenox mission asks [id]` | You answer it, an agent answers it within bounds, or it expires to its `on_timeout` verdict — unless the grant said `timeout = "never"`, in which case it simply waits |
 | **Inbox item** | A report that had no live session to deliver to | `contenox inbox list`, `contenox inbox show <id>` | `contenox inbox ack <id>` marks it read without deleting it |
 
 A report *blocks nothing*. An ask *blocks the unit*. The inbox is not a third kind of thing — it is where reports land when the mission has no parent session listening, which is always the case for an operator-fired `mission fire` and eventually the case for any session-fired mission whose session process ended.
@@ -136,14 +136,14 @@ Four things can resolve either:
 
 See [who may answer a subagent](/docs/guide/hitl/#who-may-answer-a-subagent-attention) for the bounds.
 
-An ask does not hold a process hostage. The run **checkpoints** as soon as the ask is raised and releases its process; the ask stays a durable row that any later process can answer, and answering it resumes the suspended run exactly once. That is why you can close the terminal that raised a question and answer it tomorrow from a different one.
+An ask is a **durable row before anything waits on it**, and the unit then waits on that row. Answering it — from the terminal that raised it, from another one, or from your phone — releases that same call and the unit carries straight on. Close the terminal instead and nothing is lost: the run checkpoints beside the still-pending row on its way out, so answering it tomorrow from a different terminal resumes the suspended run exactly once.
 
 
 ## Reclaim: what happens when the host dies
 
 A unit is a child of its host. Close the laptop, kill the terminal, crash the process — the unit dies and its mission row stays `open`, holding a heartbeat that will never advance again. Nothing polls for this; it is collected by a sweep.
 
-**The bound is a floor of six hours of heartbeat silence**, and it is deliberately generous. Reaping live work is unrecoverable; reaping late only delays a row you were already ignoring. The floor is widened further when the mission has a park still open on it: an ask configured to wait longer than six hours explains the silence, so the sweep waits out that ask's own window instead — and an ask with no deadline (`timeout = "never"`) explains any amount of silence, so a mission holding one is never reclaimed. Stop it yourself with `contenox mission stop` if you no longer want it.
+**The bound is a floor of six hours of heartbeat silence**, and it is deliberately generous. Reaping live work is unrecoverable; reaping late only delays a row you were already ignoring. The floor is widened further when the mission has an ask still open on it: an ask configured to wait longer than six hours explains the silence, so the sweep waits out that ask's own window instead — and an ask with no deadline (`timeout = "never"`) explains any amount of silence, so a mission holding one is never reclaimed. Stop it yourself with `contenox mission stop` if you no longer want it.
 
 The sweep runs when an operator or a host does something that needs the truth:
 
@@ -166,7 +166,7 @@ An envelope's optional `compute` block declares ceilings. Every field is opt-in 
 |---|---|---|
 | `maxTurns` | Enforced, and only `1` is accepted | The drive loop issues at most two prompt turns, so `1` means "drop the nudge". Any other non-zero value is refused at validation, because it would name a turn the dispatcher was never going to take. |
 | `maxTokens` | Enforced between turns, best-effort | Checked against the unit's own reported usage, only between turns — never mid-turn, and inert when the unit reports no usage at all. |
-| `maxToolCalls` | **Declared, not enforced** | Validated for shape, and its one enforcement seam is the unattended permission answerer, which no shipped host wires. The envelope picker in `/mission` labels it `declared, not enforced` for exactly this reason. |
+| `maxToolCalls` | **Declared, not enforced** | Validated for shape. The only place it is counted is the unattended permission answerer — which every in-process host does wire, but which a call reaches only when the envelope escalates it for a verdict. A call the envelope grants runs without ever passing that seam, so ordinary tool use never counts against the ceiling and a unit routinely makes more calls than the number declared. The envelope picker in `/mission` labels it `declared, not enforced` for exactly this reason. |
 | `modelAllowlist` / `backendAllowlist` | Enforced at the resolution seam | Covers chat, prompt, stream, and embed. |
 | `onExhausted` | Only `finish_stuck` is implemented | `pause_ask` was declared but never built, and is now rejected at validation rather than silently treated as `finish_stuck`. |
 

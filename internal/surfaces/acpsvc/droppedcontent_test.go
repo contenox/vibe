@@ -43,12 +43,12 @@ func TestUnit_ExplainDroppedContent_AbsenceIsTheSignal(t *testing.T) {
 
 // TestUnit_MergeMeta_SiblingEnvelopesDoNotDisplaceEachOther pins the coexistence
 // rule: contenox.droppedContent and contenox.stopReason share one `_meta`
-// object, so writing either must leave the other intact — a turn can both park
-// on an approval and have discarded an attachment.
+// object, so writing either must leave the other intact — a turn can both
+// suspend with an approval open and have discarded an attachment.
 func TestUnit_MergeMeta_SiblingEnvelopesDoNotDisplaceEachOther(t *testing.T) {
 	parked := libacp.PromptResponse{
 		StopReason: libacp.StopReasonEndTurn,
-		Meta:       suspensionMeta("ead905ab-d548"),
+		Meta:       suspensionMeta("ead905ab-d548", false),
 	}
 	both := withDroppedContentMeta(parked, []string{string(libacp.ContentKindImage)})
 
@@ -84,7 +84,7 @@ func TestUnit_NativeResultToResponse_DroppedContentSurvivesReattach(t *testing.T
 	lossy, err := nativeResultToResponse(nativeturn.Result{
 		StopReason:          libacp.StopReasonEndTurn,
 		DroppedContentKinds: []string{string(libacp.ContentKindImage)},
-	})
+	}, false)
 	require.NoError(t, err)
 	var envelope map[string]droppedContentReport
 	require.NoError(t, json.Unmarshal(lossy.Meta, &envelope))
@@ -95,14 +95,14 @@ func TestUnit_NativeResultToResponse_DroppedContentSurvivesReattach(t *testing.T
 		Suspended:           true,
 		ApprovalID:          "ead905ab-d548",
 		DroppedContentKinds: []string{string(libacp.ContentKindImage)},
-	})
+	}, true)
 	require.NoError(t, err)
 	var both map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(parked.Meta, &both))
 	require.Contains(t, both, stopReasonMetaKey)
 	require.Contains(t, both, droppedContentMetaKey)
 
-	intact, err := nativeResultToResponse(nativeturn.Result{StopReason: libacp.StopReasonEndTurn})
+	intact, err := nativeResultToResponse(nativeturn.Result{StopReason: libacp.StopReasonEndTurn}, false)
 	require.NoError(t, err)
 	require.Empty(t, intact.Meta, "a turn that forwarded everything carries no marker")
 }

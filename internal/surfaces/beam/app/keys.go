@@ -196,7 +196,8 @@ func registerBindings(r *keymap.Registry) {
 	})
 
 	// Approval card. y/N mirrors the CLI prompt; Esc cancels the turn rather
-	// than offering a whole-run abort key.
+	// than offering a whole-run abort key — and says so only while there is
+	// one, since an ask can outlive the turn that raised it (see MarkDetached).
 	r.MustRegister(keymap.Binding{
 		ID: bindApprovalAllow, Owner: ownerApproval, Scope: keymap.ScopeApproval,
 		Keys: []keymap.Chord{"y"},
@@ -210,7 +211,7 @@ func registerBindings(r *keymap.Registry) {
 	r.MustRegister(keymap.Binding{
 		ID: bindApprovalCancel, Owner: ownerApproval, Scope: keymap.ScopeApproval,
 		Keys: []keymap.Chord{"esc"},
-		Help: "cancel the whole turn",
+		Help: "cancel the whole turn, if one is still running",
 	})
 
 	// Help overlay.
@@ -367,6 +368,13 @@ func (a *app) dispatch(ctx context.Context, act keymap.Action) bool {
 	case bindApprovalDeny:
 		a.resolveCard(false)
 	case bindApprovalCancel:
+		if a.card != nil && a.card.Detached() {
+			// Nothing here to cancel: the turn that raised this ask has
+			// ended and the ask outlived it. Cancelling the session would
+			// interrupt whatever ran next, and would not touch the ask.
+			a.notice(frame.StyleWarn, "no turn is running — this approval is still open: y allows it, n denies it, and the run resumes from where it stopped")
+			break
+		}
 		// The card stays pending until the cancel comes back as a cancelled
 		// turn (see approval.Card.MarkCancelled).
 		if err := a.deps.Bridge.Cancel(a.sessionID); err != nil {

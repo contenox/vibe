@@ -191,9 +191,11 @@ knowing before you schedule anything.
 
 **A gated call has nobody to ask.** There is no terminal in front of a scripted
 run, so a call the envelope gates becomes a
-[durable ask](/docs/guide/hitl/#what-a-parked-approval-looks-like) and the run
-parks until someone answers it with `contenox approvals respond` — or until
-`--timeout` (default 30m) tears it down with a non-zero exit. What a scripted run
+[durable ask](/docs/guide/hitl/#the-life-of-an-ask) and the run
+waits on that row until someone answers it with `contenox approvals respond` —
+the answer releases the waiting call and the run carries on — or until
+`--timeout` (default 30m) tears it down with a non-zero exit, leaving the ask
+answerable later against the checkpoint it wrote on the way out. What a scripted run
 may do unattended is bounded by its envelope, not by anyone watching it.
 
 **The run is not disposable.** Every `contenox run` is a mission, and its record,

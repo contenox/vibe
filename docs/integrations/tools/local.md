@@ -8,6 +8,8 @@ Contenox never touches the filesystem or spawns processes itself. Local tools gi
 
 A [`contenox serve`](/docs/guide/serve/) host has no such client, so neither of these toolsets exists there: every capability a host has is an MCP server or an OpenAPI service you attached.
 
+Neither does an unattended [mission](/docs/guide/missions/) unit — what `contenox run "<task>"` dispatches, and what `contenox mission fire` and `/mission` fire — and for the same reason: nothing is attached to forward `fs/*` or `terminal/*` to. Such a run reaches the in-process toolsets (`native-fs-browse`, `native-git`, `native-go`, `native-jq`, the `mission` tools) and whatever MCP servers you connected; a `local_fs` or `local_shell` call comes back to the model as `tool local_shell not found`, and `--shell` does not change that. Give a run file or shell access by connecting an MCP server for it, or drive the task from `contenox beam` or an editor, where a client exists to carry it out.
+
 ## `local_fs` — Filesystem access
 
 Forwarded to the ACP client's `fs/*` capability. Provides read, write, and edit operations scoped to a configured directory. **All paths are validated** against the allowed directory; attempts to escape with `../` are rejected.
@@ -110,7 +112,7 @@ Values are strings even when conceptually numeric — `tools_policies` is the ch
 > **Caution:**
 > `local_shell` gives the model direct access to run arbitrary commands on the machine the ACP client is running on. **Never enable it in public-facing deployments or when processing untrusted user input.**
 
-`local_shell` is forwarded to the ACP client's `terminal/*` capability, governed by HITL policy — there is no CLI flag that turns it on or off. It's also where directory listing, searching, and globbing now live (`ls`, `find`, `grep`/`rg`), since `local_fs` no longer has tools for those.
+`local_shell` is forwarded to the ACP client's `terminal/*` capability, governed by HITL policy — there is no CLI flag that turns it on or off. `local_fs` no longer has tools for directory listing, searching or globbing, so a shell is one way to do those (`ls`, `find`, `grep`/`rg`) — but not the only one: `native-fs-browse` (`list_dir`, `grep`, `find_files`, `stat_file`, `count_stats`) runs in-process and is therefore also reachable from a shape with no client to forward a terminal to.
 
 **Command policy is a file, not a CLI flag.** For a declared agent it lives in [`agents.toml`](/docs/reference/agents-config/), globally or under `[agents.<name>]`:
 

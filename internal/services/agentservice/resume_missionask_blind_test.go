@@ -61,7 +61,7 @@ func twoAskInput() taskengine.ChatHistory {
 func suspendOnFirstAsk(t *testing.T, inst *attentionInstance, missionID string) {
 	t.Helper()
 	ctx := missiontools.WithMissionID(context.Background(), missionID)
-	resp, err := inst.agent.Prompt(ctx, agentservice.PromptRequest{
+	resp, err := inst.agent.Prompt(detachedRun(ctx), agentservice.PromptRequest{
 		InputValue: twoAskInput(),
 		InputType:  taskengine.DataTypeChatHistory,
 		Chain:      attentionChain(),

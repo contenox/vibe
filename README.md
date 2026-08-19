@@ -44,8 +44,10 @@ gated tool call raises an approval card inline — one keystroke answers it. Bar
 Ready: yes — run: contenox beam
 ```
 
-`contenox init` scaffolds a project's `.contenox/` — agents, envelopes, config —
-and `contenox vet` checks a policy before anything runs under it. Sessions
+`contenox init` marks the project — it writes `.contenox/workspace.id` here, and
+seeds the agents, envelopes and config into `~/.contenox/` so every project on
+the machine starts from them (`contenox init --local` seeds workspace copies
+instead). `contenox vet` checks a policy before anything runs under it. Sessions
 persist: `contenox session list` and `contenox session switch <name>` pick past
 contexts back up.
 
@@ -130,7 +132,9 @@ contenox beam                           # or just: contenox
 
 **`contenox run`** — a program is the caller: CI, cron, another agent. It runs
 the task and prints the report to stdout, exit 0 when the work landed and
-nonzero when it did not, using the tools on that machine.
+nonzero when it did not. Nobody is at the keyboard, so it carries the in-process
+toolsets — git, the file browser, HTTP, jq — and not `local_fs` or
+`local_shell`, which need a client to perform them.
 
 ```bash
 contenox run "summarise what changed under ./internal since Friday"

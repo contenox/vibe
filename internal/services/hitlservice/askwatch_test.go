@@ -119,9 +119,10 @@ func TestUnit_AskWatcher_SeesAnAttentionAskAndItsRetraction(t *testing.T) {
 		MissionID: "m-9",
 		AgentName: "refund-desk",
 		AskID:     "ask-attn",
+		Detached:  true,
 	}, taskengine.NoopTaskEventSink{})
 	var pending *hitlservice.AttentionPendingError
-	require.ErrorAs(t, err, &pending, "a pre-named ask is durable and releases its caller to a checkpoint")
+	require.ErrorAs(t, err, &pending, "a detached ask is left standing for somebody else to answer")
 	require.Equal(t, "ask-attn", pending.AskID)
 
 	recorded, _, _ := w.snapshot()

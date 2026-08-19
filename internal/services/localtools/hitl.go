@@ -45,6 +45,7 @@ type HITLWrapper struct {
 	tracker   libtracker.ActivityTracker
 	eventSink taskengine.TaskEventSink
 	recorder  hitlservice.ApprovalRecorder
+	watcher   hitlservice.ApprovalWatcher
 	responder approvalResponder
 	shellKind hitlservice.ShellKind
 }
@@ -62,6 +63,7 @@ func NewHITLWrapper(inner taskengine.ToolsRepo, ask AskApproval, policy hitlserv
 		eventSink = eventSinks[0]
 	}
 	recorder, _ := policy.(hitlservice.ApprovalRecorder)
+	watcher, _ := policy.(hitlservice.ApprovalWatcher)
 	responder, _ := policy.(approvalResponder)
 	return &HITLWrapper{
 		inner:     inner,
@@ -70,6 +72,7 @@ func NewHITLWrapper(inner taskengine.ToolsRepo, ask AskApproval, policy hitlserv
 		tracker:   tracker,
 		eventSink: eventSink,
 		recorder:  recorder,
+		watcher:   watcher,
 		responder: responder,
 		shellKind: trustedShellKind(DetectPlatformShell()),
 	}
@@ -259,7 +262,7 @@ func (h *HITLWrapper) Exec(
 		h.publishDecision(ctx, tools.Name, toolName, args, result, true)
 		h.hitlLog(ctx, "ask raised", "tool", toolName, "approval_id", toolCallID, "rule", result.MatchedRule, "policy", result.PolicyName)
 
-		return h.ask(ctx, startTime, input, debug, tools, req, result, toolCallID, reportErr, reportChange)
+		return h.gateOnApproval(ctx, startTime, input, debug, tools, req, result, toolCallID, reportErr, reportChange)
 
 	default:
 		h.publishDecision(ctx, tools.Name, toolName, args, result, false)
@@ -267,7 +270,7 @@ func (h *HITLWrapper) Exec(
 	}
 }
 
-// ask is the one path a gated tool call takes. The durable row is written
+// gateOnApproval is the one path a gated tool call takes. The durable row is written
 // first, then the call blocks watching that row for a terminal verdict: an
 // answer continues the turn in place and the gated tool runs. The row — not
 // the local card — is what the wait watches, because the verdict may be
@@ -275,7 +278,7 @@ func (h *HITLWrapper) Exec(
 // `contenox approvals respond` in a second terminal, or an adjudicating agent.
 // The call releases the process only when the process is genuinely leaving
 // (ctx cancelled) or the caller detached this run's asks up front.
-func (h *HITLWrapper) ask(
+func (h *HITLWrapper) gateOnApproval(
 	ctx context.Context,
 	startTime time.Time,
 	input any,
@@ -294,27 +297,39 @@ func (h *HITLWrapper) ask(
 		approvalID = uuid.NewString()
 	}
 
+	// Decided before the row exists: a detaching call must not park a waiter at
+	// all, or a verdict landing between the record and the release would wake a
+	// waiter that is already walking away — and skip the resume hook the
+	// released run depends on.
+	detach := taskengine.AsksDetached(ctx) && taskengine.ToolCallSuspendable(ctx)
+
 	// Row first, always: it costs nothing when the answer is instant, and it is
-	// the only thing an answer from elsewhere can land on. A waiter is parked
-	// before the row is recorded, because recording is also what offers the ask
-	// to an adjudicator — an instant verdict must wake this call, not race it.
+	// the only thing an answer from elsewhere can land on.
 	durableID := ""
 	var waiter <-chan bool
+	var release func()
 	if h.recorder != nil {
-		var release func()
-		waiter, release = h.parkWaiter(approvalID)
-		defer release()
+		if !detach {
+			// Parked before the row is recorded, because recording is also what
+			// offers the ask to an adjudicator — an instant verdict must wake
+			// this call, not race it.
+			waiter, release = h.parkWaiter(approvalID)
+			defer release()
+		}
 		if err := h.recorder.RecordPendingApproval(ctx, approvalID, req); err != nil {
-			// Do not lose the gate: still ask, still block — just not restart-durable this once.
-			release()
-			waiter = nil
-			reportErr(fmt.Errorf("hitl: durable approval row failed, the ask is blocking but not restart-durable: %w", err))
+			// Do not lose the gate: hold the call and ask anyway, just not
+			// restart-durable this once, and with nothing to detach onto.
+			if release != nil {
+				release()
+			}
+			waiter, detach = nil, false
+			reportErr(fmt.Errorf("hitl: durable approval row failed, holding the gate open on a non-durable ask instead: %w", err))
 		} else {
 			durableID = approvalID
 		}
 	}
 
-	if durableID != "" && taskengine.AsksDetached(ctx) && taskengine.ToolCallSuspendable(ctx) {
+	if detach && durableID != "" {
 		// The caller declared nobody is attached to answer this run. Releasing
 		// the process is the point, so the card is detached too and the verdict
 		// comes back through the resume hook.
@@ -328,7 +343,7 @@ func (h *HITLWrapper) ask(
 		}
 	}
 
-	approved, outcome := h.waitForVerdict(ctx, req, result, durableID, waiter, reportErr)
+	approved, outcome, askErr := h.waitForVerdict(ctx, req, result, approvalID, durableID, waiter, reportErr)
 	switch outcome {
 	case verdictAnswered:
 		h.hitlLog(ctx, "verdict entered", "tool", req.ToolName, "approval_id", approvalID, "approved", approved)
@@ -346,13 +361,17 @@ func (h *HITLWrapper) ask(
 				ToolName:   req.ToolName,
 			}
 		}
-		err := fmt.Errorf("hitl: approval %s went unanswered and this run cannot suspend: %w", approvalID, ctx.Err())
+		reason := "the ask was never durably recorded, so nothing is left to answer"
+		if durableID != "" {
+			reason = "the ask stays pending, but this call cannot suspend, so answering it now resumes nothing"
+		}
+		err := fmt.Errorf("hitl: approval error: the run ended before approval %s was answered — %s: %w", approvalID, reason, ctx.Err())
 		h.hitlLog(ctx, "turn failed", "tool", req.ToolName, "approval_id", approvalID, "reason", "cancelled")
 		reportErr(err)
 		return nil, taskengine.DataTypeAny, err
 	case verdictUnaskable:
-		h.hitlLog(ctx, "turn failed", "tool", req.ToolName, "approval_id", approvalID, "reason", "ask_error")
-		err := fmt.Errorf("hitl: approval error: %w", h.lastAskErr(ctx))
+		h.hitlLog(ctx, "turn failed", "tool", req.ToolName, "approval_id", approvalID, "reason", "ask_error", "error", askErr.Error())
+		err := fmt.Errorf("hitl: approval error: %w", askErr)
 		reportErr(err)
 		return nil, taskengine.DataTypeAny, err
 	}
@@ -393,10 +412,11 @@ func (h *HITLWrapper) waitForVerdict(
 	ctx context.Context,
 	req hitlservice.ApprovalRequest,
 	result hitlservice.EvaluationResult,
+	approvalID string,
 	durableID string,
 	waiter <-chan bool,
 	reportErr func(error),
-) (bool, verdictOutcome) {
+) (bool, verdictOutcome, error) {
 	wait := h.askWait(result)
 	waitCtx := ctx
 	if !hitlservice.Indefinite(wait) {
@@ -405,11 +425,14 @@ func (h *HITLWrapper) waitForVerdict(
 		defer cancel()
 	}
 
-	// The card is how this wait is presented, so the wait owns it: it is raised
-	// on waitCtx and torn down with it, and a verdict it delivers late — after
-	// the wait already resolved the row — is read by nobody.
-	h.hitlLog(ctx, "card shown", "tool", req.ToolName, "approval_id", req.ToolCallID)
-	card := h.showCard(waitCtx, req)
+	// The card is how this wait is presented, so the wait owns it outright: it
+	// is torn down the moment the wait returns — including when the verdict came
+	// from the row rather than from here — and a verdict it delivers late is
+	// read by nobody.
+	cardCtx, cancelCard := context.WithCancel(waitCtx)
+	defer cancelCard()
+	h.hitlLog(ctx, "card shown", "tool", req.ToolName, "approval_id", approvalID)
+	card := h.showCard(cardCtx, req)
 
 	approvalPending.Add(1)
 	defer approvalPending.Add(-1)
@@ -427,9 +450,12 @@ func (h *HITLWrapper) waitForVerdict(
 		select {
 		case res := <-card:
 			if res.err != nil {
+				if ctx.Err() != nil {
+					// The card died with the turn, not for want of an answerer.
+					return false, verdictLeaving, ctx.Err()
+				}
 				if durableID == "" {
-					h.rememberAskErr(res.err)
-					return false, verdictUnaskable
+					return false, verdictUnaskable, res.err
 				}
 				// Nobody local could answer — a dropped editor, no attached
 				// client. That is not a verdict: the row is still open to the
@@ -438,10 +464,10 @@ func (h *HITLWrapper) waitForVerdict(
 				card = nil
 				continue
 			}
-			return res.approved, verdictAnswered
+			return res.approved, verdictAnswered, nil
 
 		case approved := <-waiter:
-			return approved, verdictAnswered
+			return approved, verdictAnswered, nil
 
 		case <-pollC:
 			approved, terminal, err := h.watcher.ApprovalVerdict(ctx, durableID)
@@ -450,18 +476,18 @@ func (h *HITLWrapper) waitForVerdict(
 				// pending-to-pending writes a quorum or reassignment makes.
 				continue
 			}
-			return approved, verdictAnswered
+			return approved, verdictAnswered, nil
 
 		case <-waitCtx.Done():
 			if ctx.Err() != nil {
-				return false, verdictLeaving
+				return false, verdictLeaving, ctx.Err()
 			}
 			// Our own wait elapsed: the rule's on_timeout is the verdict.
 			onTimeout := result.OnTimeout
 			if onTimeout == "" {
 				onTimeout = hitlservice.ActionDeny
 			}
-			return onTimeout == hitlservice.ActionAllow, verdictOnTimeout
+			return onTimeout == hitlservice.ActionAllow, verdictOnTimeout, nil
 		}
 	}
 }

@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/contenox/contenox/internal/kernel/clientfsterm"
 	"github.com/contenox/contenox/internal/kernel/enginesvc"
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/eventlog"
 	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/contenox/contenox/internal/services/setupcheck"
@@ -149,6 +151,20 @@ func localToolset(opts chatOpts, db libdbexec.DBManager, tracker libtracker.Acti
 		// This engine resumes suspended mission chains, and a resumed unit asks its
 		// remaining questions here.
 		missiontools.ToolsProviderName: missiontools.New(missions, missionOpts...),
+	}
+	// A program-caller shape (run, a fired mission) owns the machine it runs on
+	// and has no ACP client to proxy through, so its filesystem and shell are
+	// backed here, contained to the workspace by the same server beam serves its
+	// agent from. Without this the agent is handed mission tools alone and cannot
+	// read a file, which reads to a model as a tool it must invent.
+	if root, err := os.Getwd(); err == nil && root != "" {
+		if fsterm, ferr := clientfsterm.New(root); ferr == nil {
+			cwd := func(context.Context) string { return root }
+			tools[localtools.LocalFSToolsName] = localtools.NewLocalFSToolsWith(
+				"", db, fsterm.FileIO(), localtools.LocalFSToolsName, cwd)
+			tools[localtools.LocalExecToolsName] = localtools.NewLocalExecToolsWith(
+				fsterm.CommandRunner())
+		}
 	}
 	// Host-scoped providers last, never overriding a standard registration.
 	for name, repo := range opts.EffectiveExtraTools {

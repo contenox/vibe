@@ -49,7 +49,7 @@ A mission's envelope is a required argument, not a default it inherits — the d
 
 A coding agent asks in the session. The question lives in the process that asked it, and closing the terminal ends the question with the process.
 
-An `approve` verdict here records the ask as a durable row and the run **checkpoints and releases its process** — whether or not you are sitting there. The ask stays behind. Any process can answer it:
+An `approve` verdict here records the ask as a **durable row before anything waits on it**, and the run then blocks on that row — watching the row, not the card, so the answer may come from anywhere and the turn continues in place when it does. Quit, and the run checkpoints beside the still-pending row on the way out. Either way the ask stays behind, and any process can answer it:
 
 ```bash
 contenox approvals list
@@ -57,7 +57,7 @@ contenox approvals respond <ask-id> --approve
 contenox approvals respond <ask-id> --answer "use the staging database"
 ```
 
-A different terminal, a different day, a machine that has rebooted since. This is not mission-only plumbing: a `beam` session and a `contenox run` install the same checkpoint saver, so an ordinary interactive turn parks and releases too — and an unanswered approval card in beam is the same durable row you can answer from your phone.
+A different terminal, a different day, a machine that has rebooted since. This is not mission-only plumbing: a `beam` session and a `contenox run` install the same checkpoint saver, so an ordinary interactive turn is resumable the moment its process leaves — and an unanswered approval card in beam is the same durable row you can answer from your phone.
 
 The verdict is recorded once, by a SQL compare-and-swap against the pending row — a second responder is told the ask is already resolved. The checkpoint is then claimed under a lease before the run is rebuilt, and deleted when the run completes, so a second process does not replay it. An expiry can never silently pass a call either: `allow` is rejected when the policy loads, and every other `on_timeout` — including the empty default nobody wrote — resolves the expired ask as a **denial**. How long an ask waits before that is the envelope's to state, not the runtime's: a duration on the grant that gated the call, `timeout = "never"` for an ask with no deadline at all, or this host's `approval-ceiling` (seven days until you set one) when the grant names none — see [Bounding the wait](/docs/reference/agents-config/#bounding-the-wait).
 

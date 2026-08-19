@@ -117,11 +117,12 @@ contenox run lead-finder \
    Summary: An AI-powered finance automation platform covering treasury, accounts payable, payroll and FX for B2B finance teams.
 ```
 
-> **If the run parks instead of finishing:** `contenox run` has no terminal in
+> **If the run waits instead of finishing:** `contenox run` has no terminal in
 > front of it, so a gated call becomes a
-> [durable ask](/docs/guide/hitl/#what-a-parked-approval-looks-like) rather than
-> a prompt. `contenox approvals list` shows it; `contenox approvals respond
-> <ask-id> --approve` releases the run from its checkpoint. If you would rather
+> [durable ask](/docs/guide/hitl/#the-life-of-an-ask) rather than
+> a prompt, and the run blocks on that row. `contenox approvals list` shows it;
+> `contenox approvals respond <ask-id> --approve` releases it — the waiting call
+> if the run is still up, its checkpoint if `--timeout` already ended it. If you would rather
 > it never stopped, that belongs in the envelope — see
 > [Unattended writes](#unattended-writes), below.
 
@@ -413,7 +414,7 @@ Naming a tool in a declaration makes it reachable, not permitted. `hubspot`
 matches no rule in the shipped policy, so it falls through to `default_action` —
 `approve` — and asks a human on every call. At a keyboard that is an approval
 card. Under `contenox run` there is nobody to ask, so it is a durable ask and the
-run parks.
+run waits on it.
 
 If these writes should run unattended, say so once in `agents.toml`:
 
@@ -433,7 +434,7 @@ credential path no matter how broadly it is written.
 Whether to grant this is a real decision, not a formality: `createCompany` writes
 to your CRM, and the agent deciding to call it is reading text a stranger
 published on the web. Granting `searchCompany` and leaving the two creates gated
-is a defensible middle — the run parks on each write, and
+is a defensible middle — the run waits on each write, and
 `contenox approvals list` is your queue.
 
 ---

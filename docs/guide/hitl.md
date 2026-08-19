@@ -8,7 +8,7 @@ order: 9
 
 Human + AI collaboration in contenox is an authored, versioned artifact — not a runtime default. The policy decides what runs unattended, what pauses to ask a human, and what is denied outright, and it is diffable and swappable like any other file in your repo.
 
-You do not normally write that policy by hand. You write an **envelope** — a named `[envelopes.<name>]` section in [`agents.toml`](/docs/reference/agents-config/#envelopesname) — and the runtime transpiles it into the JSON below. An envelope transpiles to a policy; the approval engine is unchanged either way. See [Where a policy comes from](#where-a-policy-comes-from). Because approvals are durable, an unanswered ask does not hold a process open: it checkpoints the run, and answering it later — from any terminal — resumes execution exactly once. Every ask is also bounded, and you write the bound: a grant carrying `timeout` resolves through its `on_timeout` when nobody answers, a grant carrying `timeout = "never"` waits with no deadline at all, and a grant carrying none rides this host's approval ceiling (`contenox config set approval-ceiling`, seven days until you set it). A parked turn says so rather than going quiet, and a client that reconnects is shown the question again; see [What a parked approval looks like](#what-a-parked-approval-looks-like). For how these controls fit a sovereignty and oversight posture, see [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/).
+You do not normally write that policy by hand. You write an **envelope** — a named `[envelopes.<name>]` section in [`agents.toml`](/docs/reference/agents-config/#envelopesname) — and the runtime transpiles it into the JSON below. An envelope transpiles to a policy; the approval engine is unchanged either way. See [Where a policy comes from](#where-a-policy-comes-from). Because approvals are durable, an ask is a row before anything waits on it: the run that raised it blocks on that row, so answering it — in beam, in your editor, from another terminal, or from your phone — carries the same turn on in place, and if the process goes away first the row and its checkpoint let it resume elsewhere. Every ask is also bounded, and you write the bound: a grant carrying `timeout` resolves through its `on_timeout` when nobody answers, a grant carrying `timeout = "never"` waits with no deadline at all, and a grant carrying none rides this host's approval ceiling (`contenox config set approval-ceiling`, seven days until you set it). A turn that ended before its ask was answered says so rather than going quiet, and a client that reconnects is shown the question again; see [The life of an ask](#the-life-of-an-ask). For how these controls fit a sovereignty and oversight posture, see [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/).
 
 The file format has a published JSON Schema, generated from the Go types that load it: [`hitl-policy-v1.schema.json`](/schema/hitl-policy-v1.schema.json). CI regenerates it and fails on any difference, so the schema you validate against is the loader, not a hand-kept copy of it. Add it as `$schema` in your policy file and your editor validates as you type; every transpiled envelope and every emitted per-agent policy already carries it. The chain format is at [`task-chain.schema.json`](/schema/task-chain.schema.json).
 
@@ -38,17 +38,21 @@ contenox events dispatch --auto
 > **Warning:**
 > `--auto` disables all approval prompts. Use only in trusted environments or non-interactive scripts.
 
-## What a parked approval looks like
+## The life of an ask
 
 ### What happens the moment an ask is raised
 
-A call the policy puts on the `approve` tier becomes a **durable row first** — written before anything waits, so a crash from that instant on still shows the ask as pending rather than losing it. What happens next depends on whether the run can checkpoint:
+A call the policy puts on the `approve` tier becomes a **durable row first** — written before anything waits, so a crash from that instant on still shows the ask as pending rather than losing it. Then the call **blocks on that row**, and the card you see is how that wait is presented.
 
-**A run that can checkpoint releases its process.** Every tool call a model makes inside an agent run can suspend, and agent runs carry a checkpoint saver. So the card is raised to whoever is attached, the run saves its checkpoint, the process is released, and the turn ends — announcing itself as suspended rather than finished. Nothing is held open, nothing is burning a connection, and the ask is now a row. Answering it — the card in beam or your editor, or [`contenox approvals respond`](/docs/reference/contenox-cli/#contenox-approvals) from any terminal that can reach your models — records the verdict and resumes the suspended run to completion. This is the unattended path, and it is the one a mission or a detached run takes.
+**Durable does not mean released.** Durability is about surviving the process dying, not about handing the process back before anyone has answered. So the run waits — and because it is watching the *row* rather than the card in front of you, the answer can come from anywhere: the card in beam or your editor, [`contenox approvals respond`](/docs/reference/contenox-cli/#contenox-approvals) in a second terminal, your phone over the relay, or an [adjudicating agent](#who-may-answer-a-subagent-attention) ruling within its bounds. Whichever writes the verdict first, the blocked call sees it, the gated tool runs, and **the same turn carries on** — no resume, no second prompt, no re-reading of the transcript.
 
-**A run that cannot checkpoint blocks in place.** A tool call outside a model batch, or one on a path with no checkpoint saver, has nothing to suspend into: it holds the call and waits, and the prompt renders where you are — inline in the terminal for the CLI, as a card in beam or your editor. This is the attended path. The durable row is still written, so the same ask is still listable and still answerable from another terminal; what differs is that this process is waiting for it.
+**The wait is the envelope's, not the runtime's.** It runs for the grant's own `timeout`, or this host's approval ceiling when the grant states none, or with no deadline at all when the grant says `timeout = "never"` — see [How an unanswered ask ends](#how-an-unanswered-ask-ends). When the wait runs out, the `on_timeout` verdict applies and the run continues with *that* — a denial the model is told about, not a hung turn.
 
-Either way there is one row, and a row becomes terminal exactly once — so a verdict is applied once no matter how many screens saw the question.
+**Suspension is what happens when nobody is waiting.** If the process is going away — you quit, the host shuts down, the laptop closes — the run checkpoints beside the still-pending row and announces itself as suspended; answering the ask later resumes it from exactly where it stopped, in any process that can reach your models.
+
+The other case is a run whose caller declared its asks **detached**: it records the ask and suspends immediately, by design, rather than holding a goroutine, a session and a model context open for a wait nobody is there to answer. Two callers do that, and only two — a [trigger firing](/docs/guide/events/), which has no attached client at all, and a **resumed run**, which executes inside whoever recorded the verdict (`contenox approvals respond`, a relayed answer, the expiry sweep) and must not hold *that* call open for a fresh human wait. So a resumed run that meets a further gated call suspends again under its own ask id rather than blocking the terminal that answered the first one.
+
+There is one row throughout, and a row becomes terminal exactly once — so a verdict is applied once no matter how many screens saw the question.
 
 ### How an unanswered ask ends
 
@@ -80,7 +84,7 @@ files.write = "deny"
 [envelopes.mine.tools]
 "github.merge_pr" = { grant = "approve", timeout = "2h", on_timeout = "deny" }
 
-# 3. ask, and wait with NO deadline. The run parks, the box can restart,
+# 3. ask, and wait with NO deadline. The run waits, the box can restart,
 #    days can pass, and the ask is still here when somebody comes back.
 "deploy.production" = { grant = "approve", timeout = "never" }
 ```
@@ -98,15 +102,19 @@ contenox config set approval-ceiling never    # ...or waits until somebody answe
 
 Unset, that ceiling is seven days — the longest wait the grammar itself admits. It is a chosen number, not a hidden one, and `contenox config get approval-ceiling` reads back what this host applies.
 
-An expiry is applied when the ask is next read rather than by a background sweep — contenox runs no daemon — so a verdict arriving after the window still resumes the run until something lists the inbox. `contenox approvals list` is that read: it sweeps expired asks to their `on_timeout` verdict and says how many it closed. Answering an ask whose window already closed is refused, naming the verdict that was already applied, rather than applied twice.
+Who applies that expiry depends on who is still waiting. A run blocked on the ask applies its own `on_timeout` the moment the wait elapses, closes the row itself, and carries on with that verdict — so the ask leaves the inbox without anybody running a command. An ask nobody is blocked on — a detached firing, a run whose process left — has its expiry applied when it is next read rather than by a background sweep, because contenox runs no daemon: `contenox approvals list` is that read, and it says how many it closed. Either way, answering an ask whose window already closed is refused, naming the verdict that was already applied, rather than applied twice.
 
-### How that state stays visible
+### How an open ask stays visible
 
-Three things keep a parked ask from being silent:
+Five things keep an open ask from being silent:
 
-**The turn announces itself.** A parked turn ends with a message in the transcript saying it is suspended rather than finished, naming the approval id and the command that resolves it. On the wire the ACP `stopReason` stays `end_turn` — the protocol has no "suspended" reason, and inventing one would break clients that read it as a closed set — so the distinguishing detail travels in the response's `_meta` alongside the announcement. An ordinary completed turn carries neither.
+**The turn announces itself — and never over the card.** A turn that suspended — the process left, or its asks were detached — ends with a message in the transcript saying it is suspended rather than finished, naming the approval id. What it tells you to do next depends on where you are reading it: on a surface that can put the ask in front of you, it says to answer it there and names no command at all, because sending you to another terminal to answer a card already on your screen is how a suspended turn used to become an unanswerable one. Only where nothing can present the card does it name [`contenox approvals respond`](/docs/reference/contenox-cli/#contenox-approvals). A turn that simply waited and got its answer says nothing of the kind: it just continues, and no such message appears while a card is still being waited on. On the wire the ACP `stopReason` stays `end_turn` — the protocol has no "suspended" reason, and inventing one would break clients that read it as a closed set — so the distinguishing detail travels in the response's `_meta` alongside the announcement. An ordinary completed turn carries neither.
 
-**A reconnecting client is asked again.** The approval prompt belongs to the connection that raised it, so it disappears when that connection goes. Attaching to the session again — reopening beam, or an editor reconnecting — re-presents the approvals the session is still parked on, as live prompts under the original ask ids. Answering a re-presented prompt resolves the same durable row and resumes the same checkpointed run; it is not a second question. Asks that were answered elsewhere, or that have expired and had their `on_timeout` verdict applied, are not re-offered. Questions asked with `mission_ask_attention` are not re-offered as prompts either — they are answered with words, through `contenox approvals respond --answer`. The re-offer is capped per attach, so a session holding an unusual number of open asks gets the first of them as cards and the rest stay answerable from a terminal.
+**A card outliving its turn says so.** In beam, a card whose turn has ended stops offering `Esc cancels turn` — there is no longer a turn to cancel — and offers `answering resumes the run` instead. `y` and `n` work exactly as before: the verdict lands on the same durable row, and that is what resumes the checkpointed run. Pressing `Esc` there cancels nothing and says why, rather than silently interrupting whatever ran next.
+
+**A reconnecting client is asked again.** The approval prompt belongs to the connection that raised it, so it disappears when that connection goes. Attaching to the session again — reopening beam, or an editor reconnecting — re-presents the asks the session still has open, as live prompts under the original ask ids. Answering a re-presented prompt resolves that same durable row: if the run behind it is still waiting, the verdict releases it and the turn carries on in place; if the process had already gone, the checkpoint resumes. Either way it is not a second question. Asks that were answered elsewhere, or that have expired and had their `on_timeout` verdict applied, are not re-offered. Questions asked with `mission_ask_attention` are not re-offered as prompts either — they are answered with words, through `contenox approvals respond --answer`. The re-offer is capped per attach, so a session holding an unusual number of open asks gets the first of them as cards and the rest stay answerable from a terminal.
+
+**A dropped card is not an answer.** If the client showing the prompt goes away — the editor closed the connection, the RPC timed out, no client was attached in the first place — the run does not read that as a denial. It keeps waiting on the row, so the ask stays answerable from a terminal or a phone until its own wait runs out and the `on_timeout` verdict applies.
 
 **Any terminal can still answer.** None of the above is required. `contenox approvals list` shows every pending ask and `contenox approvals respond` answers one from any terminal, whether or not a client is attached — see [`contenox approvals`](/docs/reference/contenox-cli/#contenox-approvals). Whichever route answers first wins: a row becomes terminal exactly once, so a prompt answered on a second screen after the verdict landed is discarded rather than applied twice.
 
@@ -134,9 +142,11 @@ prefix_allowlist = ["go test", "go vet"]
 `--hitl-policy hitl-policy-review.json` and
 `config set hitl-policy-name hitl-policy-review.json` all resolve to it. The
 filename rule is exactly `"hitl-policy-" + name + ".json"` — the same rule
-per-agent policies follow, so the two families share one namespace and a
-collision between a declared agent and an envelope is a startup error rather
-than a silent overwrite.
+per-agent policies follow, so the two families share one namespace. Where the
+two collide the envelope owns the file, and `contenox agent list` says so
+(`not carried  <agent>: posture — "<name>" is also an envelope…`) rather than
+one silently overwriting the other. Naming an envelope after a declared agent is
+how you put that agent under an envelope of your own; the shipped `acpx` is both.
 
 The rendered file lands in `.generated/`, is stamped with the section it came
 from, and is rewritten on every run:
@@ -232,7 +242,7 @@ A rule with `when` conditions gates a tool only for calls whose arguments match 
 A subagent that hits something it must not decide alone calls its
 `mission.mission_ask_attention` tool. That question lands in the session
 that fired it, where you answer it in place — your words go straight
-back to the subagent as the result of the call it is parked on, and it continues.
+back to the subagent as the result of the call it is blocked on, and it continues.
 
 The same block also decides who may rule on the subagent's **gated tool calls**:
 a call the envelope put on the `approve` tier normally waits for you, and this

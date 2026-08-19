@@ -61,6 +61,7 @@ func TestUnit_AnswerFrom_RecordsTheActorThatAnswered(t *testing.T) {
 		Summary:   "Which price table applies?",
 		MissionID: "m-1",
 		AskID:     "ask-attention",
+		Detached:  true,
 	}, nil)
 	require.Empty(t, answered)
 	var pending *hitlservice.AttentionPendingError
@@ -95,6 +96,7 @@ func TestUnit_RelayedHumanVerdict_SpendsNoAgentBound(t *testing.T) {
 		Summary:   "Which price table applies?",
 		MissionID: missionID,
 		AskID:     "ask-relayed-question",
+		Detached:  true,
 	}, nil)
 	var pending *hitlservice.AttentionPendingError
 	require.ErrorAs(t, err, &pending)

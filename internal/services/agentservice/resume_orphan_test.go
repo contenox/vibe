@@ -26,7 +26,7 @@ func TestSystem_HostDeath_ReclaimsTheMissionAndKeepsItsWorkAnswerable(t *testing
 	_, err := a.missions.Heartbeat(ctx, missionID, "")
 	require.NoError(t, err)
 	unitCtx := missiontools.WithMissionID(ctx, missionID)
-	resp, err := a.agent.Prompt(unitCtx, agentservice.PromptRequest{
+	resp, err := a.agent.Prompt(detachedRun(unitCtx), agentservice.PromptRequest{
 		InputValue: attentionInput("call-orphan"),
 		InputType:  taskengine.DataTypeChatHistory,
 		Chain:      attentionChain(),
@@ -89,7 +89,7 @@ func TestSystem_HostDeath_AnsweringTheOrphanStillResumesIt(t *testing.T) {
 	a := newAskerInstance(t, dbPath)
 	missionID := createMission(t, a.missions)
 	unitCtx := missiontools.WithMissionID(ctx, missionID)
-	resp, err := a.agent.Prompt(unitCtx, agentservice.PromptRequest{
+	resp, err := a.agent.Prompt(detachedRun(unitCtx), agentservice.PromptRequest{
 		InputValue: attentionInput("call-orphan2"),
 		InputType:  taskengine.DataTypeChatHistory,
 		Chain:      attentionChain(),

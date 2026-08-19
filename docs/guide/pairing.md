@@ -153,5 +153,5 @@ reaching your machine from elsewhere works the same.
 ## See also
 
 - [contenox serve: the standing host](serve.md) — the host the app attaches to when nobody is at the machine
-- [Human gates and envelopes](hitl.md) — what parks a run and waits for you
+- [Human gates and envelopes](hitl.md) — what holds a run and waits for you
 - [Sovereignty](sovereignty.md) — what stays on your machine, and why

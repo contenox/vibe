@@ -144,7 +144,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if resp.StopReason == agentservice.StopSuspended {
-			fmt.Fprintf(errW, "This turn is parked on approval %s — answer it with 'contenox approvals'.\n", resp.SuspendedApprovalID)
+			fmt.Fprintf(errW, "This turn ended with approval %s unanswered and checkpointed beside it — answer it with 'contenox approvals respond %s' and the run picks up where it stopped.\n", resp.SuspendedApprovalID, resp.SuspendedApprovalID)
 		}
 		printRelevantOutput(out, resp.Output, resp.OutputType, raw)
 		return nil

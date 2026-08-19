@@ -101,7 +101,7 @@ func TestSystem_S6Gate_ResumeAcrossProcesses_WritesUnderSessionWorkspaceNotResum
 
 	a := newFSE2EInstance(t, dbPath, func(context.Context) string { return sessionWorkspace })
 	promptCtx := vfs.WithSessionCwd(ctx, sessionWorkspace)
-	resp, err := a.agent.Prompt(promptCtx, agentservice.PromptRequest{
+	resp, err := a.agent.Prompt(detachedRun(promptCtx), agentservice.PromptRequest{
 		InputValue: fsE2EInput(t, relPath, content),
 		InputType:  taskengine.DataTypeChatHistory,
 		Chain:      fsE2EChain(),

@@ -134,6 +134,14 @@ type e2eInstance struct {
 	sink  *recordingSink
 }
 
+// detachedRun marks a run whose asks nobody is attached to answer — a dispatched
+// mission unit, an event firing. Its gated calls and questions record their
+// durable row and release the process instead of blocking on a verdict that is
+// not coming here; the answer arrives later through the resume hook.
+func detachedRun(ctx context.Context) context.Context {
+	return taskengine.WithDetachedAsks(ctx)
+}
+
 func awayAsk(ctx context.Context, _ hitlservice.ApprovalRequest) (bool, error) {
 	<-ctx.Done()
 	return false, ctx.Err()
@@ -238,7 +246,7 @@ func TestSystem_S6Gate_ApprovalOutlivesEngine_VerdictAfterRestartCompletesChain(
 
 	a := newE2EInstance(t, dbPath, awayAsk)
 	createSession(t, a.db, sessionID)
-	resp, err := a.agent.Prompt(ctx, agentservice.PromptRequest{
+	resp, err := a.agent.Prompt(detachedRun(ctx), agentservice.PromptRequest{
 		SessionID:  sessionID,
 		InputValue: e2eInput(),
 		InputType:  taskengine.DataTypeChatHistory,
@@ -311,7 +319,7 @@ func TestSystem_S6Gate_DenyAfterRestart_CompletesWithDenySemantics(t *testing.T)
 
 	a := newE2EInstance(t, dbPath, awayAsk)
 	createSession(t, a.db, sessionID)
-	resp, err := a.agent.Prompt(ctx, agentservice.PromptRequest{
+	resp, err := a.agent.Prompt(detachedRun(ctx), agentservice.PromptRequest{
 		SessionID:  sessionID,
 		InputValue: e2eInput(),
 		InputType:  taskengine.DataTypeChatHistory,
@@ -360,7 +368,7 @@ func TestSystem_S6Gate_ResumeEvaluatesUnderTheAskPolicyNotTheAmbientOne(t *testi
 	defer inst.close()
 	createSession(t, inst.db, sessionID)
 
-	resp, err := inst.agent.Prompt(hitlservice.WithPolicyName(ctx, envelope), agentservice.PromptRequest{
+	resp, err := inst.agent.Prompt(detachedRun(hitlservice.WithPolicyName(ctx, envelope)), agentservice.PromptRequest{
 		SessionID:  sessionID,
 		InputValue: e2eInput(),
 		InputType:  taskengine.DataTypeChatHistory,

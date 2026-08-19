@@ -35,11 +35,16 @@ The CLI cross-compiles cleanly to linux/darwin/windows, amd64/arm64 — see the
 
 ## Optional tooling (release/CI machinery, not needed day-to-day)
 
-- **Rust toolchain** — only for building the ACP conformance test peers
-  (`tools/acp-validator`, `tools/rust-sdk`) used by `task acp-conformance` /
-  `task acp-client-e2e` / `task acp-host-e2e`. These targets fail with a clear
-  "set this env var" message rather than silently skipping when a peer binary
-  isn't built.
+- **Rust toolchain** — for two things, both of them tests that must not be
+  written in Go:
+  - `task e2e-cli`, the black-box CLI suite in
+    [`tools/contenox-e2e`](../../tools/contenox-e2e/README.md). It builds the
+    shipped binary and drives it from outside the module. Named by hand it
+    fails without Rust; inside `task test-all` it skips loudly.
+  - the ACP conformance test peers (`tools/acp-validator`, `tools/rust-sdk`)
+    used by `task acp-conformance` / `task acp-client-e2e` /
+    `task acp-host-e2e`. These targets fail with a clear "set this env var"
+    message rather than silently skipping when a peer binary isn't built.
 
 ## Maintainers: releasing
 

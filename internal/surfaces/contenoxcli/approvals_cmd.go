@@ -22,10 +22,12 @@ var approvalsCmd = &cobra.Command{
 	Use:   "approvals",
 	Short: "The durable ask inbox: list pending approvals and questions, and answer them",
 	Long: `A gated tool call or a mission's question becomes a durable ask the moment it
-is raised, and the run checkpoints and releases its process rather than waiting.
-The ask is a row any process can answer — 'approvals respond' records the verdict
-and resumes the suspended run right here, even if the process that asked is long
-gone.
+is raised — the row is written before anything waits. The run that raised it then
+waits on that row, so answering it there carries the turn on in place; this inbox
+is for the asks whose process is not waiting any more, because it was detached
+(a trigger firing), or it shut down, or it is simply somewhere else. The ask is a
+row ANY process can answer — 'approvals respond' records the verdict and, when a
+run is checkpointed under it, resumes that run right here.
 
 EXPIRES-IN is how long an ask has left, and an expired ask resolves to a denial.
 How long that is comes from the envelope that gated the call: a grant written as
@@ -72,9 +74,9 @@ expired; it did not go unanswered quietly.`,
 
 var approvalsRespondCmd = &cobra.Command{
 	Use:   "respond [ask-id]",
-	Short: "Answer a pending ask (--approve/--deny a permission, --answer a question) and resume the suspended run",
-	Long: `Record a verdict on one ask and resume the run checkpointed under it, in this
-process, right now — the process that raised the ask does not need to be alive.
+	Short: "Answer a pending ask (--approve/--deny a permission, --answer a question) and let the run behind it carry on",
+	Long: `Record a verdict on one ask, from any terminal, whether or not the process that
+raised it is still alive.
 
   contenox approvals respond <id> --approve
   contenox approvals respond <id> --deny
@@ -83,15 +85,25 @@ process, right now — the process that raised the ask does not need to be alive
 Exactly one of --approve, --deny, or --answer. A permission ask takes a verdict;
 a question takes words. 'approvals list' says which is which.
 
+What the verdict does depends on where the run behind the ask is. Usually it is
+still waiting on it — an ask blocks the call that raised it — and the verdict
+lands on the durable row that call is watching, so it stops waiting, the gated
+tool runs or is refused, and that turn carries on in place. Nothing resumes,
+because nothing suspended. If instead the run's process is gone — you quit it,
+the host stopped, a trigger fired it detached — the run was checkpointed beside
+the ask, and this command resumes it here, to completion, exactly once.
+
 An answer lands only while the ask is still pending. Answer one whose window
 already closed and this refuses rather than applying a second verdict: its
 on-timeout verdict was applied when it expired, and a verdict is recorded
 exactly once. An ask listed as EXPIRES-IN never has no window to miss — it
 waits until this command answers it, however many restarts away that is.
 
-Resuming needs a reachable model. If this terminal cannot build an engine, the
-verdict is NOT recorded and the ask stays pending — fix it here ('contenox
-setup') or answer from a terminal that can.`,
+Resuming needs a reachable model, so an ask with a checkpoint under it is
+answerable only from a terminal that can build an engine: if this one cannot,
+the verdict is NOT recorded and the ask stays pending — fix it here ('contenox
+setup') or answer from a terminal that can. An ask whose run is still waiting
+elsewhere needs no engine here; the verdict is all it wants.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runApprovalsRespond,
 }
@@ -131,7 +143,7 @@ func runApprovalsList(cmd *cobra.Command, args []string) error {
 	}
 
 	if ids, serr := agentservice.StrandedCheckpoints(ctx, store, strandedSweepLimit); serr == nil && len(ids) > 0 {
-		deps, cleanup, buildErr := buildResumeDeps(cmd, ctx)
+		deps, cleanup, buildErr := buildResumeDeps(cmd, ctx, svc)
 		if buildErr != nil {
 			fmt.Fprintf(cmd.OutOrStdout(), "%d answered run(s) are checkpointed and waiting for a capable process; this one cannot build an engine (%v). They resume where a model is configured, on the next 'approvals list' or 'approvals respond'.\n\n", len(ids), buildErr)
 		} else {
@@ -264,12 +276,14 @@ func respondToAsk(cmd *cobra.Command, askID string, approve bool, answer, asAgen
 
 	// Capability to resume is proven before anything is recorded.
 	if hasCheckpoint {
-		deps, cleanup, buildErr := buildResumeDeps(cmd, ctx)
+		// BuildEngine registers the resume hook on svc itself (see engine.go),
+		// so the verdict recorded below resumes through the one hook this
+		// process has.
+		_, cleanup, buildErr := buildResumeDeps(cmd, ctx, svc)
 		if buildErr != nil {
 			return fmt.Errorf("ask %s has a suspended run checkpointed under it, and this process cannot build an engine to resume it: %v\nThe verdict was NOT recorded — the ask is still pending. Fix the configuration here ('contenox setup', or 'contenox config set default-model ...'), or answer from a terminal that can reach your models", askID, buildErr)
 		}
 		defer cleanup()
-		hitlservice.SetResumeHook(svc, agentservice.ResumeHook(deps))
 	}
 
 	switch {
@@ -305,12 +319,17 @@ func respondToAsk(cmd *cobra.Command, askID string, approve bool, answer, asAgen
 		// for a clean re-suspension.
 		fmt.Fprintf(out, "Verdict recorded for %s and the suspended run was resumed in this process. If it paused on a further ask, 'contenox approvals list' shows it.\n", askID)
 	} else {
-		fmt.Fprintf(out, "Verdict recorded for %s; nothing was suspended under it (the asker is parked in its own process or already past its deadline).\n", askID)
+		fmt.Fprintf(out, "Verdict recorded for %s. Nothing was checkpointed under it, so nothing resumed here — the run that raised it is watching this row in its own process and carries on there, if it is still up.\n", askID)
 	}
 	return nil
 }
 
-func buildResumeDeps(cmd *cobra.Command, ctx context.Context) (agentservice.Deps, func(), error) {
+// buildResumeDeps builds the engine that resumes a checkpointed run. hitlSvc is
+// the already-open service this command answers on, and it is handed to
+// BuildEngine so the resumed run gates on THAT service: one instance, one
+// resume hook, one card writer. Minting a second one here would leave a resumed
+// run's next gated call asking on a service the outer verdict never reaches.
+func buildResumeDeps(cmd *cobra.Command, ctx context.Context, hitlSvc hitlservice.Service) (agentservice.Deps, func(), error) {
 	contenoxDir, err := ResolveContenoxDir(cmd)
 	if err != nil {
 		return agentservice.Deps{}, nil, err
@@ -327,6 +346,7 @@ func buildResumeDeps(cmd *cobra.Command, ctx context.Context) (agentservice.Deps
 	// HITL gate stays on: without it the resumed unit's next question self-answers
 	// as a blocker.
 	opts.EffectiveHITL = true
+	opts.EffectiveHITLService = hitlSvc
 	engine, err := BuildEngine(ctx, db, opts)
 	if err != nil {
 		db.Close()

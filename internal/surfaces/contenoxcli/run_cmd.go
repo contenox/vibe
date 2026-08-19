@@ -39,8 +39,12 @@ default-mission-policy config — which is what bounds what the task may touch.
 ` + toolGrantLine + `
 
 ` + askWaitLine + ` Nobody is watching a run like this, so
-an envelope that asks is an envelope that stalls it until someone answers with
-'contenox approvals respond' or the wait runs out.
+an envelope that asks is an envelope that holds it: the ask is a durable row and
+the run blocks on that row until someone answers with 'contenox approvals
+respond' — which releases it and lets the task finish — or until the wait runs
+out and the on-timeout verdict (deny) applies. If --timeout ends the command
+first, the run is checkpointed beside the still-pending ask, so answering it
+afterwards resumes the work rather than losing it.
 
 The mission record and every report survive in the local store, so a run whose
 output was discarded can still be read back with 'contenox mission show'.

@@ -261,6 +261,12 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 		sessionID: cp.SessionID,
 		chainRef:  cp.ChainRef,
 	})
+	// A resume runs inside whoever recorded the verdict — `approvals respond`, a
+	// relayed answer, the expiry sweep. Nobody there is attached to the resumed
+	// run, and blocking its next ask would hold that verdict call open for a
+	// whole approval wait, so this run's asks are detached: the next one becomes
+	// a durable row and suspends again under its own key.
+	ctx = taskengine.WithDetachedAsks(ctx)
 
 	// heartbeats the claim: without it a live resume outlasting resumeClaimStaleness would be reclaimed and double-run
 	hbCtx, hbStop := context.WithCancel(ctx)
@@ -289,7 +295,7 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 		if err := store.DeleteChainCheckpoint(ctx, approvalID); err != nil && !errors.Is(err, libdb.ErrNotFound) {
 			return nil, fmt.Errorf("agentservice: run re-suspended as approval %s but deleting consumed checkpoint %s failed: %w", susp.ApprovalID, approvalID, err)
 		}
-		// the new ask's checkpoint may already be durable via the same park-window race; recursion is bounded by the run's remaining asks, each consumed once
+		// the new ask may already have been answered between suspending and here; recursion is bounded by the run's remaining asks, each consumed once
 		if resp, resumed := (&agent{deps: deps}).resumeIfAlreadyAnswered(ctx, susp.ApprovalID); resumed {
 			return resp, nil
 		}

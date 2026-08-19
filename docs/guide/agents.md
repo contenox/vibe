@@ -215,6 +215,13 @@ filename and its description from the first line.
 > `.contenox/skills/`. One in `~/.contenox/skills/` is not listed: the agent's
 > file tool is rooted at the project and refuses absolute paths, so an entry it
 > cannot open would be an instruction that fails.
+>
+> The exception is an agent compiled from `~/.contenox` itself — which is where
+> the editor surfaces (`contenox acp`, `acpx`) take their chain from. That pass
+> treats the home directory as the project, so it lists `~/.contenox/skills/`
+> and not the workspace's, and the paths it prints do not resolve in the project
+> an editor session has open. Until that is fixed, keep skills in the workspace
+> and reach them from an agent declared there.
 
 **Skill or agent?** Both work for a job like a timesheet. A skill loads into the
 agent you are already talking to and keeps the conversation's context; an agent

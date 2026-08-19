@@ -33,7 +33,7 @@ wait — is written in agents.toml under [envelopes.<name>], not here.
 
 ` + askWaitLine + `
 
-See docs/guide/trusted-binaries.md for the full workflow.`,
+See docs/guide/confinement/trusted-binaries.md for the full workflow.`,
 }
 
 var hitlTrustCmd = &cobra.Command{
@@ -63,7 +63,7 @@ failure mode — there is no warn-and-run.`,
 }
 
 func init() {
-	hitlTrustCmd.Flags().String("policy", "hitl-policy-default.json", "Policy to update: a preset name resolved along the policy search path, or an explicit file path")
+	hitlTrustCmd.Flags().String("policy", "hitl-policy-default.json", "Policy to update: a policy file NAME (hitl-policy-strict.json) found on the policy search path, or an explicit file path — not a bare envelope name")
 	hitlTrustCmd.Flags().Bool("refresh", false, "Re-read every already-declared binary and rewrite its hash — the legitimate-upgrade path")
 	hitlTrustCmd.Flags().Bool("list", false, "List every declaration and its state on this host; changes nothing")
 	hitlTrustCmd.Flags().Bool("remove", false, "Remove the named declarations instead of adding them")

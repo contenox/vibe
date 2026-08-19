@@ -46,7 +46,7 @@ Every stored event is one JSON envelope — and this exact envelope is what a fi
 |---|---|
 | `nid` | Global sequence number — monotonic across all days; the cursor and dedup key |
 | `workspace_id` | The workspace the event happened in; triggers only ever see their own workspace's events |
-| `type` | What happened — the exact string a trigger's `listen_for.type` must match |
+| `type` | What happened — the string a trigger's `listen_for.type` matches, exactly or by dotted prefix |
 | `source` | The producing service (`missionservice` for every V1 event) |
 | `subject` | The entity concerned — for mission events, the mission id |
 | `time` | Event time, UTC |
@@ -85,7 +85,7 @@ A trigger is a `trigger-*.json` file:
 |---|---|
 | `name` | Unique trigger name — the firing records key on it |
 | `description` | Optional, for humans |
-| `listen_for.type` | The exact event type to react to — exact string match, no globs or prefixes |
+| `listen_for.type` | The event type to react to: one exact type, or a dotted prefix pattern ending in `.*` (`missionservice.events.*` catches every type under it). A bare `*` is deliberately not a wildcard, and there are no other globs |
 | `type` | Always `"fire_chain"`; the only trigger action |
 | `chain` | The chain file to run, as a file name (never a path), with the event envelope as its JSON input |
 | `policy` | Optional envelope for the fired run — a [HITL policy](/docs/guide/hitl/) file name; omitted, the standard policy resolution applies |
@@ -117,7 +117,7 @@ tmux new -d -s contenox-events 'contenox events dispatch --auto'
 # or a systemd unit, or nohup contenox events dispatch --auto &
 ```
 
-Fired chains run under an envelope like any run: without `--auto`, approve-tier tool calls surface in the dispatcher's terminal when it is attended, and otherwise park as durable asks (`contenox approvals list`). `--auto` disables the terminal prompts for unattended operation — the trigger's policy (or the default) still applies.
+Fired chains run under an envelope like any run, with one difference that matters: **a firing's asks are detached**. Nothing is attached to a firing, so an approve-tier tool call does not hold the firing open waiting for an answer that is not coming — it records its durable ask, checkpoints, and hands the process back (`contenox approvals list` shows it; answering resumes the fired run). That keeps a storm of firings from each holding a run open for the full approval wait. `--auto` disables approval prompts entirely for unattended operation — the trigger's policy (or the default) still applies.
 
 | Flag | Description |
 |---|---|

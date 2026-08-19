@@ -97,9 +97,9 @@ func validate(backend *runtimetypes.Backend) error {
 		return fmt.Errorf("%w: baseURL is required", ErrInvalidBackend)
 	}
 	switch modelrepo.CanonicalBackendType(backend.Type) {
-	case "ollama", "vllm", "openai", "anthropic", "bedrock", "gemini", "vertex-google":
+	case "ollama", "vllm", "openai", "anthropic", "bedrock", "gemini", "vertex-google", modelrepo.ScriptedTestBackendType:
 	default:
-		return fmt.Errorf("%w: Type must be ollama, vllm, openai, anthropic, bedrock, gemini, or vertex-google", ErrInvalidBackend)
+		return fmt.Errorf("%w: Type must be ollama, vllm, openai, anthropic, bedrock, gemini, vertex-google, or %s", ErrInvalidBackend, modelrepo.ScriptedTestBackendType)
 	}
 
 	return nil

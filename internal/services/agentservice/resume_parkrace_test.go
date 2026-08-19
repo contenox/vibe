@@ -31,6 +31,7 @@ func (a *raceAnswerAsker) RaiseAttention(ctx context.Context, ask missiontools.A
 		Detail:    ask.Detail,
 		MissionID: ask.MissionID,
 		AskID:     ask.AskID,
+		Detached:  ask.Detached,
 	}, taskengine.NoopTaskEventSink{})
 	var pending *hitlservice.AttentionPendingError
 	if err != nil && errors.As(err, &pending) {
@@ -95,7 +96,7 @@ func TestSystem_AttentionReleaseRace_AnswerInsideTheGapStillResumesTheOriginalPr
 	missionID := createMission(t, inst.missions)
 	createSession(t, inst.db, sessionID)
 
-	resp, err := inst.agent.Prompt(missiontools.WithMissionID(ctx, missionID), agentservice.PromptRequest{
+	resp, err := inst.agent.Prompt(detachedRun(missiontools.WithMissionID(ctx, missionID)), agentservice.PromptRequest{
 		SessionID:  sessionID,
 		InputValue: attentionInput(callID),
 		InputType:  taskengine.DataTypeChatHistory,
@@ -136,7 +137,7 @@ func TestSystem_AttentionReleaseRace_AnswerInsideTheGapResumesARESUMEDRun(t *tes
 	missionID := createMission(t, inst.missions)
 	createSession(t, inst.db, sessionID)
 
-	resp, err := inst.agent.Prompt(missiontools.WithMissionID(ctx, missionID), agentservice.PromptRequest{
+	resp, err := inst.agent.Prompt(detachedRun(missiontools.WithMissionID(ctx, missionID)), agentservice.PromptRequest{
 		SessionID:  sessionID,
 		InputValue: attentionInputPair(callA, callB),
 		InputType:  taskengine.DataTypeChatHistory,

@@ -180,9 +180,10 @@ a host does not unpair it — the machine stays attached to the relay and is
 reachable again the moment something starts. To detach the machine entirely,
 use `contenox unpair`.
 
-A run that was parked on an ask when you stopped the host is not lost. The ask
-is a durable row and the run is a checkpoint; both outlive the process, and the
-next host to start can resume it.
+A run that was waiting on an ask when you stopped the host is not lost. The ask
+is a durable row, and the run checkpoints beside it on the way out; both outlive
+the process, so answering the ask later resumes the run — in the next host to
+start, or in the terminal that answers it.
 
 ## See also
 

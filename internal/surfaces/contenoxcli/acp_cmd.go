@@ -61,8 +61,12 @@ flow so the editor's UI controls approval. Pass --auto to disable (unattended/te
 
 ` + toolGrantLine + `
 
-` + askWaitLine + ` The editor's own prompt is
-answered live; the durable row behind it is what expires.
+` + askWaitLine + ` An ask is a durable row before the
+editor's prompt appears, and the turn waits on that row rather than ending, so
+answering the prompt continues the turn in place. The same ask is answerable
+from a terminal or a phone while it waits, expires on its own if nobody answers,
+and outlives the editor: reconnect and it is offered again, or answer it later
+and the run resumes from the checkpoint it left behind.
 
 The /mission slash command dispatches a mission in-process: the fired unit is a child
 subprocess of this editor session and its reports arrive live back in the firing session.`,

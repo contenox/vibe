@@ -33,13 +33,39 @@ semantics elsewhere.
 
 ### V1 product surface
 
-- `contenox` CLI (agents, missions, approvals, inbox, sessions, config,
-  backends, models, tools, MCP, events, hitl, vet, workspace grants)
+- `contenox beam` — the terminal UI, and what bare `contenox` opens on a TTY
+- `contenox run` — one task for a caller that is a program; `git diff | contenox
+  "…"` is the same shape with stdin attached
+- `contenox chat` — a session-backed conversation without the TUI
 - `contenox acp` / `contenox acpx` for ACP editors
 - `contenox serve` / `contenox pair` for a relay-reachable host
+- the rest of the CLI (agents, missions, approvals, inbox, sessions, config,
+  backends, models, tools, MCP, events, hitl, vet)
 
-When you change this surface, update the relevant user docs in the same
-change.
+When you change this surface, update the relevant user docs **and the command's
+own help** in the same change. The help text is the documentation most people
+read, and it is what rots first: it has advertised a removed chat mode, called
+`beam` an alias for the host, and pointed at a `contenox index` that no longer
+existed — each time because a change landed without it.
+
+### What an operator authors
+
+Three files, and nothing else, decide what an agent is and what it may do. A
+change to any of them is a change to the product's contract:
+
+- **`agents/**.md`** — the agent harness declaration: prompt, `tools`,
+  `posture`, model. `tools` is reach, not permission: `*` means every connected
+  toolset, `!name` removes one, a bare name grants one, and `mcpServers` /
+  `remoteTools` grant themselves by being declared.
+- **`agents.toml` `[envelopes.<name>]`** — the permission layer. An envelope
+  transpiles to a HITL policy; nobody hand-writes the JSON. It states
+  allow/ask/deny per capability axis, and for an ask the wait itself
+  (`timeout = "30m"`, `on_timeout`, or `timeout = "never"`).
+- **`.generated/`** — output. Chains and policies land here and are rewritten
+  on the next run; editing them is editing a build artifact.
+
+Anything under `.generated/` that an operator must edit by hand is a bug in the
+declaration format, not a workflow to document.
 
 ### Abstraction layers
 
@@ -146,24 +172,106 @@ separately in
 
 Before submitting a pull request, run the checks that match your change.
 
-Fast path, matching CI:
+Test names carry their tier, and the tasks select by it:
+
+| Prefix | Means | Task |
+| --- | --- | --- |
+| `TestUnit_` | isolated, no I/O, fast inner loop | `task test-unit` |
+| `TestIntegration_` | real dependencies, cross-package | `task test-integration` |
+| `TestSystem_`, `TestE2E_` (also `TestHostE2E_`, `TestFleetE2E_`) | whole workflows | `task test-system` |
+
+`-short` is not a release gate. It means *unit only*: it switches off every
+case that needs a container, a kernel feature, a peer binary or a spawned
+`contenox`, which is most of what the product is. Use it for the inner loop,
+never as the thing you ship on.
 
 ```bash
-task test-unit
+task test-unit          # fast inner loop, TestUnit_ under -short
 ```
 
-Full Go suite, including any system tests that are not separately gated:
+The release claim, and what CI runs on every push and pull request:
 
 ```bash
-task test
+task test-system        # TestSystem_/TestE2E_, never -short
+task test-integration   # TestIntegration_, against real dependencies
 ```
 
-Targeted system suites are explicit because some use local services or
-containers:
+Both run under `-v` with `-count=1` and end with a census naming every case
+that did **not** run, because `go test` reports a skipped package as `ok`:
+
+```
+==> test-system: 96 passed, 29 SKIPPED (not passed)
+    did not run: TestSystem_BedrockCatalog_RegisteredAndChatCapable
+    ...
+```
+
+Read that census. A case that skipped for want of Docker, a Landlock kernel or
+a peer binary is not a case that passed. `SKIP=<regexp>` excludes cases by name
+if you need to; CI uses it only to keep the multi-GB Ollama and vLLM model
+pulls out of the per-push run, and the nightly release gate passes nothing so
+everything is attempted.
+
+Several hundred tests still carry names that predate the convention
+(`TestLoopback_`, `TestManager_`, `TestFleetService_`, …). `task test-rest`
+runs exactly those, so `task test-all` covers the whole tree without running
+anything twice. `task test` remains the plain full sweep:
 
 ```bash
-task test-system
+task test-rest          # what the named gates do not select
+task test               # every test in the tree, whatever its name
+task test-all           # the one-command release gate: all of the above, in CI's order
 ```
+
+New tests take the tier their dependencies put them in. A `TestUnit_` that
+asserts the implementation matches itself proves nothing a release can lean on;
+if the behaviour you changed is reachable from the CLI, write a `TestSystem_`
+that drives it.
+
+Neither those suites nor an end-to-end run you drive by hand needs a live model.
+The `scripted-test` backend ships in the ordinary binary and replays a JSON
+dialog in place of the model, so the chain engine, tool dispatch, the HITL gate,
+sessions and `beam` all keep running for real:
+
+```bash
+contenox backend add scripted --type scripted-test --script ./dialog.json
+contenox config set default-provider scripted-test
+contenox config set default-model scripted-test
+```
+
+The script format and how turns are consumed are in
+[docs/development/scripted-test-backend.md](docs/development/scripted-test-backend.md).
+It exercises the machinery, not the agent's judgement: a scripted run cannot
+tell you whether a real model would have picked that tool, so behaviour changes
+still have to be tried against one.
+
+### End-to-end tests are written in another language, on purpose
+
+A test written in the language of the thing it tests can cheat: it can reach
+past the surfaces, construct internals, and swap a fake in where a user could
+not. The e2e suites are therefore **not** Go. They build the shipped binary and
+drive it from outside, asserting only on what an integrator can observe —
+stdout, stderr, exit codes, files the run wrote, and state read back through
+the product's own commands (`approvals list`, `mission show`, `session list`).
+
+Reading the SQLite file directly is the same cheat wearing a different hat, and
+is not allowed. If a behaviour can only be observed through internal state,
+that is a finding — the product cannot show a user something it does — and it
+belongs in an issue, not in a test that opens the database.
+
+That suite lives in [`tools/contenox-e2e`](tools/contenox-e2e/README.md), a
+Rust crate that builds `bin/contenox`, runs it in a scratch `HOME`, and reads
+every durable fact back through a contenox command. A new e2e case joins it
+rather than becoming a Go test that happens to exec something:
+
+```bash
+task e2e-cli                        # builds the binary, then runs the suite
+task e2e-cli -- beam_under_a_pty    # anything after -- goes to cargo test
+```
+
+Its README covers how to write a case: the hermetic `Instance`, the typed
+scripted-test dialog, the command and pty drivers, and the read-back helpers.
+It needs a Rust toolchain, so `task test-all` skips it loudly when there is
+none — read that notice like any other `SKIPPED, not passed`.
 
 CLI package and help drift checks:
 

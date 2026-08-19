@@ -187,7 +187,10 @@ type loopbackHarness struct {
 	router *SessionRouter
 }
 
-func newLoopbackHarness(t *testing.T) *loopbackHarness {
+// newLoopbackHarness builds one client wired to one transport over a pipe.
+// withDeps, if given, adjusts the Deps before the transport is built — the only
+// way to hand it the collaborators (an ask surface, say) a bare harness omits.
+func newLoopbackHarness(t *testing.T, withDeps ...func(*Deps, libdb.DBManager)) *loopbackHarness {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -206,13 +209,17 @@ func newLoopbackHarness(t *testing.T) *loopbackHarness {
 		RequestPoll: 5 * time.Millisecond,
 	})
 	router := NewSessionRouter()
-	factory := New(Deps{
+	deps := Deps{
 		Engine:        &enginesvc.Engine{Bus: bus},
 		DB:            db,
 		ChainRegistry: &ChainRegistry{defaultChain: &taskengine.TaskChainDefinition{}},
 		WorkspaceID:   "loopback-ws",
 		SessionRouter: router,
-	})
+	}
+	for _, apply := range withDeps {
+		apply(&deps, db)
+	}
+	factory := New(deps)
 
 	var tr *Transport
 	agentConn := libacp.NewAgentSideConnection(agentSide, func(c *libacp.AgentSideConnection) libacp.Agent {

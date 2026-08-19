@@ -12,6 +12,8 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	"github.com/contenox/contenox/internal/models/backendservice"
+	"github.com/contenox/contenox/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/models/modelrepo/scriptedtest"
 	"github.com/contenox/contenox/internal/models/runtimestate"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/internal/substrate"
@@ -50,6 +52,8 @@ A backend points at an LLM provider. Supported types:
   vllm                          Self-hosted OpenAI-compatible endpoint (requires --url).
   vertex-google                 Google Cloud Vertex AI / Gemini (requires gcloud auth application-default
                                 login and GOOGLE_CLOUD_PROJECT).
+  scripted-test                 TEST ONLY. Replays a scripted dialog from a JSON file (--script). No model
+                                is ever called; every reply is the next turn in the file.
 
 Examples:
   # Register a local Ollama server (default URL inferred):
@@ -74,6 +78,9 @@ Examples:
   # Register a custom vLLM server:
   contenox backend add myvllm --type vllm --url http://gpu-host:8000
 
+  # Register the scripted TEST backend (replays a dialog; never calls a model):
+  contenox backend add scripted --type scripted-test --script ./dialog.json
+
   contenox backend list
   contenox backend show openai
   contenox backend remove myvllm`,
@@ -96,6 +103,8 @@ func defaultBaseURLForType(typ string) (string, error) {
 		return "", fmt.Errorf("--url is required for %s backends\n  Include project and location — global endpoint:\n  --url \"https://aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/global\"\n  or regional (data residency):\n  --url \"https://{REGION}-aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/{REGION}\"\n  Model availability differs per endpoint (contenox model list)", typ)
 	case "bedrock":
 		return "", fmt.Errorf("--url is required for bedrock backends (it carries the region)\n  e.g.: --url \"https://bedrock-runtime.us-east-1.amazonaws.com\"\n  Credentials come from the ambient AWS chain (env / profile / IAM role); no --api-key needed unless storing static keys.")
+	case modelrepo.ScriptedTestBackendType:
+		return "", fmt.Errorf("--script is required for %s backends (it carries the dialog file)\n  e.g.: --script ./dialog.json", modelrepo.ScriptedTestBackendType)
 	default:
 		return "", nil
 	}
@@ -113,16 +122,24 @@ The --type flag determines which provider protocol is used.
                                 --url https://ollama.com/api and --api-key-env OLLAMA_API_KEY).
   vllm                          Self-hosted OpenAI-compatible endpoint (requires --url).
   vertex-google                 Google Cloud Vertex AI / Gemini (requires gcloud auth application-default login).
+  scripted-test                 TEST ONLY. Replays a scripted dialog from a JSON file (requires --script).
 
 API keys should be passed via --api-key-env (reads from environment) rather than
 --api-key (inline literal) to avoid leaking secrets into shell history.
+
+The scripted-test type is a fake: it calls no model and replays the turns in its
+--script file in order, one per model turn. Every surface that names the active
+provider shows "scripted-test", and 'contenox doctor' warns while it is the default.
+It proves the machinery (chain loop, tool dispatch, HITL gate), not the agent's
+judgement — you wrote the tool calls, so no real model was asked to choose them.
 
 Examples:
   contenox backend add ollama     --type ollama
   contenox backend add ollama-cloud --type ollama    --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
   contenox backend add openai     --type openai      --api-key-env OPENAI_API_KEY
   contenox backend add gemini     --type gemini      --api-key-env GEMINI_API_KEY
-  contenox backend add myvllm    --type vllm         --url http://gpu-host:8000`,
+  contenox backend add myvllm    --type vllm         --url http://gpu-host:8000
+  contenox backend add scripted  --type scripted-test --script ./dialog.json`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := libtracker.WithNewRequestID(context.Background())
@@ -131,12 +148,26 @@ Examples:
 
 		typ, _ := flags.GetString("type")
 		baseURL, _ := flags.GetString("url")
+		scriptPath, _ := flags.GetString("script")
 		apiKeyEnv, _ := flags.GetString("api-key-env")
 		apiKeyLit, _ := flags.GetString("api-key")
 
 		typ = strings.ToLower(strings.TrimSpace(typ))
 		if typ == "" {
 			typ = "ollama"
+		}
+		if scriptPath = strings.TrimSpace(scriptPath); scriptPath != "" {
+			if typ != modelrepo.ScriptedTestBackendType {
+				return fmt.Errorf("--script only applies to --type %s backends", modelrepo.ScriptedTestBackendType)
+			}
+			abs, err := scriptedtest.ResolvePath(scriptPath)
+			if err != nil {
+				return err
+			}
+			if _, err := scriptedtest.Load(abs); err != nil {
+				return err
+			}
+			baseURL = abs
 		}
 		if baseURL == "" {
 			inferred, err := defaultBaseURLForType(typ)
@@ -151,8 +182,9 @@ Examples:
 		}
 
 		// A double-slash in the path is almost always an un-expanded environment
-		// variable such as an empty $GOOGLE_CLOUD_PROJECT.
-		if baseURL != "" {
+		// variable such as an empty $GOOGLE_CLOUD_PROJECT. A scripted-test base
+		// URL is a filesystem path, not a URL, so the heuristic does not apply.
+		if baseURL != "" && typ != modelrepo.ScriptedTestBackendType {
 			pathPart := baseURL
 			if idx := strings.Index(baseURL, "://"); idx >= 0 {
 				pathPart = baseURL[idx+3:] // skip "https://"
@@ -193,6 +225,10 @@ Examples:
 		invalidateBackendModelCache(ctx, cmd.ErrOrStderr(), db, backend.ID)
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Backend %q added (%s → %s).\n", name, typ, baseURL)
+		if typ == modelrepo.ScriptedTestBackendType {
+			fmt.Fprintf(cmd.OutOrStdout(), "WARNING: %s is a TEST backend. It calls no model — every reply is replayed from %s in order.\n", modelrepo.ScriptedTestBackendType, baseURL)
+			fmt.Fprintf(cmd.OutOrStdout(), "         Point the defaults at it with:\n           contenox config set default-provider %s\n           contenox config set default-model %s\n", modelrepo.ScriptedTestBackendType, scriptedTestModelName(baseURL))
+		}
 		return nil
 	},
 }
@@ -287,6 +323,14 @@ registration; it does not affect the remote provider or endpoint.`,
 	},
 }
 
+func scriptedTestModelName(scriptPath string) string {
+	script, err := scriptedtest.Load(scriptPath)
+	if err != nil {
+		return scriptedtest.DefaultModelName
+	}
+	return script.Model
+}
+
 func openBackendDB(cmd *cobra.Command) (libdb.DBManager, backendservice.Service, error) {
 	dbPath, err := resolveDBPath(cmd)
 	if err != nil {
@@ -339,6 +383,7 @@ func globalContenoxDir() (string, error) {
 func init() {
 	backendAddCmd.Flags().String("type", "ollama", "Backend type: ollama, openai, anthropic, bedrock, gemini, vllm, vertex-google")
 	backendAddCmd.Flags().String("url", "", "Base URL of the backend (auto-inferred for openai/anthropic/gemini if omitted; set https://ollama.com/api for hosted Ollama)")
+	backendAddCmd.Flags().String("script", "", "Path to the dialog file for a --type scripted-test backend (TEST ONLY: replays turns instead of calling a model)")
 	backendAddCmd.Flags().String("api-key-env", "", "Name of the environment variable holding the API key (preferred over --api-key)")
 	backendAddCmd.Flags().String("api-key", "", "API key literal — prefer --api-key-env to avoid leaking into shell history")
 

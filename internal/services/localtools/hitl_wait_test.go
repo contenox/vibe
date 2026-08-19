@@ -20,10 +20,10 @@ type ceilingPolicy struct {
 func (p ceilingPolicy) ApprovalCeiling() time.Duration { return p.ceiling }
 
 // TestUnit_HITLWrapper_CardOutlivesNothingItShould pins the card's lifetime
-// against the row's: a rule wait bounds it, an unset wait falls to the host's
-// ceiling, and a wait with no deadline gets no context deadline at all — the
-// card stands until it is answered, which is what makes "close the laptop"
-// true on the client side too.
+// against the wait that owns it: a rule wait bounds both, an unset wait falls to
+// the host's ceiling, and a wait with no deadline gets no context deadline at
+// all — the call blocks and the card stands until somebody answers, which is
+// what makes "close the laptop" true on the client side too.
 func TestUnit_HITLWrapper_CardOutlivesNothingItShould(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -47,7 +47,6 @@ func TestUnit_HITLWrapper_CardOutlivesNothingItShould(t *testing.T) {
 			}
 			seen := make(chan window, 1)
 			release := make(chan struct{})
-			t.Cleanup(func() { close(release) })
 			ask := func(ctx context.Context, _ hitlservice.ApprovalRequest) (bool, error) {
 				deadline, ok := ctx.Deadline()
 				seen <- window{deadline, ok}
@@ -59,15 +58,29 @@ func TestUnit_HITLWrapper_CardOutlivesNothingItShould(t *testing.T) {
 				}
 			}
 
+			w := localtools.NewHITLWrapper(inner, ask, policy, nil)
 			raised := time.Now()
-			_, _, err := execSuspendableCall(t, localtools.NewHITLWrapper(inner, ask, policy, nil), "call-wait")
-			require.Error(t, err, "a gated call parks; the card is raised beside it")
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				_, _, _ = execSuspendableCall(t, w, "call-wait")
+			}()
+			t.Cleanup(func() {
+				close(release)
+				<-done
+			})
 
 			var got window
 			select {
 			case got = <-seen:
 			case <-time.After(5 * time.Second):
 				t.Fatal("the card was never raised")
+			}
+
+			select {
+			case <-done:
+				t.Fatal("the call must block on the ask, not return before it is answered")
+			case <-time.After(50 * time.Millisecond):
 			}
 
 			if tc.want == 0 {

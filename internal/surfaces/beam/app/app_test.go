@@ -610,6 +610,70 @@ func TestUnit_Approval_EscCancelsTheTurn(t *testing.T) {
 	}
 }
 
+// TestUnit_Approval_CardOutlivingItsTurnStopsClaimingIt is the beam half of
+// the reported incident: the approval card and the turn's own suspension
+// notice arrived together, both speaking for the same turn — the card still
+// offering "Esc cancels turn" over a turn that had already stopped, while the
+// notice sent the operator to another terminal. A gated call now waits on its
+// ask in place, so a turn that ends under a live card has genuinely suspended:
+// the card stays answerable and says what answering does instead.
+func TestUnit_Approval_CardOutlivingItsTurnStopsClaimingIt(t *testing.T) {
+	h := newHarness(t).start()
+	events := testkit.FixtureApprovalFlow(testSession)
+	h.deliver(events[1])
+	if h.a.card == nil {
+		t.Fatal("no approval card after PermissionRequested")
+	}
+	live := testkit.EncodeLines(h.last().Live)
+	requireContains(t, live, "Esc cancels turn", "a card over a running turn still offers the cancel")
+
+	h.deliver(enginebridge.TurnEnded{SessionID: testSession, StopReason: libacp.StopReasonEndTurn})
+	if h.a.card == nil {
+		t.Fatal("a suspended turn's ask is still answerable here — the card must not be retired")
+	}
+	if !h.a.card.Detached() {
+		t.Fatal("the card outlived its turn and must know it")
+	}
+	live = testkit.EncodeLines(h.last().Live)
+	requireNotContains(t, live, "Esc cancels turn", "there is no turn left for Esc to cancel")
+	requireContains(t, live, "answering resumes the run", "what answering does is the honest offer")
+	requireContains(t, live, "local_fs.write_file", "the card still names what it is about")
+
+	// Esc stops asking the bridge to cancel a turn that has already ended, and
+	// says why rather than doing nothing.
+	mark := len(h.term.frames)
+	before := h.calls()
+	h.press(input.KeyEscape)
+	if h.calls() != before {
+		t.Fatalf("Esc cancelled something after the turn ended:\n%s", h.calls())
+	}
+	requireContains(t, scrollbackFrom(h, mark), "no turn is running", "Esc explains itself instead")
+	if h.a.card == nil {
+		t.Fatal("Esc must not drop an ask that is still open")
+	}
+
+	// And the ask is still answerable from here, which is the whole point.
+	h.input(input.KeyEvent{Key: input.KeyRune, Rune: 'y'})
+	if h.a.card != nil {
+		t.Fatal("y must answer a detached card exactly like any other")
+	}
+	requireContains(t, h.scrollback(), "allowed", "the verdict is recorded")
+}
+
+// TestUnit_Approval_CancelledTurnStillRetiresTheCard pins the other half:
+// a cancelled turn leaves nothing anyone can answer, so its card is retired
+// rather than kept alive as a detached ask.
+func TestUnit_Approval_CancelledTurnStillRetiresTheCard(t *testing.T) {
+	h := newHarness(t).start()
+	h.deliver(testkit.FixtureApprovalFlow(testSession)[1])
+
+	h.deliver(enginebridge.TurnEnded{SessionID: testSession, StopReason: libacp.StopReasonCancelled})
+	if h.a.card != nil {
+		t.Fatal("a cancelled turn must retire the pending card")
+	}
+	requireContains(t, h.scrollback(), "cancelled", "the retired card leaves its record")
+}
+
 // TestUnit_CtrlC_ThreeWay pins the clear/interrupt/quit Ctrl+C policy against
 // a scripted clock.
 func TestUnit_CtrlC_ThreeWay(t *testing.T) {

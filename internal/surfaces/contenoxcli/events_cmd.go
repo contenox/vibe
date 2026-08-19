@@ -307,7 +307,12 @@ func (r *chainFiringRunner) RunChain(ctx context.Context, t eventtrigger.Trigger
 	if err != nil {
 		return err
 	}
-	execCtx := ctx
+	// Nobody is attached to a firing: a gated call records its ask and suspends
+	// rather than holding this goroutine, its session and its model context for
+	// the whole approval wait — which, unanswered, would be the full ceiling,
+	// multiplied by every event in a storm. The answer arrives later through the
+	// resume hook.
+	execCtx := taskengine.WithDetachedAsks(ctx)
 	if t.Policy != "" {
 		// The trigger's named envelope; unset, hitlservice's standard resolution
 		// applies.

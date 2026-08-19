@@ -22,6 +22,7 @@ type recordingApprovePolicy struct {
 	requests  []hitlservice.ApprovalRequest
 	resolved  map[string]bool
 	responded map[string]bool
+	rows      map[string]bool // terminal verdicts, as the durable row holds them
 	recordErr error
 }
 
@@ -60,6 +61,25 @@ func (p *recordingApprovePolicy) Respond(_ context.Context, approvalID string, a
 	return nil
 }
 
+// ApprovalVerdict reads the durable row, the way hitlservice does.
+func (p *recordingApprovePolicy) ApprovalVerdict(_ context.Context, approvalID string) (bool, bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	approved, ok := p.rows[approvalID]
+	return approved, ok, nil
+}
+
+// resolveRowElsewhere is a verdict written straight to the row by somebody who
+// is not this process: a phone over the relay, a second terminal, a quorum flow.
+func (p *recordingApprovePolicy) resolveRowElsewhere(approvalID string, approved bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.rows == nil {
+		p.rows = map[string]bool{}
+	}
+	p.rows[approvalID] = approved
+}
+
 func (p *recordingApprovePolicy) verdicts() map[string]bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -84,7 +104,10 @@ func newRecordingApprovePolicy() *recordingApprovePolicy {
 	return &recordingApprovePolicy{result: hitlservice.EvaluationResult{Action: hitlservice.ActionApprove}}
 }
 
-var _ hitlservice.ApprovalRecorder = (*recordingApprovePolicy)(nil)
+var (
+	_ hitlservice.ApprovalRecorder = (*recordingApprovePolicy)(nil)
+	_ hitlservice.ApprovalWatcher  = (*recordingApprovePolicy)(nil)
+)
 
 type noopCheckpointSaver struct{}
 
@@ -122,93 +145,200 @@ func execSuspendableCall(t *testing.T, w *localtools.HITLWrapper, callID string)
 		&taskengine.ToolsCall{Name: "local_shell", ToolName: "run_command"})
 }
 
-func TestUnit_HITLWrapper_ReleasesAtCreation(t *testing.T) {
+// TestUnit_HITLWrapper_AnsweringTheCardContinuesTheTurn is the regression test
+// for the reported beam bug: a gated call on an attended surface used to record
+// its row, raise a card and suspend in the same instant, so answering the card
+// resolved a row whose turn was already gone and the agent stalled forever. The
+// row is still written first, but the call now blocks on it — and the answer
+// runs the tool and carries the turn on in place.
+func TestUnit_HITLWrapper_AnsweringTheCardContinuesTheTurn(t *testing.T) {
 	inner := &mockInnerTools{}
 	policy := newRecordingApprovePolicy()
-	asked := make(chan struct{}, 1)
+	answered := make(chan struct{})
 	ask := func(ctx context.Context, req hitlservice.ApprovalRequest) (bool, error) {
-		asked <- struct{}{}
-		<-ctx.Done()
-		return false, ctx.Err()
+		close(answered)
+		return true, nil
 	}
 	w := localtools.NewHITLWrapper(inner, ask, policy, nil)
 
-	_, _, err := execSuspendableCall(t, w, "call-9")
+	res, dt, err := execSuspendableCall(t, w, "call-9")
 
 	var pend *taskengine.ApprovalPendingError
-	require.ErrorAs(t, err, &pend)
-	require.Equal(t, "call-9", pend.ApprovalID, "approval ID == the engine-minted call ID")
-	require.Equal(t, "run_command", pend.ToolName)
-	require.Equal(t, []string{"call-9"}, policy.recorded, "the durable row precedes the release")
-	require.Empty(t, policy.inlineVerdicts(), "the row stays pending — nobody has answered")
-	require.Empty(t, inner.calls, "the gated tool must not run")
-
-	select {
-	case <-asked:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the card must still be raised, detached from the released call")
-	}
+	require.NotErrorAs(t, err, &pend,
+		"the reported bug: an attended, checkpointable surface released the turn up front instead of waiting")
+	require.NoError(t, err, "an answered ask is not a suspension")
+	require.Equal(t, "ok", res)
+	require.Equal(t, taskengine.DataTypeString, dt)
+	require.Equal(t, []string{"call-9"}, policy.recorded, "the durable row is still written first")
+	require.Equal(t, []string{"run_command"}, inner.calls, "the gated tool runs, in this turn")
+	require.Equal(t, map[string]bool{"call-9": true}, policy.inlineVerdicts(),
+		"the row closes inline — no resume hook may fire for a run that is still alive")
+	require.Empty(t, policy.verdicts(), "the card is not a privileged writer: it never calls Respond")
+	<-answered
 }
 
-func TestUnit_HITLWrapper_VerdictLandsThroughTheResponder(t *testing.T) {
+// TestUnit_HITLWrapper_VerdictFromAnotherProcessContinuesTheTurn pins the half a
+// local card can never cover: the phone over the relay, `contenox approvals
+// respond` in a second terminal, or an EE quorum flow writes the verdict onto
+// the ROW, and the blocked call must see it there.
+func TestUnit_HITLWrapper_VerdictFromAnotherProcessContinuesTheTurn(t *testing.T) {
 	inner := &mockInnerTools{}
 	policy := newRecordingApprovePolicy()
-	w := localtools.NewHITLWrapper(inner, alwaysApprove, policy, nil)
-
-	_, _, err := execSuspendableCall(t, w, "call-fast")
-
-	var pend *taskengine.ApprovalPendingError
-	require.ErrorAs(t, err, &pend, "an instant answer must not decide whether the ask was durable")
-	require.Equal(t, []string{"call-fast"}, policy.recorded)
-	require.Empty(t, inner.calls, "the tool runs on the resume, not here")
-
-	require.Eventually(t, func() bool {
-		return len(policy.verdicts()) == 1
-	}, 5*time.Second, 5*time.Millisecond, "the verdict must reach the durable row through Respond")
-	require.Equal(t, map[string]bool{"call-fast": true}, policy.verdicts())
-	require.Empty(t, policy.inlineVerdicts(), "a released call never closes its row inline")
-}
-
-func TestUnit_HITLWrapper_NoAttachedClientStillCheckpoints(t *testing.T) {
-	inner := &mockInnerTools{}
-	policy := newRecordingApprovePolicy()
+	// No local card can answer this one at all.
 	noClient := func(context.Context, hitlservice.ApprovalRequest) (bool, error) {
 		return false, errors.New("no editor session is attached to answer it")
 	}
 	w := localtools.NewHITLWrapper(inner, noClient, policy, nil)
 
-	_, _, err := execSuspendableCall(t, w, "call-unattended")
+	go func() {
+		require.Eventually(t, func() bool {
+			policy.mu.Lock()
+			defer policy.mu.Unlock()
+			return len(policy.recorded) == 1
+		}, 5*time.Second, 5*time.Millisecond)
+		policy.resolveRowElsewhere("call-elsewhere", true)
+	}()
 
-	var pend *taskengine.ApprovalPendingError
-	require.ErrorAs(t, err, &pend, "nobody to ask is a suspension, not a failed run")
-	require.Equal(t, "call-unattended", pend.ApprovalID)
-	require.Equal(t, []string{"call-unattended"}, policy.recorded, "the ask is durable even though no client saw it")
-	require.Empty(t, inner.calls)
+	res, _, err := execSuspendableCall(t, w, "call-elsewhere")
 
-	require.Never(t, func() bool {
-		return len(policy.verdicts())+len(policy.inlineVerdicts()) > 0
-	}, 200*time.Millisecond, 10*time.Millisecond, "a transport failure is not a verdict")
+	require.NoError(t, err)
+	require.Equal(t, "ok", res, "a verdict nobody local wrote still releases the call")
+	require.Equal(t, []string{"run_command"}, inner.calls, "and the gated tool runs")
 }
 
-func TestUnit_HITLWrapper_RecordedAskCarriesItsSession(t *testing.T) {
+// TestUnit_HITLWrapper_RowStaysPendingUntilTerminal pins that the wait resolves
+// on a terminal verdict only. A row rewritten pending-to-pending — partial
+// quorum, reassignment — must not be read as an answer.
+func TestUnit_HITLWrapper_RowStaysPendingUntilTerminal(t *testing.T) {
+	inner := &mockInnerTools{}
+	policy := newRecordingApprovePolicy()
+	policy.result.TimeoutS = 2
+	policy.result.OnTimeout = hitlservice.ActionDeny
+	noClient := func(context.Context, hitlservice.ApprovalRequest) (bool, error) {
+		return false, errors.New("no editor session is attached to answer it")
+	}
+	w := localtools.NewHITLWrapper(inner, noClient, policy, nil)
+
+	res, _, err := execSuspendableCall(t, w, "call-quorum")
+
+	require.NoError(t, err)
+	require.Equal(t, localtools.DenyTimeoutMessage, res, "nothing terminal was ever written")
+	require.Empty(t, inner.calls)
+}
+
+// TestUnit_HITLWrapper_NoAttachedClientWaitsOutTheRow pins that a card nobody
+// can present is not a verdict. The row stays open to an answer from anywhere
+// else until the operator's wait runs out, and only then does on_timeout stand in.
+func TestUnit_HITLWrapper_NoAttachedClientWaitsOutTheRow(t *testing.T) {
+	inner := &mockInnerTools{}
+	policy := newRecordingApprovePolicy()
+	policy.result.TimeoutS = 1
+	policy.result.OnTimeout = hitlservice.ActionDeny
+	noClient := func(context.Context, hitlservice.ApprovalRequest) (bool, error) {
+		return false, errors.New("no editor session is attached to answer it")
+	}
+	w := localtools.NewHITLWrapper(inner, noClient, policy, nil)
+
+	started := time.Now()
+	res, _, err := execSuspendableCall(t, w, "call-unattended")
+
+	require.NoError(t, err, "a transport failure is not a failed run")
+	require.Equal(t, localtools.DenyTimeoutMessage, res)
+	require.GreaterOrEqual(t, time.Since(started), 900*time.Millisecond,
+		"the ask stayed answerable for its whole wait, not just for as long as the card")
+	require.Equal(t, []string{"call-unattended"}, policy.recorded, "the ask is durable even though no client saw it")
+	require.Equal(t, map[string]bool{"call-unattended": false}, policy.inlineVerdicts(), "on_timeout closed the row")
+	require.Empty(t, inner.calls)
+}
+
+// TestUnit_HITLWrapper_OnTimeoutAllowRunsTheTool pins the other half of the
+// timeout verdict: on_timeout = allow lets the run carry on with the tool run.
+func TestUnit_HITLWrapper_OnTimeoutAllowRunsTheTool(t *testing.T) {
+	inner := &mockInnerTools{}
+	policy := newRecordingApprovePolicy()
+	policy.result.TimeoutS = 1
+	policy.result.OnTimeout = hitlservice.ActionAllow
+	w := localtools.NewHITLWrapper(inner, blockUntilCtxDone, policy, nil)
+
+	res, _, err := execSuspendableCall(t, w, "call-allow")
+
+	require.NoError(t, err)
+	require.Equal(t, "ok", res)
+	require.Equal(t, []string{"run_command"}, inner.calls)
+	require.Equal(t, map[string]bool{"call-allow": true}, policy.inlineVerdicts())
+}
+
+// TestUnit_HITLWrapper_ProcessLeavingSuspends pins the one non-detached
+// suspension left: the process is actually going away, so the row stays pending
+// and the engine checkpoints beside it for a resume elsewhere.
+func TestUnit_HITLWrapper_ProcessLeavingSuspends(t *testing.T) {
 	inner := &mockInnerTools{}
 	policy := newRecordingApprovePolicy()
 	w := localtools.NewHITLWrapper(inner, blockUntilCtxDone, policy, nil)
 
-	ctx := context.WithValue(suspendableCtx("call-s"), runtimetypes.SessionIDContextKey, "f1084c50-session")
+	ctx, cancel := context.WithCancel(suspendableCtx("call-shutdown"))
+	go func() {
+		require.Eventually(t, func() bool {
+			policy.mu.Lock()
+			defer policy.mu.Unlock()
+			return len(policy.recorded) == 1
+		}, 5*time.Second, 5*time.Millisecond)
+		cancel()
+	}()
+	defer cancel()
+
+	_, _, err := w.Exec(ctx, time.Now(), map[string]any{"path": "a.txt"}, false,
+		&taskengine.ToolsCall{Name: "local_shell", ToolName: "run_command"})
+
+	var pend *taskengine.ApprovalPendingError
+	require.ErrorAs(t, err, &pend, "a dying process suspends rather than inventing a verdict")
+	require.Equal(t, "call-shutdown", pend.ApprovalID)
+	require.Empty(t, policy.inlineVerdicts(), "the row stays pending — it is what makes the resume possible")
+	require.Empty(t, inner.calls)
+}
+
+// TestUnit_HITLWrapper_DetachedAsksRelease pins the only up-front release left:
+// a caller that explicitly declared nobody is attached to answer this run.
+func TestUnit_HITLWrapper_DetachedAsksRelease(t *testing.T) {
+	inner := &mockInnerTools{}
+	policy := newRecordingApprovePolicy()
+	w := localtools.NewHITLWrapper(inner, alwaysApprove, policy, nil)
+
+	ctx := taskengine.WithDetachedAsks(suspendableCtx("call-detached"))
 	_, _, err := w.Exec(ctx, time.Now(), map[string]any{"path": "a.txt"}, false,
 		&taskengine.ToolsCall{Name: "local_shell", ToolName: "run_command"})
 
 	var pend *taskengine.ApprovalPendingError
 	require.ErrorAs(t, err, &pend)
+	require.Equal(t, "call-detached", pend.ApprovalID)
+	require.Equal(t, []string{"call-detached"}, policy.recorded)
+	require.Empty(t, inner.calls, "the tool runs on the resume, not here")
+
+	require.Eventually(t, func() bool {
+		return len(policy.verdicts()) == 1
+	}, 5*time.Second, 5*time.Millisecond, "a detached card answers through Respond, which is what fires the resume hook")
+	require.Equal(t, map[string]bool{"call-detached": true}, policy.verdicts())
+	require.Empty(t, policy.inlineVerdicts(), "a released call never closes its row inline")
+}
+
+func TestUnit_HITLWrapper_RecordedAskCarriesItsSession(t *testing.T) {
+	inner := &mockInnerTools{}
+	policy := newRecordingApprovePolicy()
+	w := localtools.NewHITLWrapper(inner, alwaysDeny, policy, nil)
+
+	ctx := context.WithValue(suspendableCtx("call-s"), runtimetypes.SessionIDContextKey, "f1084c50-session")
+	_, _, err := w.Exec(ctx, time.Now(), map[string]any{"path": "a.txt"}, false,
+		&taskengine.ToolsCall{Name: "local_shell", ToolName: "run_command"})
+
+	require.NoError(t, err)
 	require.Len(t, policy.requests, 1)
 	require.Equal(t, "f1084c50-session", policy.requests[0].SessionID,
-		"the released ask must know the session it belongs to")
+		"the recorded ask must know the session it belongs to")
 
 	bare := newRecordingApprovePolicy()
-	wBare := localtools.NewHITLWrapper(&mockInnerTools{}, blockUntilCtxDone, bare, nil)
+	wBare := localtools.NewHITLWrapper(&mockInnerTools{}, alwaysDeny, bare, nil)
 	_, _, err = execSuspendableCall(t, wBare, "call-bare")
-	require.ErrorAs(t, err, &pend)
+	require.NoError(t, err)
 	require.Len(t, bare.requests, 1)
 	require.Empty(t, bare.requests[0].SessionID)
 }
@@ -275,7 +405,7 @@ func TestUnit_HITLWrapper_InjectedVerdict(t *testing.T) {
 	require.True(t, askCalled)
 }
 
-func TestUnit_HITLWrapper_ShortRuleTimeoutStillSuspends(t *testing.T) {
+func TestUnit_HITLWrapper_ShortRuleWaitAppliesOnTimeout(t *testing.T) {
 	inner := &mockInnerTools{}
 	policy := newRecordingApprovePolicy()
 	policy.result.TimeoutS = 1
@@ -284,13 +414,12 @@ func TestUnit_HITLWrapper_ShortRuleTimeoutStillSuspends(t *testing.T) {
 
 	res, _, err := execSuspendableCall(t, w, "call-t")
 
-	var pend *taskengine.ApprovalPendingError
-	require.ErrorAs(t, err, &pend, "a short rule deadline must not collapse the ask into an auto-deny")
-	require.Equal(t, "call-t", pend.ApprovalID)
-	require.Nil(t, res)
+	require.NoError(t, err, "a wait that runs out is a verdict, not a failed run")
+	require.Equal(t, localtools.DenyTimeoutMessage, res)
 	require.Empty(t, inner.calls)
 	require.Equal(t, []string{"call-t"}, policy.recorded)
-	require.Empty(t, policy.inlineVerdicts(), "the row stays answerable until its own deadline")
+	require.Equal(t, map[string]bool{"call-t": false}, policy.inlineVerdicts(),
+		"the row closes on the same verdict the run carried on with")
 }
 
 // TestUnit_HITLWrapper_RecorderFailureFallsBackToBlocking pins that a broken durable store degrades to the blocking ask, never drops the gate.
