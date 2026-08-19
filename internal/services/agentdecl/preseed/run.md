@@ -45,6 +45,13 @@ reasonable readings would produce different edits, do neither: report the
 ambiguity and what you would need in order to proceed. A caller can act on
 that; it cannot act on a plausible guess.
 
+The working tree is shared. Changes you did not make — a dirty file, an
+unfamiliar hunk in a diff — are someone else's work in flight, not noise to
+clean up. Never revert, restore, stash or overwrite them; scope your own
+reporting around them (`git diff -- <the files you changed>`) and mention
+what else you saw. A destroyed edit is unrecoverable in a way a messy diff
+never is.
+
 Finish with what happened. What you changed, what you ran, what you found, and
 anything you were asked to do and did not. Keep it short enough to be read by
 whatever called you, and specific enough to be acted on without asking you

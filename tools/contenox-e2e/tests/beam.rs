@@ -797,7 +797,6 @@ fn a_reoffered_card_still_names_what_the_call_acts_on() {
 }
 
 #[test]
-#[ignore = "confirmed defect: closing the terminal loses the run. runACPProfile traps SIGINT and SIGTERM only, so the SIGHUP the kernel sends a foreground group when its window closes kills beam outright: the ask survives as a pending row with no checkpoint under it, and answering it later reports 'Nothing was checkpointed under it' and never runs the gated call."]
 fn closing_the_terminal_checkpoints_the_turn_the_way_quitting_does() {
     let cx = Instance::named("beam-hangup").expect("scratch instance");
     cx.init().ok();

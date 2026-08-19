@@ -98,6 +98,18 @@ func RecoveredFailure(steps []taskengine.CapturedStateUnit) string {
 func InferStopReason(err error, steps []taskengine.CapturedStateUnit) StopReason {
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			for i := len(steps) - 1; i >= 0; i-- {
+				step := steps[i]
+				if step.TaskHandler == "execute_tool_calls" || step.TaskHandler == "tools" {
+					if step.Error.ErrorInternal == nil {
+						for _, toolName := range step.ToolNames {
+							if toolName == "mission.mission_finish" {
+								return StopEndTurn
+							}
+						}
+					}
+				}
+			}
 			return StopCancelled
 		}
 		msg := err.Error()

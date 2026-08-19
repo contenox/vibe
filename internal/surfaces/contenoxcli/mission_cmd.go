@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/contenox/contenox/internal/kernel/clientfsterm"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/services/eventlog"
@@ -284,7 +285,7 @@ func fireMissionAndWait(cmd *cobra.Command, spec missionFireSpec) (*missionFireO
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
-	ctx, stopSignals := signal.NotifyContext(parentCtx, syscall.SIGINT, syscall.SIGTERM)
+	ctx, stopSignals := signal.NotifyContext(parentCtx, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer stopSignals()
 	ctx = libtracker.WithNewRequestID(ctx)
 
@@ -366,7 +367,7 @@ func fireMissionAndWait(cmd *cobra.Command, spec missionFireSpec) (*missionFireO
 	}
 
 	projectRoot, _ := os.Getwd()
-	fleet, _, stopFleet, err := fleetservice.BuildInProcess(ctx, fleetservice.InProcessDeps{
+	inproc := fleetservice.InProcessDeps{
 		DB:          db,
 		Bus:         bus,
 		Missions:    missions,
@@ -382,7 +383,22 @@ func fireMissionAndWait(cmd *cobra.Command, spec missionFireSpec) (*missionFireO
 		},
 		AgentSupervisor: supervisor,
 		Stderr:          os.Stderr,
-	})
+	}
+	// A viewer-less unit fired from the CLI gets fs and terminal from the same
+	// client-side server beam consumes (internal/kernel/clientfsterm), rooted at
+	// this command's cwd — the envelope, not tool absence, bounds what it may
+	// touch. Same scrub the beam terminal and the ACP shell take.
+	if projectRoot != "" {
+		var fstOpts []clientfsterm.Option
+		if scrub, _, scrubErr := resolvedSandboxEnv(db, tracker, cmd.ErrOrStderr()); scrubErr == nil && scrub != nil {
+			fstOpts = append(fstOpts, clientfsterm.WithEnvScrub(scrub))
+		}
+		if server, fstErr := clientfsterm.New(projectRoot, fstOpts...); fstErr == nil {
+			inproc.Filesystem = server
+			inproc.Terminal = server
+		}
+	}
+	fleet, _, stopFleet, err := fleetservice.BuildInProcess(ctx, inproc)
 	if err != nil {
 		return nil, err
 	}

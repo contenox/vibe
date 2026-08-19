@@ -829,16 +829,36 @@ func marshalApprovalResolution(approved bool) json.RawMessage {
 }
 
 func summarizeApprovalArgs(args map[string]any) string {
-	for _, key := range []string{"path", "command", "url", "pattern"} {
+	// A shell command's summary carries its argv and cwd too: an adjudicator
+	// shown only "git" cannot tell a diff from a restore.
+	if cmd, ok := args["command"].(string); ok && strings.TrimSpace(cmd) != "" {
+		parts := []string{strings.TrimSpace(cmd)}
+		if list, ok := args["args"].([]any); ok {
+			for _, a := range list {
+				if s, ok := a.(string); ok && s != "" {
+					parts = append(parts, s)
+				}
+			}
+		}
+		if cwd, ok := args["cwd"].(string); ok && strings.TrimSpace(cwd) != "" {
+			parts = append(parts, "(in "+strings.TrimSpace(cwd)+")")
+		}
+		return trimApprovalSummary(strings.Join(parts, " "))
+	}
+	for _, key := range []string{"path", "url", "pattern"} {
 		v, ok := args[key].(string)
 		if !ok || strings.TrimSpace(v) == "" {
 			continue
 		}
-		s := strings.TrimSpace(strings.ReplaceAll(v, "\n", " "))
-		if len([]rune(s)) > 96 {
-			return string([]rune(s)[:95]) + "..."
-		}
-		return s
+		return trimApprovalSummary(v)
 	}
 	return ""
+}
+
+func trimApprovalSummary(v string) string {
+	s := strings.TrimSpace(strings.ReplaceAll(v, "\n", " "))
+	if len([]rune(s)) > 96 {
+		return string([]rune(s)[:95]) + "..."
+	}
+	return s
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/models/llmrepo"
 	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
@@ -27,6 +28,9 @@ var (
 	ErrNoCheckpoint = errors.New("agentservice: no suspended run is checkpointed under this approval")
 	// ErrApprovalUnanswered reports a resume attempted before the verdict landed.
 	ErrApprovalUnanswered = errors.New("agentservice: the approval backing this checkpoint has no verdict yet; respond to it first")
+	// ErrMissionFinished reports a checkpoint whose mission already reached a
+	// terminal status; the run behind it must not be revived.
+	ErrMissionFinished = errors.New("agentservice: the mission behind this checkpoint already finished; the suspended run is not resumable")
 )
 
 const resumeClaimStaleness = 10 * time.Minute
@@ -162,6 +166,19 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 		approved, err = verdictFromApproval(row)
 		if err != nil {
 			return nil, err
+		}
+	}
+
+	// A terminal mission never moves again, so its checkpoint can revive nothing
+	// but a zombie: answering (or sweeping) its leftover ask would otherwise
+	// re-drive the unit, which asks again, forever. The row is deleted so the
+	// stranded sweep stops finding it.
+	if row.MissionID != nil && *row.MissionID != "" {
+		if m, merr := missionservice.New(deps.DB).Get(ctx, *row.MissionID); merr == nil && missionservice.IsTerminalStatus(m.Status) {
+			if derr := store.DeleteChainCheckpoint(ctx, approvalID); derr != nil && !errors.Is(derr, libdb.ErrNotFound) {
+				return nil, fmt.Errorf("agentservice: mission %s behind approval %s is %q, but deleting its dead checkpoint failed: %w", *row.MissionID, approvalID, m.Status, derr)
+			}
+			return nil, fmt.Errorf("%w (mission %s is %q, approval %s)", ErrMissionFinished, *row.MissionID, m.Status, approvalID)
 		}
 	}
 
@@ -307,17 +324,27 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 			SuspendedApprovalID: susp.ApprovalID,
 		}, nil
 	}
+
+	resp := &PromptResponse{
+		Output:     output,
+		OutputType: outputType,
+		Steps:      units,
+		StopReason: InferStopReason(execErr, units),
+	}
 	if execErr != nil {
+		if resp.StopReason == StopEndTurn && (errors.Is(execErr, context.Canceled) || errors.Is(execErr, context.DeadlineExceeded)) {
+			// The run completed and persisted; a leftover row is noise, not loss.
+			if err := store.DeleteChainCheckpoint(ctx, approvalID); err != nil && !errors.Is(err, libdb.ErrNotFound) {
+				return nil, fmt.Errorf("agentservice: resumed run for approval %s completed, but deleting its checkpoint failed: %w", approvalID, err)
+			}
+			return resp, nil
+		}
+
 		// Keep the checkpoint, annotated, so a retry can run it again.
 		if annErr := store.SetChainCheckpointFailure(ctx, approvalID, execErr.Error()); annErr != nil {
 			return nil, fmt.Errorf("agentservice: resume of approval %s failed (%v) AND annotating its checkpoint failed: %w", approvalID, execErr, annErr)
 		}
-		return &PromptResponse{
-			Output:     output,
-			OutputType: outputType,
-			Steps:      units,
-			StopReason: InferStopReason(execErr, units),
-		}, fmt.Errorf("agentservice: resume of approval %s failed (checkpoint retained with failure annotation): %w", approvalID, execErr)
+		return resp, fmt.Errorf("agentservice: resume of approval %s failed (checkpoint retained with failure annotation): %w", approvalID, execErr)
 	}
 
 	// Deduped by message ID: nothing already produced is written twice.
@@ -331,12 +358,7 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 		return nil, fmt.Errorf("agentservice: resumed run for approval %s completed, but deleting its checkpoint failed: %w", approvalID, err)
 	}
 
-	return &PromptResponse{
-		Output:     output,
-		OutputType: outputType,
-		Steps:      units,
-		StopReason: InferStopReason(nil, units),
-	}, nil
+	return resp, nil
 }
 
 func verdictFromApproval(row *runtimetypes.HITLApproval) (bool, error) {

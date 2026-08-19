@@ -131,10 +131,10 @@ contenox beam                           # or just: contenox
 ```
 
 **`contenox run`** — a program is the caller: CI, cron, another agent. It runs
-the task and prints the report to stdout, exit 0 when the work landed and
-nonzero when it did not. Nobody is at the keyboard, so it carries the in-process
-toolsets — git, the file browser, HTTP, jq — and not `local_fs` or
-`local_shell`, which need a client to perform them.
+the task with the tools on that machine and prints the report to stdout, exit 0
+when the work landed and nonzero when it did not. Nobody is at the keyboard, so
+what the task may touch is bounded by its envelope: a gated file write or shell
+command becomes a durable ask that waits for `contenox approvals respond`.
 
 ```bash
 contenox run "summarise what changed under ./internal since Friday"

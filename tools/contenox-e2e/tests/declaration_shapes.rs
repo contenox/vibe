@@ -75,12 +75,12 @@ fn a_declaration_naming_read_reaches_the_file_under_an_editor() {
     assert_eq!(turn.stop_reason, "end_turn");
 }
 
-/// The program shape: nobody is holding a filesystem open for it, so the same
-/// declaration's `Read` admits a toolset that is not mounted. The refusal is
-/// visible to the model — `tool read_file not found` comes back as the call's
-/// own result, which is what a model can act on.
+/// The program shape: nobody is holding a filesystem open for it, so the
+/// runtime serves one itself, rooted at the launch directory. The same
+/// declaration's `Read` reads the same file — what an unattended run may
+/// touch is the envelope's decision, not an accident of mounting.
 #[test]
-fn the_same_declaration_cannot_reach_a_file_under_an_unattended_run() {
+fn the_same_declaration_reaches_the_file_under_an_unattended_run_too() {
     let cx = instance("shape-run-read");
     cx.scripted(
         &Script::new()
@@ -109,12 +109,12 @@ fn the_same_declaration_cannot_reach_a_file_under_an_unattended_run() {
     assert_eq!(sessions.len(), 1, "one run, one session, got {sessions:?}");
     let said = cx.session_show(&sessions[0].id).ok().stdout;
     assert!(
-        said.contains("tool read_file not found"),
-        "an unattended run mounts no filesystem, and the model is told so:\n{said}"
+        !said.contains("tool read_file not found"),
+        "the runtime serves local_fs itself in this shape:\n{said}"
     );
     assert!(
-        !said.contains("the shape decides whether this is readable"),
-        "and the file's content never reaches the conversation:\n{said}"
+        said.contains("the shape decides whether this is readable"),
+        "the same declaration reads the same file unattended:\n{said}"
     );
 }
 

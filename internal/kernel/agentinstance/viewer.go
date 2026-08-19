@@ -235,6 +235,10 @@ func (h *viewerHub) instanceFileSystemCaps() libacp.FileSystemCapabilities {
 	return h.fileSystem.FileSystemCapabilities()
 }
 
+func (h *viewerHub) instanceTerminalCap() bool {
+	return h.terminal != nil
+}
+
 func (h *viewerHub) fileSystemServer(sessionID libacp.SessionID) FileSystemServer {
 	h.mu.Lock()
 	var controller FileSystemServer

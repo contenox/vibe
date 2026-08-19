@@ -91,7 +91,7 @@ pin_model = false
 # program is the only thing this list still buys once the interpreters are on
 # it, and a shell entry would end that.
 [tools_policies.local_shell]
-_allowed_commands = "ls,cat,head,tail,wc,sort,uniq,cut,tr,diff,echo,printf,pwd,which,find,grep,sed,awk,stat,file,basename,dirname,realpath,du,date,env,xargs,tee,mktemp,mkdir,touch,cp,mv,rm,ln,chmod,tar,gzip,gunzip,zip,unzip,patch,git,go,python3,node,npm,make,cargo,curl,wget,jq"
+_allowed_commands = "ls,cat,head,tail,wc,sort,uniq,cut,tr,diff,echo,printf,pwd,which,find,grep,sed,awk,stat,file,basename,dirname,realpath,du,date,env,xargs,tee,mktemp,mkdir,touch,cp,mv,rm,ln,chmod,tar,gzip,gunzip,zip,unzip,patch,git,go,gofmt,python3,node,npm,make,cargo,curl,wget,jq"
 # Checked BEFORE the allowlist, so it is the gate that still holds when a
 # deployment clears the allowlist entirely. Machine-level verbs belong here
 # whether or not anything above would have admitted them.

@@ -282,7 +282,7 @@ func runEventsDispatch(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	runCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	runCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	fmt.Fprintln(errOut, "Dispatching (catch-up, then live). Ctrl-C to stop.")
 	if err := dispatcher.Run(runCtx); err != nil {

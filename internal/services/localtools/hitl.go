@@ -640,7 +640,23 @@ func (h *HITLWrapper) publishDecision(ctx context.Context, toolsName, toolName s
 }
 
 func hitlArgsSummary(args map[string]any) string {
-	for _, key := range []string{"path", "command", "url", "pattern"} {
+	// A shell command's summary carries its argv too: an adjudicator shown
+	// only "git" cannot tell a diff from a restore.
+	if cmd, ok := args["command"].(string); ok && strings.TrimSpace(cmd) != "" {
+		parts := []string{strings.TrimSpace(cmd)}
+		if list, ok := args["args"].([]any); ok {
+			for _, a := range list {
+				if s, ok := a.(string); ok && s != "" {
+					parts = append(parts, s)
+				}
+			}
+		}
+		if cwd, ok := args["cwd"].(string); ok && strings.TrimSpace(cwd) != "" {
+			parts = append(parts, "(in "+strings.TrimSpace(cwd)+")")
+		}
+		return trimHITLSummary(strings.Join(parts, " "))
+	}
+	for _, key := range []string{"path", "url", "pattern"} {
 		if v, ok := args[key].(string); ok && strings.TrimSpace(v) != "" {
 			return trimHITLSummary(v)
 		}

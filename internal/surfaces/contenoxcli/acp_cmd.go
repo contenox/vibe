@@ -203,8 +203,12 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
-	ctx, stop := signal.NotifyContext(parentCtx, syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(parentCtx, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
+	// A hangup closes the terminal too: the next stdout write would raise a
+	// fatal SIGPIPE and kill the process before the suspension checkpoint is
+	// written. Ignored, that write fails as EPIPE and teardown completes.
+	signal.Ignore(syscall.SIGPIPE)
 
 	// Deferred before the engine is built so it runs after engine teardown.
 	defer func() { _ = modelrepo.Shutdown() }()

@@ -101,6 +101,7 @@ func (c *GeminiStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 
 		var (
 			toolCallIndex int
+			textLen       int
 			lastSignature string
 			finishReason  string
 			usage         *modelrepo.TokenUsage
@@ -148,6 +149,7 @@ func (c *GeminiStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 						return
 					}
 				case part.Text != "":
+					textLen += len(part.Text)
 					if !send(&modelrepo.StreamParcel{Data: part.Text}) {
 						return
 					}
@@ -184,6 +186,20 @@ func (c *GeminiStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 
 		if err := sc.Err(); err != nil && err != io.EOF {
 			err = fmt.Errorf("error reading from stream: %w", err)
+			reportErr(err)
+			send(&modelrepo.StreamParcel{Error: err})
+			return
+		}
+
+		// Same contract as the vertex stream: neither text nor a tool call is an
+		// error, not an empty success, so the caller's retry fires (Gemini emits
+		// this shape on MALFORMED_FUNCTION_CALL).
+		if textLen == 0 && toolCallIndex == 0 {
+			reason := finishReason
+			if reason == "" {
+				reason = "unknown"
+			}
+			err := fmt.Errorf("empty stream from Gemini model %s: finish reason (%s)", c.modelName, reason)
 			reportErr(err)
 			send(&modelrepo.StreamParcel{Error: err})
 			return

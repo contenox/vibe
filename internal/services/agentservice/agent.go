@@ -12,6 +12,7 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/models/llmrepo"
 	"github.com/contenox/contenox/internal/services/chatservice"
+	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/contenox/contenox/internal/services/sessionservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	libdb "github.com/contenox/contenox/libdbexec"
@@ -227,6 +228,9 @@ func (a *agent) Prompt(ctx context.Context, req PromptRequest) (*PromptResponse,
 		StopReason: InferStopReason(execErr, stateUnits),
 	}
 	if execErr != nil {
+		if resp.StopReason == StopEndTurn && (errors.Is(execErr, context.Canceled) || errors.Is(execErr, context.DeadlineExceeded)) {
+			return resp, nil
+		}
 		return resp, fmt.Errorf("chain execution failed: %w", execErr)
 	}
 	return resp, nil
@@ -337,6 +341,30 @@ func (a *agent) buildChatInput(ctx context.Context, req PromptRequest) (any, tas
 	return chatInput, taskengine.DataTypeChatHistory, nil
 }
 
+// runConcludedItsMission reports whether the captured run brought its mission
+// to rest: a mission_finish call answered by missiontools' success result.
+func runConcludedItsMission(units []taskengine.CapturedStateUnit) bool {
+	finishCalls := map[string]bool{}
+	for _, unit := range units {
+		hist, ok := unit.Output.(taskengine.ChatHistory)
+		if !ok {
+			continue
+		}
+		for _, m := range hist.Messages {
+			for _, tc := range m.CallTools {
+				name := tc.Function.Name
+				if name == "mission.mission_finish" || name == missiontools.ToolNameFinish {
+					finishCalls[tc.ID] = true
+				}
+			}
+			if m.Role == "tool" && finishCalls[m.ToolCallID] && strings.HasPrefix(m.Content, "mission finished as ") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func stampTurnProvenance(msgs []taskengine.Message, requestID, chainRef string) {
 	for i := range msgs {
 		if msgs[i].RequestID != "" {
@@ -351,6 +379,17 @@ func (a *agent) persistHistory(ctx context.Context, sessionID string, input any,
 	chatInput, ok := input.(taskengine.ChatHistory)
 	if !ok {
 		return
+	}
+
+	// A run whose mission_finish already landed is torn down by design: the
+	// StatusChanged reaper cancels it mid-trailing-turn. That cancellation is a
+	// clean stop, not a failure the record should carry — only cancellations
+	// with no finish behind them keep their annotations.
+	if chainErr != nil && errors.Is(chainErr, context.Canceled) && runConcludedItsMission(stateUnits) {
+		chainErr = nil
+		for len(stateUnits) > 0 && stateUnits[len(stateUnits)-1].Cancelled {
+			stateUnits = stateUnits[:len(stateUnits)-1]
+		}
 	}
 
 	synthesized := taskengine.SynthesizeHistory(chatInput.Messages, stateUnits, chainErr)

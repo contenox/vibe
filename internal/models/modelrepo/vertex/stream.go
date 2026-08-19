@@ -206,6 +206,21 @@ func (c *vertexStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 			return
 		}
 
+		// Same contract as the non-streaming path: a turn that produced neither
+		// text nor a tool call is an error, not an empty success — otherwise a
+		// MALFORMED_FUNCTION_CALL turn lands in history as a completed reply and
+		// the caller's retry never fires.
+		if totalContent.Len() == 0 && toolCallIndex == 0 {
+			reason := finishReason
+			if reason == "" {
+				reason = "unknown"
+			}
+			err := fmt.Errorf("empty stream from Vertex AI model %s: finish reason (%s)", c.modelName, reason)
+			reportErr(err)
+			send(&modelrepo.StreamParcel{Error: err})
+			return
+		}
+
 		if !send(&modelrepo.StreamParcel{Terminal: &modelrepo.StreamTerminal{
 			FinishReason: finishReason,
 			Usage:        usage,

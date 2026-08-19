@@ -103,6 +103,15 @@ func (c *GeminiChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	}
 
 	if outText == "" && len(toolCalls) == 0 {
+		// MALFORMED_FUNCTION_CALL is a broken tool-call turn, not a degenerate
+		// end-of-turn: reported as success it lands in history as a completed
+		// reply and the caller's retry never fires. Thinking-only and
+		// signature-only turns on a normal finish stay tolerated.
+		if cand.FinishReason == "MALFORMED_FUNCTION_CALL" {
+			err := fmt.Errorf("empty content from Gemini model %s: finish reason (%s)", c.modelName, cand.FinishReason)
+			reportErr(err)
+			return modelrepo.ChatResult{}, err
+		}
 		empty := modelrepo.ChatResult{
 			Message: modelrepo.Message{Role: "assistant", Content: "", Thinking: thinkingText},
 			Usage:   resp.UsageMetadata.neutralUsage(),

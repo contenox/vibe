@@ -41,8 +41,9 @@ func SweepStrandedCheckpoints(ctx context.Context, deps Deps, limit int) (resume
 		switch {
 		case rerr == nil:
 			resumed++
-		case errors.Is(rerr, ErrNoCheckpoint), errors.Is(rerr, ErrApprovalUnanswered):
-			// Claimed or completed by a racer, or the ask changed under us.
+		case errors.Is(rerr, ErrNoCheckpoint), errors.Is(rerr, ErrApprovalUnanswered), errors.Is(rerr, ErrMissionFinished):
+			// Claimed or completed by a racer, the ask changed under us, or the
+			// mission already finished and the dead checkpoint was discarded.
 		default:
 			failed++
 		}

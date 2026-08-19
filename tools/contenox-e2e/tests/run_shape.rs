@@ -360,13 +360,17 @@ fn a_scripted_tool_call_reaches_a_toolset_registered_on_this_machine() {
     );
 }
 
-/// `local_fs` and `local_shell` are forwarded to a connected ACP client's
-/// `fs/*` and `terminal/*` capabilities. A `run` has no client, so those
-/// toolsets do not exist in this shape — not even behind `--shell` — and the
-/// model is told so by name rather than being left to guess.
+/// A `run` has no client, so the runtime serves `local_fs` and `local_shell`
+/// itself, rooted at the launch directory — "the tools on that machine", as
+/// the README promises. The envelope, not tool absence, bounds the call: the
+/// shell command is held as a durable ask, and answering it runs the command.
+/// The mission does not land here: the scripted backend replays its script
+/// from the top on every resume, so the re-emitted shell call — a fresh call —
+/// is correctly held by the envelope again. A real model resumes from history
+/// instead of re-emitting, which is the half a scripted dialog cannot reach.
 #[test]
-fn a_run_has_no_client_so_a_local_shell_call_is_refused_by_name() {
-    let cx = instance("run-no-shell");
+fn a_run_serves_the_shell_itself_and_the_envelope_holds_the_call() {
+    let cx = instance("run-owns-shell");
     cx.scripted(
         &Script::new()
             .turn(
@@ -378,23 +382,57 @@ fn a_run_has_no_client_so_a_local_shell_call_is_refused_by_name() {
             )
             .turn(
                 Turn::new()
-                    .text("Filing what I found.")
-                    .call(ToolCall::mission_report("result", "asked for a shell")),
+                    .text("Filing what I did.")
+                    .call(ToolCall::mission_report("result", "touched the proof")),
             )
             .turn(Turn::new().call(ToolCall::mission_finish("landed")))
             .turn("Mission finished."),
     )
     .expect("scripted-test backend");
 
-    cx.cmd(["--shell", "run", "--policy", "run", "touch proof.txt"])
-        .timeout(Duration::from_secs(180))
-        .output()
-        .expect("contenox run")
-        .expect_stderr("tool local_shell not found");
+    cx.cmd([
+        "run",
+        "--policy",
+        "run",
+        "--timeout",
+        "20s",
+        "touch proof.txt",
+    ])
+    .timeout(Duration::from_secs(180))
+    .output()
+    .expect("contenox run")
+    .expect_code(1);
 
+    let ask = cx
+        .await_approval(Duration::from_secs(30))
+        .expect("the gated shell call is a durable ask");
+    assert_eq!(ask.tool, "local_shell.local_shell");
     assert!(
         !cx.work().join("proof.txt").exists(),
-        "no shell means no command ran, so nothing may appear on disk"
+        "nothing may touch the disk before the ask is answered"
+    );
+
+    cx.approve(&ask.id)
+        .ok()
+        .expect_stdout("the suspended run was resumed in this process");
+
+    assert!(
+        cx.work().join("proof.txt").exists(),
+        "answering the ask runs the gated command on this machine"
+    );
+
+    // The scripted replay re-emits the call as a fresh one, and the envelope
+    // holds a fresh call for approval — each emission is its own gate.
+    let asks = cx.approvals().expect("contenox approvals list");
+    assert_eq!(
+        asks.len(),
+        1,
+        "the re-emitted call is held again, got {asks:?}"
+    );
+    assert_eq!(asks[0].tool, "local_shell.local_shell");
+    assert_ne!(
+        asks[0].id, ask.id,
+        "a fresh call is a fresh ask, not a replay of the verdict"
     );
 }
 

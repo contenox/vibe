@@ -356,7 +356,10 @@ func (i *instance) ensureInitialized(ctx context.Context, conn *libacp.ClientSid
 	}
 	instanceFS := i.hub.instanceFileSystemCaps()
 	clientCaps := libacp.ClientCapabilities{
-		Terminal: spec.Terminal,
+		// ORed with the instance-wide servers for the same reason as FS below: a
+		// viewer-less unit's terminal is the one the manager installed, and a
+		// mounted server that is never advertised serves nothing.
+		Terminal: spec.Terminal || i.hub.instanceTerminalCap(),
 		FS: libacp.FileSystemCapabilities{
 			ReadTextFile:  spec.FS.ReadTextFile || instanceFS.ReadTextFile,
 			WriteTextFile: spec.FS.WriteTextFile || instanceFS.WriteTextFile,

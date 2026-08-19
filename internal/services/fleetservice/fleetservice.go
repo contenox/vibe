@@ -437,13 +437,15 @@ var (
 	toolReport = missiontools.ToolsProviderName + "." + missiontools.ToolNameReport
 	toolAsk    = missiontools.ToolsProviderName + "." + missiontools.ToolNameAskAttention
 	toolFinish = missiontools.ToolsProviderName + "." + missiontools.ToolNameFinish
+	toolPlan   = missiontools.ToolsProviderName + "." + missiontools.ToolNamePlan
 )
 
 var missionPreamble = fmt.Sprintf(`You are running as an UNATTENDED mission unit. No human is reading this conversation — replying in prose reaches no one. You reach outside this session ONLY through your mission tools:
+- %s: file your plan before any other tool call, and keep it true the whole run: exactly one entry in_progress at a time, each entry marked completed the moment it is done, revised when the work turns out different. The plan is your operator's only live view of where you are.
 - %s: record real progress, a finding, a blocker, or a result.
 - %s: ask for a decision you may not make alone, and WAIT for the reply. It comes back as this tool's result, so you continue with it on the same turn. Nobody may be listening — if the reply does not come, your question is filed as a blocker and you carry on.
 - %s: end the mission with a verdict, once the work is truly done.
-Do the work with your other tools. Decide what you can from the intent you were given; ask only for what the intent genuinely does not settle. Chat text alone will not be seen.`, toolReport, toolAsk, toolFinish)
+Do the work with your other tools. Decide what you can from the intent you were given; ask only for what the intent genuinely does not settle. Chat text alone will not be seen.`, toolPlan, toolReport, toolAsk, toolFinish)
 
 var missionNudge = fmt.Sprintf(`Your last turn ended without reaching outside this session, and no human is reading this chat. To reach your operator now, call %s (progress, a finding, a blocker, or a result); if you are blocked on a decision you may not make alone, call %s and wait for the reply; to end the mission, call %s. If you are not done, keep working with your other tools and report when you have something. Do not answer in prose alone — it will not be seen.`, toolReport, toolAsk, toolFinish)
 
