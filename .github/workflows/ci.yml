@@ -1,15 +1,15 @@
-# CI: hygiene gates (gofmt, vet, govulncheck), contenox compile smoke, Windows
-# cross-compile smoke, CLI help smoke, published-schema drift, and cheap
-# TestUnit_* Go tests, plus a container-backed smoke of the opt-in storage
-# backends and of the wiring that selects them, plus the TestSystem_/TestE2E_/
-# TestIntegration_ suites that are the actual release claim, plus the black-box
-# CLI suite that drives the shipped binary from outside the Go module.
+# CI: the trunk lane — fast, hermetic, advisory. Hygiene gates (gofmt, vet,
+# govulncheck), contenox compile smoke, Windows cross-compile smoke, CLI help
+# smoke, published-schema drift, cheap TestUnit_* Go tests, a container-backed
+# smoke of the opt-in storage backends, and the black-box e2e-cli suite that
+# drives the shipped binary from outside the Go module.
 #
-# Until this job existed, every push and PR ran `-run '^TestUnit_' -short` and
-# nothing else: not one of the ~141 TestSystem_/TestE2E_/TestIntegration_ cases
-# in the tree was selected by any per-push job, and they ran only in the nightly
-# release-gate. A suite of self-referential unit tests stayed green while the
-# product broke. The system-tests job below is what makes green mean something.
+# What deliberately does NOT run here: the TestSystem_/TestE2E_/
+# TestIntegration_ release claim. Trunk is commit-then-review (dev-flow.md):
+# post-commit signal must arrive in minutes, and a fifteen-minute gate nobody
+# waits for is a gate that gets un-required and then ignored. The claim runs
+# where waiting is acceptable because merging ships: as the required check on
+# a release PR into main, and unfiltered in the nightly release-gate.
 #
 # Third-party actions are pinned to a commit SHA with a trailing version comment.
 # A floating tag (@v4) lets a compromised tag run arbitrary code in this job.
@@ -18,9 +18,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [trunk, main, master]
   pull_request:
-    branches: [main, master]
+    branches: [trunk, main, master]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -212,54 +212,10 @@ jobs:
       - name: Black-box CLI e2e against the shipped binary
         run: task e2e-cli
 
-  # The release claim, run on every push and PR rather than only nightly.
-  #
-  # `task test-system` and `task test-integration` run under -v with -count=1
-  # and print a census of every case that skipped, so a run in which the
-  # workflow lost a dependency reports "N SKIPPED (not passed)" in the log
-  # instead of a green tick. Read that census when this job is green.
-  #
-  # Two deliberate exclusions, both of which the nightly release-gate runs
-  # without any SKIP:
-  #   TestSystem_Ollama*  starts an Ollama container and pulls multi-GB models.
-  #                       Minutes and tens of GB per push is not a per-PR cost.
-  #   TestSystem_VLLM*    self-skips unless CONTENOX_RUN_VLLM_TESTS=1, which
-  #                       nothing sets per-push. Excluded rather than left to
-  #                       skip, so the census lists only cases a runner could
-  #                       plausibly have run.
-  # Everything else is attempted. Cases whose dependency is genuinely absent on
-  # a GitHub runner still skip and are named by the census: Bedrock (no AWS
-  # credentials) and the ACP host e2e cases (no Rust reference peers — those are
-  # built and run in release-gate.yml).
-  system-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 75
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version: "1.25"
-          check-latest: true
-
-      - name: Install task
-        run: go install github.com/go-task/task/v3/cmd/task@latest
-
-      # The runner kernel has Landlock, but Ubuntu 24.04 blocks unprivileged
-      # user namespaces through AppArmor, and libsandbox's suites probe for that
-      # and skip — which is the whole confinement story going unproven. This is
-      # the same sysctl docs/guide/confinement/sandbox.md tells operators to
-      # set; without it these cases are skipped, not passed.
-      # Tolerant of a runner image that has no such knob: the suites probe the
-      # capability themselves and skip by name, so a missing sysctl must show up
-      # in the census rather than as a failed setup step.
-      - name: Allow unprivileged user namespaces (the libsandbox wall)
-        run: |
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-          sysctl kernel.apparmor_restrict_unprivileged_userns || echo "no such sysctl on this image"
-
-      - name: System and e2e tests (TestSystem_, TestE2E_, TestHostE2E_, TestFleetE2E_)
-        run: task test-system SKIP='^TestSystem_(Ollama|VLLM)'
-
-      - name: Integration tests (TestIntegration_)
-        run: task test-integration
+  # The release claim (`task test-system` + `task test-integration`) is NOT
+  # run per push: it takes ~15 minutes of wall clock on every PR, and a gate
+  # nobody waits for is a gate that gets made non-required and then ignored.
+  # It runs unfiltered — Ollama pulls included — in the nightly
+  # release-gate.yml (`task test-all`), whose census still treats a skip as
+  # not-a-pass. Per-push CI is the hermetic subset above: unit, spec,
+  # substrate smoke, and the black-box e2e-cli gate.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/agentservice"
+	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
@@ -15,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSystem_HostDeath_ReclaimsTheMissionAndKeepsItsWorkAnswerable pins the split a fresh process finds after a host dies mid-ask: the mission sweep collects the now-unreachable mission row as abandoned, while the still-pending ask and still-checkpointed run are left untouched.
+// TestSystem_HostDeath_ReclaimsTheMissionAndKeepsItsWorkAnswerable pins the split a fresh process finds after a host dies mid-ask: while the ask's own window still runs the mission stays open — a parked mission is waiting, not gone, and the answer that arrives resumes real work — and only silence outlasting that window lets the sweep collect the row as abandoned, leaving the ask and the checkpointed run untouched.
 func TestSystem_HostDeath_ReclaimsTheMissionAndKeepsItsWorkAnswerable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "orphan.db")
 	ctx := context.Background()
@@ -51,9 +52,24 @@ func TestSystem_HostDeath_ReclaimsTheMissionAndKeepsItsWorkAnswerable(t *testing
 	require.NoError(t, err)
 	require.Equal(t, 0, reclaimed, "and the mission's staleness bound has not either")
 
-	// winds the frozen heartbeat past the bound to simulate the silence a real orphan accumulates while the operator is away
+	// Silence past the floor alone collects nothing: the pending ask's window
+	// widens the bound (missionservice.parkBound), because a parked mission is
+	// indistinguishable from a dead one and reclaiming it early would strand
+	// the answer that resumes it.
 	m.CreatedAt = m.CreatedAt.Add(-missionservice.StaleHeartbeatAfter - time.Hour)
 	frozen := m.CreatedAt
+	m.LastHeartbeat = &frozen
+	require.NoError(t, b.missions.Update(ctx, m))
+
+	reclaimed, err = b.missions.SweepAbandoned(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, reclaimed, "inside the ask's own window the mission is waiting, not gone")
+
+	// Past the longest park still open on it, silence is silence again.
+	m, err = b.missions.Get(ctx, missionID)
+	require.NoError(t, err)
+	m.CreatedAt = m.CreatedAt.Add(-hitlservice.FallbackApprovalCeiling - time.Hour)
+	frozen = m.CreatedAt
 	m.LastHeartbeat = &frozen
 	require.NoError(t, b.missions.Update(ctx, m))
 

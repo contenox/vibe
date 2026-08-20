@@ -1,0 +1,100 @@
+# The release button. A PR from trunk into main has exactly one meaning:
+# "release this" — merging it creates the tag and publishes the release, with
+# the PR body as the release notes. There is no title convention to get wrong
+# beyond the version itself, and no second meaning to guard against: nothing
+# else is allowed to open PRs into main (ruleset; see docs/internal/dev-flow.md).
+#
+# Why the tag is created here and the build is a workflow_call rather than a
+# tag trigger: a tag pushed with the default GITHUB_TOKEN never triggers other
+# workflows (GitHub's recursion guard). Calling release.yml directly is the
+# only path that works without a PAT — and it keeps one source of truth for
+# how a release is built.
+name: Release on Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+concurrency:
+  group: release-on-merge
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    # merged (not just closed), from THIS repo's trunk branch — a fork PR or a
+    # stray feature branch aimed at main must never mint a release.
+    if: >
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.ref == 'trunk' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.parse.outputs.TAG }}
+      notes_b64: ${{ steps.notes.outputs.NOTES_B64 }}
+    steps:
+      - name: Parse version from the PR title
+        id: parse
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$PR_TITLE" =~ ^Release[[:space:]](v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "ERROR: a PR into main is a release, and its title names the version."
+            echo "  got:  \"$PR_TITLE\""
+            echo "  want: \"Release vX.Y.Z\""
+            exit 1
+          fi
+          echo "TAG=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the merge commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+
+      # The same check release.yml's verify job repeats against the tag —
+      # done here first so a forgotten version bump fails BEFORE a tag exists,
+      # not after.
+      - name: Verify version.txt matches the title
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.parse.outputs.TAG }}"
+          VERSION_IN_FILE="$(tr -d '\n\r' < internal/version/version.txt)"
+          if [ "$VERSION_IN_FILE" != "$TAG" ]; then
+            echo "ERROR: internal/version/version.txt says $VERSION_IN_FILE, the PR title says $TAG."
+            echo "Bump the file on trunk as part of the release PR."
+            exit 1
+          fi
+
+      - name: Extract release notes from the PR body
+        id: notes
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          # HTML comments are PR-template plumbing, not notes.
+          printf '%s\n' "$PR_BODY" | sed -e 's/<!--[^>]*-->//g' > /tmp/notes.md
+          echo "NOTES_B64=$(base64 -w0 /tmp/notes.md)" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push the tag at the merge commit
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.parse.outputs.TAG }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG" "${{ github.event.pull_request.merge_commit_sha }}"
+          git push origin "$TAG"
+
+  build-and-publish:
+    needs: tag
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+      notes_b64: ${{ needs.tag.outputs.notes_b64 }}

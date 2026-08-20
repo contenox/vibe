@@ -27,10 +27,11 @@ require (
 require (
 	github.com/creack/pty v1.1.24
 	github.com/dop251/goja v0.0.0-20260723142020-b4aef50fa347
-	github.com/go-git/go-git/v5 v5.19.1
+	github.com/go-git/go-git/v5 v5.19.2
 	github.com/invopop/jsonschema v0.14.0
 	github.com/itchyny/gojq v0.12.19
 	github.com/mattn/go-runewidth v0.0.27
+	github.com/pelletier/go-toml/v2 v2.2.2
 	golang.org/x/net v0.56.0
 	golang.org/x/tools v0.47.0
 	gvisor.dev/gvisor v0.0.0-20260224225140-573d5e7127a8
@@ -97,7 +98,6 @@ require (
 	github.com/oasdiff/yaml v0.0.0-20250309154309-f31be36b4037 // indirect
 	github.com/oasdiff/yaml3 v0.0.0-20250309153720-d2182401db90 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
-	github.com/pelletier/go-toml/v2 v2.2.2 // indirect
 	github.com/perimeterx/marshmallow v1.1.5 // indirect
 	github.com/pjbgf/sha1cd v0.6.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect

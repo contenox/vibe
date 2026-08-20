@@ -7,9 +7,25 @@
 name: Release
 
 on:
+  # Break-glass path: a hand-pushed tag still releases (rulesets are what
+  # forbid that day-to-day). The normal path is release-on-merge.yml calling
+  # this workflow after it created the tag — a tag pushed with the default
+  # GITHUB_TOKEN deliberately cannot trigger this `push` event, so the call
+  # below is not an optimization, it is the only way the merge path works.
   push:
     tags:
       - "v*"
+  workflow_call:
+    inputs:
+      tag:
+        description: "The vX.Y.Z tag to build and publish (must already exist on the remote)"
+        required: true
+        type: string
+      notes_b64:
+        description: "base64-encoded release notes (from the release PR body); empty keeps notes empty"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   verify:
@@ -26,8 +42,12 @@ jobs:
       - name: Extract tag
         id: vars
         run: |
-          echo "TAG=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          echo "EXTENSION_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "TAG=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "EXTENSION_VERSION=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Verify version matches tag
         run: |
@@ -156,11 +176,14 @@ jobs:
       - name: Create GitHub Release and upload assets
         run: |
           TAG="${{ needs.verify.outputs.tag }}"
+          # Notes come from the release PR body (base64 through workflow_call);
+          # the break-glass tag-push path keeps them empty, as before.
+          printf '%s' "${{ inputs.notes_b64 }}" | base64 -d > /tmp/release-notes.md || : > /tmp/release-notes.md
           cd release-assets
           gh release create "$TAG" \
             contenox-linux-* contenox-darwin-* contenox-windows-* SHA256SUMS \
             --title "$TAG" \
-            --notes "" \
+            --notes-file /tmp/release-notes.md \
             --latest \
             --verify-tag
         env:

@@ -85,8 +85,10 @@ node_modules/
 # Project-specific
 # ==============================
 
-# Contenox CLI build output and local config
-bin/
+# Contenox CLI build output and local config. Root-anchored: an unanchored
+# bin/ also swallowed tools/contenox-e2e/src/bin/ — cargo's auto-discovered
+# test-stub binaries — which compiled locally and broke CI as untracked files.
+/bin/
 .contenox/
 
 /dist/

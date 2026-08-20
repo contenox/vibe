@@ -24,6 +24,11 @@ on:
     # 03:00 UTC nightly — off-peak for GitHub-hosted runners.
     - cron: "0 3 * * *"
   workflow_dispatch:
+  # A PR into main is a release request (dev-flow.md), and this claim is its
+  # required check: the one lane where an hour of wall clock is acceptable,
+  # because merging it ships. Trunk pushes never wait on this.
+  pull_request:
+    branches: [main]
 
 concurrency:
   group: release-gate-${{ github.ref }}
