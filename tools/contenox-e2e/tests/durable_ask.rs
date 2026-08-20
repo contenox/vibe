@@ -102,16 +102,25 @@ fn run_blocked_on_its_ask(cx: &Instance, task: &str) -> (Running, ApprovalRow) {
     (fired, ask)
 }
 
-/// A run torn down by its own `--timeout` with the ask still open: the state a
-/// second terminal finds when the process that asked is gone.
+/// A run whose process is gone with the ask still open: the state a second
+/// terminal finds when the process that asked is no longer there.
+///
+/// The host is killed once the ask is durable rather than left to expire on its
+/// own `--timeout`. A timeout teardown races the host's own shutdown: stopping
+/// the unit makes the shepherd's in-flight turn fail, and `failTurn` finishes
+/// the mission `derailed` on a context that deliberately outlives the caller's,
+/// so whether that write lands before the process exits is decided by how fast
+/// the machine is — open here, derailed on a slower runner. Killing the host
+/// settles it. The ask row is already durable by then, and no shutdown write
+/// can land afterwards, so every caller below sees one state rather than two.
 fn run_gone_with_its_ask_open(cx: &Instance, task: &str) -> ApprovalRow {
-    cx.cmd(["run", "--policy", "default", "--timeout", "10s", task])
-        .timeout(patiently())
-        .output()
-        .expect("contenox run")
+    let (mut fired, ask) = run_blocked_on_its_ask(cx, task);
+    fired.kill();
+    fired
+        .wait_timeout(Duration::from_secs(60))
+        .expect("the killed run is reaped")
         .expect_failure();
-    cx.await_approval(Duration::from_secs(30))
-        .expect("the ask outlives the run that raised it")
+    ask
 }
 
 // ------------------------------------------------- the row comes first

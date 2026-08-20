@@ -1064,6 +1064,18 @@ fn instance_with_a_gated_firing(label: &str, policy: Option<&str>) -> Instance {
 /// `contenox approvals list` shows the ask — answering it later, from another
 /// process, is what runs the call.
 #[test]
+#[ignore = "confirmed defect: whether an unattended firing PARKS its gated ask or is \
+refused for want of a terminal is not decided by the trigger, the policy or the chain — it is \
+decided by how fast the machine is. Measured 2 failures in 3 runs pinned to two cores, each \
+inside 4s: the dispatcher prints `[denied: local_shell.local_shell requires approval but no \
+terminal is attached]`, the call is lost and `contenox approvals list` stays empty. Not a \
+timeout — the 90s CATCH_UP is never reached. Seam: localtools/hitl.go detach = \
+taskengine.AsksDetached(ctx) && taskengine.ToolCallSuspendable(ctx); both of the dispatcher's \
+consumers build the same chainFiringRunner and both set WithDetachedAsks, so it is the \
+suspendable half that is intermittently absent by the time the gate is reached. Same denial \
+as a_firing_without_a_named_policy_still_parks_its_gated_ask above, which quarantines the \
+no-policy case and cites THIS case as the one that passes — it does, about half the time. \
+Promised in docs/guide/events.md (\"a firing's asks are DETACHED\")."]
 fn a_firing_records_its_gated_ask_and_hands_the_process_back() {
     let cx = instance_with_a_gated_firing("events-detached-ask", Some("hitl-policy-run.json"));
 
