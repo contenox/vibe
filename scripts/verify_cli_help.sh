@@ -34,8 +34,11 @@ if ! echo "$HELP_OUTPUT" | grep -q "Version:"; then
 fi
 
 # 3. Every top-level subcommand must appear in the help output. Keep this list
-# in lockstep with the registrations in internal/surfaces/contenoxcli/cli.go — a command
-# added there but not here is invisible to this gate, and vice versa.
+# in lockstep with the rootCmd.AddCommand calls in internal/surfaces/contenoxcli/ —
+# they live both in cli.go and in each command's own file init(), so grep the
+# package, not just cli.go. A command added there but not here is invisible to
+# this gate, and vice versa. A command RETIRED there must be dropped from this
+# list, or the gate demands a command the CLI no longer registers.
 STABLE_CMDS=(
   "acp"
   "acpx"
@@ -64,7 +67,6 @@ STABLE_CMDS=(
   "update"
   "version"
   "vet"
-  "workspace"
 )
 
 # BETA_CMDS are registered unconditionally but marked Hidden without the

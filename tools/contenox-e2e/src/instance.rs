@@ -69,6 +69,13 @@ impl Instance {
         env.push(("HOME".into(), Some(home.clone().into_os_string())));
         env.push(("USERPROFILE".into(), Some(home.clone().into_os_string())));
         env.push(("TMPDIR".into(), Some(tmp.into_os_string())));
+        // Pinned for the same reason as HOME: an interactive shell exports
+        // these and a CI runner exports neither, so anything that reads the
+        // terminal description — the sandbox's env allowlist, the colour
+        // ladder — would assert against the developer's shell and diverge in
+        // CI. A pinned value is not a TTY; colour still needs one.
+        env.push(("TERM".into(), Some("xterm-256color".into())));
+        env.push(("COLORTERM".into(), Some("truecolor".into())));
 
         Ok(Instance {
             root,
